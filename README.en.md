@@ -105,6 +105,7 @@ Per-user installation (no UAC), with Start-menu and desktop shortcuts created au
 
 ### FAQ
 
+- **Fresh Lite install complains about a missing engine**: on startup the app probes previous install directories (`a4agent*\engine`) and adopts an existing engine automatically — no re-download needed. If no engine exists anywhere, a prompt offers to re-run the setup wizard for an online download (also available under *Settings → Wizard*)
 - **LAN devices can't connect**: enable *Allow LAN access* in Settings and restart; then allow `llama-server.exe` through Windows Firewall (the first `0.0.0.0` start triggers a prompt)
 - **Is LAN access safe**: the service has no built-in auth; on untrusted networks add `--api-key <secret>` via *Settings → Extra args*
 - **Engine download fails / slow**: choose *Offline install* in the wizard and point it to a manually downloaded official zip; on poor networks start with the 30 MB Vulkan pack

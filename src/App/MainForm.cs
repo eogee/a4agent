@@ -62,6 +62,7 @@ public sealed class MainForm : Form
 
         Load += (_, _) =>
         {
+            AdoptOrPromptEngine();
             LoadSettingsToControls();
             RescanModels();
             ProbeCapabilities();
@@ -69,6 +70,48 @@ public sealed class MainForm : Form
             _ = SilentCheckAfterDelayAsync();
         };
         FormClosing += OnFormClosing;
+    }
+
+    // ───────────────────────── 引擎接管与初始引导 ─────────────────────────
+
+    /// <summary>启动时：默认目录没引擎则探测旧版本安装目录并自动接管；全机无引擎时提供重新向导。</summary>
+    void AdoptOrPromptEngine()
+    {
+        var found = EngineLocator.FindExisting(_cfg.EngineDir, AppContext.BaseDirectory);
+        if (found == null)
+        {
+            var choice = MessageBox.Show(this,
+                "未检测到推理引擎（llama-server.exe）。\r\n\r\n" +
+                "「是」立即重新运行配置向导，自动下载引擎；\r\n" +
+                "「否」稍后在「设置 → 配置向导」处理。",
+                "a4agent 初始引导", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (choice == DialogResult.Yes) RunWizardAgain();
+            return;
+        }
+
+        var effective = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_cfg.EffectiveEngineDir));
+        if (!string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(found)), effective, StringComparison.OrdinalIgnoreCase))
+        {
+            _cfg.EngineDir = found;
+            ConfigStore.Save(_cfg);
+            AppendLog($"[引擎] 已自动接管已有引擎目录: {found}");
+        }
+    }
+
+    /// <summary>重新运行首次配置向导（可重新下载引擎 / 调整模型与端口）。服务运行中会先停止。</summary>
+    void RunWizardAgain()
+    {
+        if (_engine.IsBusy)
+        {
+            AppendLog("[向导] 先停止服务再重新配置…");
+            _engine.Stop();
+        }
+        using var wizard = new WizardForm(_cfg);
+        if (wizard.ShowDialog(this) != DialogResult.OK) return;
+        LoadSettingsToControls();
+        RefreshConnectTab();
+        AppendLog("[配置] 已重新完成配置向导");
+        if (wizard.LaunchAfterFinish && !_engine.IsBusy) StartServer();
     }
 
     // ───────────────────────── 软件更新 ─────────────────────────
@@ -317,6 +360,13 @@ public sealed class MainForm : Form
         _chkTrim = new CheckBox { Text = "启动后自动裁剪内存（释放文件缓存）", AutoSize = true };
         _nudTrimSec = new NumericUpDown { Minimum = 5, Maximum = 3600 };
         AddRow("", _chkTrim, _nudTrimSec);
+
+        var btnWizard = new Button { Text = "重新运行向导", Size = new Size(110, 28) };
+        btnWizard.Click += (_, _) => RunWizardAgain();
+        AddRow("配置向导", btnWizard, new Label
+        {
+            Text = "重新检测硬件、下载引擎、选择模型与端口", AutoSize = true, ForeColor = Color.DimGray,
+        });
 
         _btnCheckUpdate = new Button { Text = "检查更新", Size = new Size(110, 28) };
         _btnCheckUpdate.Click += async (_, _) => await CheckUpdateAsync(false);

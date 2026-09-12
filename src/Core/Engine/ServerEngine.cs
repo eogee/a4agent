@@ -44,7 +44,7 @@ public sealed class ServerEngine : IDisposable
             if (!File.Exists(exe))
             {
                 Log?.Invoke($"[错误] 未找到引擎: {exe}");
-                Log?.Invoke("[提示] 请在 设置 页指定引擎目录（含 llama-server.exe）；轻量版可在首次配置向导里自动下载引擎");
+                Log?.Invoke("[提示] 请在 设置 页指定引擎目录（含 llama-server.exe），或在 设置 → 配置向导 重新运行向导自动下载引擎");
                 SetState(EngineState.Failed);
                 return;
             }
