@@ -49,7 +49,14 @@
 
 - 引擎二进制经 **HTTPS 取自 llama.cpp 官方 GitHub Release**，请勿改用不可信的镜像地址；
 - 下载先写入临时目录，解压并确认 `llama-server.exe` 存在后**原子换入** `engine\` 目录——失败或中途取消不会留下半个引擎目录，也不影响已有引擎；
-- 网络受限环境：手动下载对应官方 zip 解压后，在向导 / 设置页指定引擎目录即可。
+- 网络受限环境可手动下载后离线安装（解压后在向导 / 设置页指定引擎目录）：
+  - **官方下载页**：https://github.com/ggml-org/llama.cpp/releases/tag/b10919
+  - 各引擎包对应的资产（zip）文件名：
+    - Vulkan：`llama-b10919-bin-win-vulkan-x64.zip`
+    - CPU：`llama-b10919-bin-win-cpu-x64.zip`
+    - CUDA 12.4：`llama-b10919-bin-win-cuda-12.4-x64.zip` + `cudart-llama-bin-win-cuda-12.4-x64.zip`
+    - CUDA 13.3：`llama-b10919-bin-win-cuda-13.3-x64.zip` + `cudart-llama-bin-win-cuda-13.3-x64.zip`
+  - CUDA 引擎需把主包与 cudart 包的文件解压合并到**同一个**引擎目录；升级 llama.cpp 版本后，资产名以 `src/Core/Engine/EnginePack.cs` 为准
 
 ---
 

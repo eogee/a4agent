@@ -51,7 +51,14 @@ Packs are pinned to a fixed llama.cpp release (currently [b10919](https://github
 
 - Engine binaries come **only from the official llama.cpp GitHub Release over HTTPS**;
 - Downloads go to a temp directory and are **atomically swapped** into `engine\` after `llama-server.exe` is verified — a failed or cancelled download never leaves a broken engine behind;
-- Restricted networks: download the official zips manually, extract, and point the wizard / settings to that directory.
+- Restricted networks: download the official zips manually and install offline (extract, then point the wizard / settings to that directory):
+  - **Official download page**: https://github.com/ggml-org/llama.cpp/releases/tag/b10919
+  - Asset (zip) names per engine pack:
+    - Vulkan: `llama-b10919-bin-win-vulkan-x64.zip`
+    - CPU: `llama-b10919-bin-win-cpu-x64.zip`
+    - CUDA 12.4: `llama-b10919-bin-win-cuda-12.4-x64.zip` + `cudart-llama-bin-win-cuda-12.4-x64.zip`
+    - CUDA 13.3: `llama-b10919-bin-win-cuda-13.3-x64.zip` + `cudart-llama-bin-win-cuda-13.3-x64.zip`
+  - For CUDA, merge the main pack and the cudart pack into the **same** engine directory; after bumping the llama.cpp version, asset names follow `src/Core/Engine/EnginePack.cs`
 
 ---
 
