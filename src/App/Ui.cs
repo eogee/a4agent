@@ -57,19 +57,6 @@ internal static class Ui
         it.SubItems.Add(m.HasNextnTensors ? "✓" : "-");
     }
 
-    /// <summary>本机第一个非回环 IPv4，用于局域网接入提示。</summary>
-    public static string? GetLanIPv4()
-    {
-        try
-        {
-            return System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
-                .Where(n => n.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up
-                         && n.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Loopback)
-                .SelectMany(n => n.GetIPProperties().UnicastAddresses)
-                .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                .Select(a => a.Address.ToString())
-                .FirstOrDefault();
-        }
-        catch { return null; }
-    }
+    /// <summary>本机对局域网可用的 IPv4（跳过 WSL/Hyper-V 等虚拟网卡），用于接入页展示。</summary>
+    public static string? GetLanIPv4() => Core.Net.LanAddress.GetBestIPv4();
 }

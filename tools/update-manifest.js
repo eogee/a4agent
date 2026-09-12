@@ -296,7 +296,8 @@ async function main() {
 
   const tokens = loadTokens(opts.tokenFile);
   const tag = `v${opts.version}`;
-  const releaseName = `${tag} ${body.split('\n').find((l) => l.trim() && !l.startsWith('#') && !l.startsWith('|'))?.trim() || ''}`.trim();
+  // 发布名取说明文件的一级标题（如 "v0.2.0 · 首个开源版本"），缺省退回 tag
+  const releaseName = (body.match(/^#\s+(.+)$/m)?.[1] || tag).trim();
   const assetName = path.basename(installer);
 
   for (const [platform, token] of [['gitee', tokens.gitee], ['github', tokens.github]]) {
