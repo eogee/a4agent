@@ -33,7 +33,7 @@
 
 ### 引擎包目录
 
-引擎包钉定在 llama.cpp 官方 Release 的固定版本（当前 [b10919](https://github.com/ggml-org/llama.cpp/releases/tag/b10919)，见 `src/Core/Engine/EnginePack.cs`，升级改这一个文件即可）：
+引擎包钉定在 llama.cpp 官方 Release 的**固定版本**，不自动追新——二进制可复现、升级经人工验证后再推送。当前钉定的 tag 以 `src/Core/Engine/EnginePack.cs` 的 `RepoTag` 为**单一事实来源**（升级 = 改这一个文件，同步资产名与体积即可），对应官方发布页为 `https://github.com/ggml-org/llama.cpp/releases/tag/<RepoTag>`：
 
 | 引擎包 | 体积 | 适用 | 要求 |
 |---|---|---|---|
@@ -50,13 +50,13 @@
 - 引擎二进制经 **HTTPS 取自 llama.cpp 官方 GitHub Release**，请勿改用不可信的镜像地址；
 - 下载先写入临时目录，解压并确认 `llama-server.exe` 存在后**原子换入** `engine\` 目录——失败或中途取消不会留下半个引擎目录，也不影响已有引擎；
 - 网络受限环境可手动下载后离线安装（解压后在向导 / 设置页指定引擎目录）：
-  - **官方下载页**：https://github.com/ggml-org/llama.cpp/releases/tag/b10919
-  - 各引擎包对应的资产（zip）文件名：
-    - Vulkan：`llama-b10919-bin-win-vulkan-x64.zip`
-    - CPU：`llama-b10919-bin-win-cpu-x64.zip`
-    - CUDA 12.4：`llama-b10919-bin-win-cuda-12.4-x64.zip` + `cudart-llama-bin-win-cuda-12.4-x64.zip`
-    - CUDA 13.3：`llama-b10919-bin-win-cuda-13.3-x64.zip` + `cudart-llama-bin-win-cuda-13.3-x64.zip`
-  - CUDA 引擎需把主包与 cudart 包的文件解压合并到**同一个**引擎目录；升级 llama.cpp 版本后，资产名以 `src/Core/Engine/EnginePack.cs` 为准
+  - **官方发布列表**：https://github.com/ggml-org/llama.cpp/releases ；当前钉定版本的发布页为 `https://github.com/ggml-org/llama.cpp/releases/tag/<RepoTag>`（`<RepoTag>` 以 `src/Core/Engine/EnginePack.cs` 为准）
+  - 各引擎包对应的资产（zip）文件名，`<tag>` 即 `RepoTag`：
+    - Vulkan：`llama-<tag>-bin-win-vulkan-x64.zip`
+    - CPU：`llama-<tag>-bin-win-cpu-x64.zip`
+    - CUDA 12.4：`llama-<tag>-bin-win-cuda-12.4-x64.zip` + `cudart-llama-bin-win-cuda-12.4-x64.zip`
+    - CUDA 13.3：`llama-<tag>-bin-win-cuda-13.3-x64.zip` + `cudart-llama-bin-win-cuda-13.3-x64.zip`
+  - CUDA 引擎需把主包与 cudart 包的文件解压合并到**同一个**引擎目录；cudart 包文件名不含 tag，跟随 CUDA 大版本
 
 ---
 
