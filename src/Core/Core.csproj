@@ -8,4 +8,9 @@
     <RootNamespace>a4agent.Core</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Ed25519 验签（更新清单签名）；.NET 8 BCL 无 Ed25519，用 BouncyCastle 的 Rfc8032 实现 -->
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.4.0" />
+  </ItemGroup>
+
 </Project>

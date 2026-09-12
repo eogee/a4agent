@@ -119,6 +119,34 @@
 
 ---
 
+## 自动更新与安全
+
+应用内置自更新：发布新版后，应用在启动时静默检查，或在「设置 → 软件更新」点「检查更新」手动检查；发现新版本后确认下载，校验通过即可一键升级（安装器自动完成覆盖，配置与已下载引擎全部保留）。也可「跳过此版本」。
+
+### 更新源与校验（防 MITM / 防伪造）
+
+- **双源**：更新清单 `latest.json` 同时发布到 GitHub 与 Gitee，客户端并行拉取、首个通过验签的生效；安装包下载 GitHub 失败自动回退 Gitee。
+- **清单签名**：发布侧用 Ed25519 私钥签名 `latest.json`（版本、更新说明、安装包 SHA256 等字段），应用内置对应公钥验签；任何字段异常或签名不符，清单直接作废、**不弹更新提示**。URL 不入签名，因此两份清单字节一致、共用同一签名，URL 指向的内容由被签名的 SHA256 绑死。
+- **完整性校验**：安装包边下边算 SHA256，与签名清单比对通过才落盘；点击「安装并关闭程序」时会对磁盘文件**再次复核**才拉起安装器。
+- **传输白名单**：仅 HTTPS，且重定向逐跳校验主机白名单（`github.com` / `gitee.com` / `*.githubusercontent.com` / `*.gitee.com`），拦截跳转到任意域名。
+- **防降级**：候选版本需严格高于当前版本；预发布版本仅当当前运行版本也是预发布时才提示。
+- **尺寸上限**：清单 512KB、安装包 300MB，超限拒绝；下载只写入应用数据目录（`%APPDATA%\a4agent\updates\`），不信任系统临时目录。
+
+### 发布新版（维护者）
+
+```powershell
+powershell -File installer/build.ps1 -Version 0.2.1 -Lite      # 构建安装包（版本号同步写入程序集）
+git tag v0.2.1; git push origin v0.2.1; git push github v0.2.1 # 推送标签
+node tools/update-manifest.js --installer installer/out/a4agent-Lite-setup-v0.2.1.exe `
+    --version 0.2.1 --body-file installer/out/RELEASE-NOTES-v0.2.1.md
+```
+
+发布脚本自动完成：生成并 Ed25519 签名 `latest.json` → 在两平台查找/创建 Release → 删除同名旧资产 → 上传安装包与清单 → 更新发布说明。Token 通过环境变量 `A4AGENT_GITEE_TOKEN` / `A4AGENT_GITHUB_TOKEN` 或 `--token-file` 提供。
+
+签名私钥位于 `.claude/keys/update-signing.pem`（已 gitignore，**绝不入库**）；私钥一旦泄漏必须吊销轮换：生成新密钥 → 替换 `src/Core/Update/Updater.cs` 内置公钥 → 重新发版。协议一致性由 `Smoke --updatetest` 保证（node 签名 ↔ C# 验签跨语言互验 + 篡改拒收用例）。
+
+---
+
 ## 安全设计
 
 - **引擎供应链**：引擎二进制仅从 llama.cpp 官方 Release 经 HTTPS 下载，钉定固定版本、升级需显式修改目录代码；解压条目做路径逃逸防护；落盘前确认关键文件存在，安装采用临时目录 + 原子换入，杜绝半成品引擎被启动
@@ -134,8 +162,11 @@
 
 ```bash
 dotnet build src/App/App.csproj -c Release      # 编译
-src/App/bin/Release/net8.0-windows/a4agent.exe --uitest   # 无头自检（控件树冒烟）
+src/App/bin/Release/net8.0-windows/a4agent.exe --uitest      # 无头自检（控件树完整性）
+src/Smoke/bin/Debug/net8.0-windows/Smoke.exe --updatetest    # 更新协议自检（签名互验/篡改拒收）
 ```
+
+第三方组件：[BouncyCastle.Cryptography](https://github.com/bcgit/bc-csharp)（MIT 许可，用于更新清单 Ed25519 验签）。
 
 ## 打包
 

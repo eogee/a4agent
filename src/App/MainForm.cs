@@ -1,6 +1,7 @@
 using a4agent.Core.Config;
 using a4agent.Core.Engine;
 using a4agent.Core.Gguf;
+using a4agent.Core.Update;
 
 namespace a4agent.App;
 
@@ -24,6 +25,9 @@ public sealed class MainForm : Form
     CheckBox _chkLan = null!, _chkFa = null!, _chkTrim = null!;
     TextBox _txtExtra = null!, _txtEngineDir = null!;
     Button _btnSaveApply = null!;
+    Button _btnCheckUpdate = null!;
+    Label _lblUpdate = null!;
+    bool _checkingUpdate;
 
     NotifyIcon _tray = null!;
     bool _balloonShown;
@@ -62,8 +66,63 @@ public sealed class MainForm : Form
             RescanModels();
             ProbeCapabilities();
             if (startImmediately) StartServer();
+            _ = SilentCheckAfterDelayAsync();
         };
         FormClosing += OnFormClosing;
+    }
+
+    // ───────────────────────── 软件更新 ─────────────────────────
+
+    async Task SilentCheckAfterDelayAsync()
+    {
+        try { await Task.Delay(3000); await CheckUpdateAsync(silent: true); } catch { /* 后台检查，失败不打扰 */ }
+    }
+
+    async Task CheckUpdateAsync(bool silent)
+    {
+        if (_checkingUpdate) return;
+        _checkingUpdate = true;
+        _btnCheckUpdate.Enabled = false;
+        _lblUpdate.ForeColor = Color.DimGray;
+        _lblUpdate.Text = "正在检查更新…";
+
+        var r = await Updater.CheckAsync();
+        _checkingUpdate = false;
+        _btnCheckUpdate.Enabled = true;
+
+        switch (r.Status)
+        {
+            case UpdateCheckStatus.UpdateAvailable:
+                _lblUpdate.ForeColor = Color.DarkSlateBlue;
+                _lblUpdate.Text = $"发现新版本 v{r.LatestVersion}（当前 v{r.CurrentVersion}）";
+                if (silent)
+                    _tray.ShowBalloonTip(5000, "a4agent",
+                        $"发现新版本 v{r.LatestVersion}，到「设置」页可一键更新。", ToolTipIcon.Info);
+                else if (new UpdateDialog(r).ShowDialog(this) == DialogResult.OK)
+                    ReallyExit();   // 安装器已拉起：停止引擎并退出，释放文件锁让安装器覆盖
+                break;
+            case UpdateCheckStatus.UpToDate:
+                _lblUpdate.ForeColor = Color.DimGray;
+                _lblUpdate.Text = $"已是最新版本 v{r.CurrentVersion}";
+                if (!silent) MessageBox.Show($"已是最新版本（v{r.CurrentVersion}）。", "检查更新",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                break;
+            case UpdateCheckStatus.Ignored:
+                _lblUpdate.ForeColor = Color.DimGray;
+                _lblUpdate.Text = $"已跳过版本 v{r.LatestVersion}（当前 v{r.CurrentVersion}）";
+                break;
+            case UpdateCheckStatus.TooOld:
+                _lblUpdate.ForeColor = Color.Firebrick;
+                _lblUpdate.Text = r.Error;
+                if (!silent) MessageBox.Show(r.Error, "检查更新", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                break;
+            default:
+                _lblUpdate.ForeColor = Color.Firebrick;
+                _lblUpdate.Text = silent ? $"当前版本 v{r.CurrentVersion}（检查更新失败）" : "检查更新失败";
+                if (!silent) MessageBox.Show("检查更新失败：" + r.Error, "检查更新",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                break;
+        }
     }
 
     // ═══════════════════════ UI 构建 ═══════════════════════
@@ -258,6 +317,15 @@ public sealed class MainForm : Form
         _chkTrim = new CheckBox { Text = "启动后自动裁剪内存（释放文件缓存）", AutoSize = true };
         _nudTrimSec = new NumericUpDown { Minimum = 5, Maximum = 3600 };
         AddRow("", _chkTrim, _nudTrimSec);
+
+        _btnCheckUpdate = new Button { Text = "检查更新", Size = new Size(110, 28) };
+        _btnCheckUpdate.Click += async (_, _) => await CheckUpdateAsync(false);
+        _lblUpdate = new Label
+        {
+            Text = $"当前版本 v{Updater.CurrentVersion}", AutoSize = true,
+            ForeColor = Color.DimGray, Anchor = AnchorStyles.Left,
+        };
+        AddRow("软件更新", _btnCheckUpdate, _lblUpdate);
 
         _btnSaveApply = new Button { Text = "保存设置", Size = new Size(120, 32) };
         _btnSaveApply.Click += (_, _) => SaveSettings();

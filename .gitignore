@@ -15,3 +15,6 @@ uitest.fail
 *.user
 *.suo
 .vs/
+
+# 机密：更新签名私钥与平台令牌，绝不入库
+.claude/

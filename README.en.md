@@ -102,7 +102,32 @@ Per-user installation (no UAC), with Start-menu and desktop shortcuts created au
 - **Is LAN access safe**: the service has no built-in auth; on untrusted networks add `--api-key <secret>` via *Settings → Extra args*
 - **Engine download fails / slow**: choose *Offline install* in the wizard and point it to a manually downloaded official zip; on poor networks start with the 30 MB Vulkan pack
 - **Upgrade**: run the new installer over the old one; config and the downloaded engine are preserved
-- **Reporting issues**: attach the log text from the *Status* tab
+### Reporting issues: attach the log text from the *Status* tab
+
+---
+
+## Auto-update & security
+
+The app ships with self-update: it silently checks on startup (or via *Settings → Software update → Check*). After you confirm, it downloads the new installer, verifies it, and the setup wizard completes the upgrade — config and the downloaded engine are preserved. You can also *skip this version*.
+
+### Sources & verification (anti-MITM / anti-forgery)
+
+- **Dual sources**: the signed manifest `latest.json` is published to both GitHub and Gitee; the client fetches both in parallel and the first signature-valid one wins. Installer download falls back from GitHub to Gitee automatically.
+- **Signed manifest**: the release side signs `latest.json` with an Ed25519 private key (version, notes, installer SHA256); the app verifies it with the embedded public key — any tampering invalidates the manifest silently. URLs are not part of the signature, so both copies are byte-identical; the content behind a URL is pinned by the signed SHA256.
+- **Integrity**: the installer SHA256 is computed while streaming and compared against the manifest before it lands on disk; the file is re-verified again before launching the installer.
+- **Transport whitelist**: HTTPS only, and every redirect hop is checked against a host whitelist (`github.com` / `gitee.com` / `*.githubusercontent.com` / `*.gitee.com`).
+- **Anti-downgrade**: candidates must be strictly newer; pre-releases are only offered to pre-release installations; individual versions can be skipped.
+- **Size caps**: manifest 512KB, installer 300MB; downloads land in the app data directory (`%APPDATA%\a4agent\updates\`), never the system temp folder.
+
+### Releasing (maintainers)
+
+```powershell
+powershell -File installer/build.ps1 -Version 0.2.1 -Lite      # build installer (version stamped into the assembly)
+git tag v0.2.1; git push origin v0.2.1; git push github v0.2.1
+node tools/update-manifest.js --installer installer/out/a4agent-Lite-setup-v0.2.1.exe --version 0.2.1
+```
+
+The script signs `latest.json`, ensures the release on both platforms, uploads the installer + manifest, and updates the notes. The signing key lives in `.claude/keys/update-signing.pem` (gitignored; rotate immediately if leaked). Protocol consistency between the Node publisher and the C# client is enforced by `Smoke --updatetest` (cross-language signature interop + tamper-rejection cases).
 
 ---
 

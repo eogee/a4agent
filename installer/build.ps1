@@ -28,7 +28,7 @@ $publishDir = Join-Path $root 'publish'
 Remove-Item (Join-Path $publishDir '*') -Recurse -Force -ErrorAction SilentlyContinue
 & $dotnet publish (Join-Path $root 'src\App\App.csproj') -c Release -r win-x64 --self-contained true `
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
-    -p:EnableCompressionInSingleFile=true -o $publishDir
+    -p:EnableCompressionInSingleFile=true -p:Version=$Version -o $publishDir
 if ($LASTEXITCODE -ne 0) { throw 'publish failed' }
 Get-ChildItem $publishDir | ForEach-Object { '  {0}  {1:N1} MB' -f $_.Name, ($_.Length/1MB) }
 
