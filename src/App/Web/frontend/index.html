@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>a4agent</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='10' fill='%2316baaa'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="layui/css/layui.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!--
+  THESIS: llama-server 控制台 = 旗舰店柜台的服务台——服务状态像「当前生效」一样常驻顶栏，
+  启动/停止是一件被郑重对待的事；拒绝「卡片网格 + 蓝按钮」的管理后台默认。
+  OWN-WORLD: 与 a4api 同一世界——薄荷画布 #eefafa 上的无瑕白卡，发丝分隔线，深墨字；
+  状态绿 #16baaa 只点亮「运行中」与「默认模型」两处；软红只留给失败。
+  STORY: 打开即见服务状态与启停；日志像柜台上的流水账安静滚动；模型页把 GGUF 陈列成卡片表格；
+  设置与接入都在白卡的抽屉里。
+  FORM: 旗舰店柜台（grounded #6，与 a4api 同源），seed 继承。
+  -->
+  <div class="app-header">
+    <div class="app-title"><span class="app-mark" aria-hidden="true"></span>a4agent</div>
+    <div class="status-bar" id="status-bar">
+      <span class="status-label">服务状态：</span>
+      <span id="status-text" class="status-text">加载中…</span>
+    </div>
+    <div class="header-actions">
+      <a href="javascript:;" class="update-link" id="btn-open-webui">打开 WebUI</a>
+      <a href="javascript:;" class="update-link" id="btn-check-update">检查更新</a>
+      <button class="layui-btn layui-btn-normal" id="btn-toggle-service">启动服务</button>
+    </div>
+  </div>
+
+  <div class="app-main">
+    <div class="notice notice-warn" id="engine-banner" style="display:none">
+      <span>未检测到推理引擎（llama-server.exe）。</span>
+      <a href="javascript:;" id="btn-banner-wizard">重新运行配置向导</a>
+      <span>，自动下载引擎。</span>
+    </div>
+
+    <div class="layui-tab layui-tab-brief" lay-filter="main-tab">
+      <ul class="layui-tab-title">
+        <li class="layui-this" lay-id="status">状态</li>
+        <li lay-id="models">模型</li>
+        <li lay-id="settings">设置</li>
+        <li lay-id="connect">接入</li>
+      </ul>
+      <div class="layui-tab-content">
+
+        <!-- ═══════════ 状态 ═══════════ -->
+        <div class="layui-tab-item layui-show">
+          <div class="panel status-hero">
+            <div class="status-hero-main">
+              <span class="status-dot dot-stopped" id="hero-dot"></span>
+              <div class="status-hero-text">
+                <div class="status-hero-title" id="hero-title">已停止</div>
+                <div class="status-hero-meta" id="hero-meta">正在加载…</div>
+              </div>
+            </div>
+            <div class="status-hero-actions">
+              <button class="layui-btn layui-btn-normal" id="btn-start">启动服务</button>
+              <button class="layui-btn" id="btn-stop" disabled>停止服务</button>
+            </div>
+          </div>
+
+          <div class="section-title">运行日志</div>
+          <div class="panel log-panel">
+            <div class="log-box" id="log-box"><div class="log-empty">暂无日志——点「启动服务」后，引擎输出会实时滚动到这里</div></div>
+          </div>
+        </div>
+
+        <!-- ═══════════ 模型 ═══════════ -->
+        <div class="layui-tab-item">
+          <div class="skills-header">
+            <span class="providers-title">模型列表</span>
+            <div class="skills-header-actions">
+              <button class="layui-btn layui-btn-sm" id="btn-add-dir">添加目录</button>
+              <button class="layui-btn layui-btn-sm" id="btn-rescan">重新扫描</button>
+              <button class="layui-btn layui-btn-sm layui-btn-normal" id="btn-set-default">设为默认模型</button>
+            </div>
+          </div>
+          <div class="panel table-panel">
+            <table class="layui-table models-table">
+              <thead>
+                <tr>
+                  <th>文件</th>
+                  <th>大小</th>
+                  <th>量化</th>
+                  <th>原生上下文</th>
+                  <th>MTP</th>
+                </tr>
+              </thead>
+              <tbody id="models-tbody">
+                <tr><td colspan="5"><div class="empty-tip">加载中…</div></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="provider-hint" id="default-model-hint"></div>
+        </div>
+
+        <!-- ═══════════ 设置 ═══════════ -->
+        <div class="layui-tab-item">
+          <form class="layui-form settings-form" lay-filter="settings-form">
+
+            <div class="panel settings-panel">
+              <div class="form-section-title">服务</div>
+              <div class="form-grid">
+                <div class="form-item">
+                  <div class="form-label">服务端口（默认 8080）</div>
+                  <input type="number" class="layui-input" id="f-port" min="1024" max="65535">
+                </div>
+                <div class="form-item">
+                  <div class="form-label">局域网访问</div>
+                  <div class="form-control-row">
+                    <input type="checkbox" id="f-lan" lay-skin="switch" lay-filter="f-lan">
+                    <span class="form-inline-hint">勾选 = 0.0.0.0，首次使用请放行防火墙</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-section-title">引擎</div>
+              <div class="form-grid form-grid-one">
+                <div class="form-item">
+                  <div class="form-label">引擎目录</div>
+                  <div class="input-row">
+                    <input type="text" class="layui-input" id="f-engine-dir" readonly>
+                    <button type="button" class="layui-btn" id="btn-browse-engine">浏览</button>
+                  </div>
+                  <div class="form-hint">「引擎」指 llama-server 推理后端本体：即 llama-server.exe 及其依赖 DLL 所在的目录。默认使用安装目录下的 engine\ 子目录；把它改指向其它后端包的 engine 目录（例如 Vulkan 版安装目录），即可不重装直接切换显卡后端。修改并保存后需重启服务生效。</div>
+                </div>
+              </div>
+
+              <div class="form-section-title">推理参数</div>
+              <div class="form-grid">
+                <div class="form-item">
+                  <div class="form-label">上下文长度（tokens）</div>
+                  <input type="number" class="layui-input" id="f-ctx" min="512" max="1048576" step="512">
+                  <div class="form-hint">预设档会自动推荐</div>
+                </div>
+                <div class="form-item">
+                  <div class="form-label">KV 缓存级别</div>
+                  <div class="form-control-row form-control-row-wrap">
+                    <select class="layui-input" id="f-kv" lay-filter="f-kv">
+                      <option value="f16">f16</option>
+                      <option value="q8_0">q8_0</option>
+                      <option value="q4_0">q4_0</option>
+                    </select>
+                    <input type="checkbox" id="f-fa" lay-skin="primary" title="Flash Attention">
+                  </div>
+                </div>
+                <div class="form-item">
+                  <div class="form-label">GPU 层数（-ngl）</div>
+                  <input type="number" class="layui-input" id="f-ngl" min="0" max="999">
+                  <div class="form-hint">99 = 全量 offload</div>
+                </div>
+                <div class="form-item">
+                  <div class="form-label">MTP 投机步数</div>
+                  <input type="number" class="layui-input" id="f-mtp" min="0" max="10">
+                  <div class="form-hint" id="mtp-hint">0 = 关闭；需引擎与模型支持</div>
+                </div>
+                <div class="form-item">
+                  <div class="form-label">CPU 线程数</div>
+                  <input type="number" class="layui-input" id="f-threads" min="0" max="256">
+                  <div class="form-hint">0 = 自动</div>
+                </div>
+                <div class="form-item">
+                  <div class="form-label">ubatch</div>
+                  <input type="number" class="layui-input" id="f-ub" min="16" max="16384" step="16">
+                </div>
+                <div class="form-item">
+                  <div class="form-label">并行槽位（--parallel）</div>
+                  <input type="number" class="layui-input" id="f-par" min="1" max="16">
+                </div>
+                <div class="form-item">
+                  <div class="form-label">额外参数</div>
+                  <input type="text" class="layui-input" id="f-extra" placeholder="空格分隔，原样追加">
+                </div>
+              </div>
+
+              <div class="form-section-title">运行</div>
+              <div class="form-grid">
+                <div class="form-item">
+                  <div class="form-label">启动后自动裁剪内存</div>
+                  <div class="form-control-row">
+                    <input type="checkbox" id="f-trim" lay-skin="switch" lay-filter="f-trim">
+                    <span class="form-inline-hint">释放文件缓存，延迟</span>
+                    <input type="number" class="layui-input input-mini" id="f-trim-sec" min="5" max="3600">
+                    <span class="form-inline-hint">秒</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-section-title">维护</div>
+              <div class="form-grid">
+                <div class="form-item">
+                  <div class="form-label">配置向导</div>
+                  <button type="button" class="layui-btn" id="btn-wizard">重新运行向导</button>
+                  <div class="form-hint">重新检测硬件、下载引擎、选择模型与端口</div>
+                </div>
+                <div class="form-item">
+                  <div class="form-label">软件更新</div>
+                  <div class="form-control-row">
+                    <button type="button" class="layui-btn" id="btn-check-update-2">检查更新</button>
+                    <span class="form-inline-hint" id="version-text"></span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-actions">
+                <button type="button" class="layui-btn layui-btn-normal layui-btn-big" id="btn-save-settings">保存设置</button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <!-- ═══════════ 接入 ═══════════ -->
+        <div class="layui-tab-item">
+          <div class="connect-grid">
+            <div class="connect-card">
+              <div class="connect-card-head">
+                <span>Base URL（OpenAI 兼容接口根地址）</span>
+                <a href="javascript:;" class="copy-link" data-copy="v-base-url">复制</a>
+              </div>
+              <div class="connect-value mono" id="v-base-url">…</div>
+            </div>
+            <div class="connect-card">
+              <div class="connect-card-head">
+                <span>Chat Completions 完整地址</span>
+                <a href="javascript:;" class="copy-link" data-copy="v-chat-url">复制</a>
+              </div>
+              <div class="connect-value mono" id="v-chat-url">…</div>
+            </div>
+            <div class="connect-card">
+              <div class="connect-card-head">
+                <span>模型名称（model 字段填这个）</span>
+                <a href="javascript:;" class="copy-link" data-copy="v-model-id">复制</a>
+              </div>
+              <div class="connect-value mono" id="v-model-id">…</div>
+            </div>
+          </div>
+
+          <div class="notice notice-green" id="lan-notice" style="display:none"></div>
+
+          <div class="section-title">curl 调用示例</div>
+          <div class="panel code-panel"><pre class="code-block" id="code-curl"></pre></div>
+
+          <div class="section-title">Python（openai SDK）示例</div>
+          <div class="panel code-panel"><pre class="code-block" id="code-py"></pre></div>
+
+          <div class="provider-hint">API Key：服务未启用鉴权，客户端里随便填或留空即可。</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script src="layui/layui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

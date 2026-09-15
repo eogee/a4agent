@@ -17,6 +17,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Core\Core.csproj" />
+    <!-- 控制台 UI 宿主（Win10/11 一般自带 WebView2 Runtime；缺失时降级为系统浏览器打开） -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- layui 控制台前端整体内嵌进程序集，由 ControlServer 从内存直出（单文件发布也无需带散文件） -->
+    <EmbeddedResource Include="Web\frontend\**\*.*" />
   </ItemGroup>
 
 </Project>

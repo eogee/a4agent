@@ -30,6 +30,8 @@ Remove-Item (Join-Path $publishDir '*') -Recurse -Force -ErrorAction SilentlyCon
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
     -p:EnableCompressionInSingleFile=true -p:Version=$Version -o $publishDir
 if ($LASTEXITCODE -ne 0) { throw 'publish failed' }
+# WebView2 包会带出 3 个 Intellisense xml 文档，不进安装包
+Remove-Item (Join-Path $publishDir 'Microsoft.Web.WebView2.*.xml') -Force -ErrorAction SilentlyContinue
 Get-ChildItem $publishDir | ForEach-Object { '  {0}  {1:N1} MB' -f $_.Name, ($_.Length/1MB) }
 
 if ($Lite) {
