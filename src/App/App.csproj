@@ -12,7 +12,7 @@
     <RootNamespace>a4agent.App</RootNamespace>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <!-- 更新检查以程序集版本为准；发布时 build.ps1 会用 -p:Version 覆盖为安装包同版本 -->
-    <Version>0.2.1</Version>
+    <Version>0.3.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
