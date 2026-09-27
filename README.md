@@ -2,8 +2,6 @@
 
 **四端 AI 编程工具管理台 + 本地大模型推理控制台**：为 **Claude Code、Codex、dsh（DeepSeek Harness）与 ZCode（智谱 Agentic 开发环境）** 提供统一的**技能管理（Skill）**、**MCP 管理**与 **API 服务商切换**，并内置 **llama.cpp 本地模型推理**（原 a4agent 能力完整合并）。所有操作通过可视化界面完成，无需手动编辑配置文件。
 
-> **官网**：<https://eogee.com> ｜ **使用文档**：<https://eogee.com/article/83> ｜ **联系**：QQ 3886370035 · 微信 eogee2022 ｜ 应用内页脚「问题反馈」可直接提交 Bug 与需求（支持截图），直达开发者邮箱
-
 | 能力 | 说明 |
 |---|---|
 | **技能管理** | 四端全局/项目级 skill 自动发现、聚合标注、跨端迁移、回收站恢复，一键把项目 skill 补齐到所有缺失的端 |
@@ -269,3 +267,12 @@ build.py           打包脚本
 ```
 
 运行时数据（数据库、配置备份、llama 配置与引擎）写入 `backend/database/`（开发）或 `%APPDATA%\a4agent\`（打包后）。
+
+---
+
+## 联系方式
+
+- **官网**：<https://eogee.com>
+- **使用文档**：<https://eogee.com/article/83>
+- **QQ**：3886370035 ｜ **微信**：eogee2022
+- **问题反馈**：推荐应用内页脚「问题反馈」直接提交（支持截图），直达开发者邮箱 eogee@qq.com；也可按上方「提交 Issue 要求」提 Issue
