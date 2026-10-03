@@ -58,8 +58,8 @@ def _nvidia(driver):
 
 
 @pytest.mark.parametrize("driver,expected", [
-    ("591.86", "cuda133"),
-    ("580.10", "cuda133"),
+    ("591.86", "cuda134"),
+    ("580.10", "cuda134"),
     ("560.35", "cuda124"),
     ("550.54", "cuda124"),
     ("546.33", "vulkan"),  # 驱动过旧降级
@@ -77,9 +77,17 @@ def test_engine_recommend_non_nvidia():
 def test_engine_catalog_pinned_tag():
     assert catalog.REPO_OWNER == "ggml-org"
     assert catalog.REPO_NAME == "llama.cpp"
-    assert catalog.find("vulkan").zips == ("llama-b10919-bin-win-vulkan-x64.zip",)
+    assert catalog.find("vulkan").zips == ("llama-b11370-bin-win-vulkan-x64.zip",)
     url = catalog.pack_url(catalog.find("vulkan"), 0)
     assert url.startswith("https://github.com/ggml-org/llama.cpp/releases/download/")
+
+
+def test_engine_catalog_legacy_pack_id():
+    # 旧配置里存的 cuda133 自动映射到改名后的 cuda134
+    assert catalog.find("cuda133").pack_id == "cuda134"
+    assert catalog.find("cuda134").pack_id == "cuda134"
+    assert catalog.find("cuda124").pack_id == "cuda124"
+    assert catalog.find("nope") is None
 
 
 def test_size_label():

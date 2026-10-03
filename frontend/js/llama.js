@@ -360,6 +360,7 @@ layui.use(['layer', 'form', 'element'], function () {
       box.innerHTML =
         block('Base URL', c.base_url + '/v1') +
         block('Chat Completions', c.chat_url) +
+        block('决策模型端点', c.systemone_url || '') +
         block('模型名 (model)', c.model || '—') +
         lanLine +
         '<div class="llama-code-label">curl</div>' +

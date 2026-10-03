@@ -52,7 +52,7 @@ class LlamaConfig:
     port: int = 8080
     host: str = "127.0.0.1"  # 127.0.0.1 | 0.0.0.0
     engine_dir: str = ""     # llama-server.exe 所在目录；空 = 数据目录 engine
-    engine_pack_id: str = ""  # 向导自动下载的引擎包标识（vulkan/cuda124/cuda133/cpu）
+    engine_pack_id: str = ""  # 向导自动下载的引擎包标识（vulkan/cuda124/cuda134/cpu，旧配置 cuda133 自动映射）
     model_dirs: list = field(default_factory=list)
     models: list = field(default_factory=list)  # ModelEntry.asdict() 列表
     default_model_path: str = ""

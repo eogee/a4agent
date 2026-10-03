@@ -289,7 +289,7 @@ class LlamaRuntime:
         }
 
     def connect(self) -> dict:
-        """接入页：Base URL、Chat 地址、模型名、局域网地址与调用示例。"""
+        """接入页：Base URL、Chat 地址、System One 决策端点、模型名、局域网地址与调用示例。"""
         cfg = self.cfg
         probe_host = "127.0.0.1"
         base = f"http://{probe_host}:{cfg.port}"
@@ -315,6 +315,7 @@ class LlamaRuntime:
         return {
             "base_url": base,
             "chat_url": f"{base}/v1/chat/completions",
+            "systemone_url": f"{base}/v1/systemone",
             "models_url": f"{base}/v1/models",
             "model": model,
             "api_key_set": bool(cfg.infer.api_key.strip()),

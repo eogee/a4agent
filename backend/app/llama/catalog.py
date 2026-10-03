@@ -7,12 +7,12 @@ from dataclasses import dataclass
 
 REPO_OWNER = "ggml-org"
 REPO_NAME = "llama.cpp"
-REPO_TAG = "b10919"  # 2026-09-12 发布
+REPO_TAG = "b11370"  # 2026-10-03 发布，llama-server 含 /v1/systemone 决策模型端点
 
 
 @dataclass(frozen=True)
 class EnginePack:
-    pack_id: str           # cuda133 / cuda124 / vulkan / cpu
+    pack_id: str           # cuda134 / cuda124 / vulkan / cpu
     label: str             # 显示名（不含体积）
     note: str              # 一行适配说明
     zips: tuple            # 需依次下载的官方 zip 资产名
@@ -41,25 +41,25 @@ class EnginePack:
 
 PACKS = [
     EnginePack(
-        "cuda133", "CUDA 13.3",
+        "cuda134", "CUDA 13.4",
         "NVIDIA 显卡，驱动 ≥ 580（较新驱动，性能优先）",
-        ("llama-b10919-bin-win-cuda-13.3-x64.zip", "cudart-llama-bin-win-cuda-13.3-x64.zip"),
-        int((142.8 + 372.9) * 1024 * 1024), "580", True),
+        ("llama-b11370-bin-win-cuda-13.4-x64.zip", "cudart-llama-bin-win-cuda-13.4-x64.zip"),
+        int((145.8 + 403.9) * 1024 * 1024), "580", True),
     EnginePack(
         "cuda124", "CUDA 12.4",
         "NVIDIA 显卡，驱动 ≥ 550（兼容旧驱动）",
-        ("llama-b10919-bin-win-cuda-12.4-x64.zip", "cudart-llama-bin-win-cuda-12.4-x64.zip"),
-        int((242.3 + 373.3) * 1024 * 1024), "550", True),
+        ("llama-b11370-bin-win-cuda-12.4-x64.zip", "cudart-llama-bin-win-cuda-12.4-x64.zip"),
+        int((251.3 + 373.3) * 1024 * 1024), "550", True),
     EnginePack(
         "vulkan", "Vulkan",
         "通用后端：NVIDIA / AMD / Intel 独显与核显均可",
-        ("llama-b10919-bin-win-vulkan-x64.zip",),
-        int(30.2 * 1024 * 1024), "", False),
+        ("llama-b11370-bin-win-vulkan-x64.zip",),
+        int(31.7 * 1024 * 1024), "", False),
     EnginePack(
         "cpu", "CPU",
         "无可用显卡时的兜底方案，速度受限",
-        ("llama-b10919-bin-win-cpu-x64.zip",),
-        int(17.6 * 1024 * 1024), "", False),
+        ("llama-b11370-bin-win-cpu-x64.zip",),
+        int(18.4 * 1024 * 1024), "", False),
 ]
 
 
@@ -71,9 +71,13 @@ def pack_url(pack: EnginePack, index: int) -> str:
     return zip_url(pack.zips[index])
 
 
+_LEGACY_PACK_IDS = {"cuda133": "cuda134"}  # 旧配置里已存过的引擎包标识映射
+
+
 def find(pack_id: str | None) -> EnginePack | None:
     if not pack_id:
         return None
+    pack_id = _LEGACY_PACK_IDS.get(pack_id, pack_id)
     return next((p for p in PACKS if p.pack_id == pack_id), None)
 
 
