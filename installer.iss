@@ -18,6 +18,8 @@ AppVersion={#MyAppVersion}
 AppPublisher=a4agent
 DefaultDirName={localappdata}\Programs\{#MyAppName}
 UsePreviousAppDir=no
+; 默认 yes 时升级安装会沿用上一次的开始菜单组名（改名用户会残留 a4api 组），强制用新组名
+UsePreviousGroup=no
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
@@ -71,6 +73,16 @@ const
 
 var
   PreviousDir: String;
+
+// 与 {app} 同目录判定：Inno 写入卸载注册表的 InstallLocation 带尾部反斜杠
+// （如 '...\Programs\a4agent\'），而 {app} 展开后没有，直接字符串比较永不相等，
+// 会把「同目录升级」误判为「改名迁移」，ssPostInstall 的 DelTree 将删光刚装好的
+// 新版（v0.4.1 实际事故）。比较前统一去掉尾部反斜杠。
+function IsDifferentDir(const A, B: String): Boolean;
+begin
+  Result := (A <> '') and
+    (CompareText(RemoveBackslashUnlessRoot(A), RemoveBackslashUnlessRoot(B)) <> 0);
+end;
 
 // 是否有指定镜像名的进程在运行（主程序与后台代理共用同一可执行文件）
 function ImageRunning(const Image: String): Boolean;
@@ -189,7 +201,7 @@ begin
       DelTree(ExpandConstant('{app}\_internal'), True, True, True);
     end;
     // 从 v0.3.x 升级：旧目录（Programs\a4api）里的旧 exe 也要优雅停掉后台代理
-    if (PreviousDir <> '') and (PreviousDir <> ExpandConstant('{app}')) then
+    if IsDifferentDir(PreviousDir, ExpandConstant('{app}')) then
     begin
       ExePath := PreviousDir + '\' + LegacyImageName;
       if FileExists(ExePath) then
@@ -200,11 +212,14 @@ begin
   if CurStep = ssPostInstall then
   begin
     // 改名迁移收尾：卸载注册表已指向新目录，旧安装目录与旧快捷方式一并清理
-    if (PreviousDir <> '') and (PreviousDir <> ExpandConstant('{app}')) and DirExists(PreviousDir) then
+    if IsDifferentDir(PreviousDir, ExpandConstant('{app}')) and DirExists(PreviousDir) then
       DelTree(PreviousDir, True, True, True);
     DeleteFile(ExpandConstant('{userprograms}\a4api.lnk'));
     DeleteFile(ExpandConstant('{userdesktop}\a4api.lnk'));
     DeleteFile(ExpandConstant('{commonprograms}\a4api.lnk'));
     DeleteFile(ExpandConstant('{commondesktop}\a4api.lnk'));
+    // 旧组文件夹（UsePreviousGroup=yes 时代 0.4.0/0.4.1 把 a4agent.lnk 装进了 a4api 组）
+    if DirExists(ExpandConstant('{userprograms}\a4api')) then
+      DelTree(ExpandConstant('{userprograms}\a4api'), True, True, True);
   end;
 end;
