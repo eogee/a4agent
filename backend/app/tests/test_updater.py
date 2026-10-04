@@ -9,6 +9,7 @@ import hashlib
 import http.server
 import json
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -476,6 +477,78 @@ def test_download_file_cancel(tmp_path, local_server, monkeypatch):
     assert not part.exists() or part.stat().st_size == 0
 
 
+# ---------- 竞速下载：快镜像胜出，慢/挂镜像自动落败 ----------
+
+def test_race_download_fast_mirror_wins(monkeypatch, tmp_path):
+    """慢镜像（跟随取消判定）被抛弃，快镜像立即完成 → 返回快镜像下标。"""
+    calls = []
+
+    def fake_download(url, dest, sha, size, cancel, on_progress=None):
+        calls.append(url)
+        if "slow" in url:
+            while not cancel.is_set():
+                time.sleep(0.01)
+            raise InterruptedError("cancelled")
+        dest.write_bytes(b"x" * size)  # 快镜像立即完成并通过校验
+
+    monkeypatch.setattr(updater, "_download_file", fake_download)
+    w = updater._race_download(
+        ["http://slow/mirror", "http://fast/mirror"], tmp_path,
+        "a4agent-setup-0.2.0.exe", hashlib.sha256(b"x" * 1234).hexdigest(), 1234,
+        threading.Event(),
+    )
+    assert w == 1
+    assert len(calls) == 2  # 两个镜像同时开下
+    assert not (tmp_path / "a4agent-setup-0.2.0.exe.part0").exists()  # 慢镜像已清理
+    assert (tmp_path / "a4agent-setup-0.2.0.exe.part1").read_bytes() == b"x" * 1234
+
+
+def test_race_download_early_win_margin(monkeypatch, tmp_path):
+    """领先超过 _WIN_MARGIN 即提前判胜，不必等慢镜像自行落后到完成。"""
+    mb = 1024 * 1024
+
+    def fake_download(url, dest, sha, size, cancel, on_progress=None):
+        if "slow" in url:
+            while not cancel.is_set():
+                time.sleep(0.01)
+            raise InterruptedError("cancelled")
+        for n in (4 * mb, 9 * mb):  # 领先 9MB > 8MB 阈值 → 判胜
+            if cancel.is_set():
+                raise InterruptedError("cancelled")
+            if on_progress:
+                on_progress(n)
+        dest.write_bytes(b"x" * size)
+
+    monkeypatch.setattr(updater, "_download_file", fake_download)
+    w = updater._race_download(
+        ["http://fast/mirror", "http://slow/mirror"], tmp_path,
+        "a4agent-setup-0.2.0.exe", hashlib.sha256(b"x" * 1234).hexdigest(), 1234,
+        threading.Event(),
+    )
+    assert w == 0
+    assert not (tmp_path / "a4agent-setup-0.2.0.exe.part1").exists()
+
+
+def test_race_download_all_fail_reports_error(monkeypatch, tmp_path):
+    """全部镜像失败 → status=failed，错误信息带各镜像原因。"""
+    from urllib.error import URLError
+
+    def fake_download(url, dest, sha, size, cancel, on_progress=None):
+        raise URLError(f"connection refused ({url})")
+
+    monkeypatch.setattr(updater, "_download_file", fake_download)
+    with updater._lock:
+        updater._download.update(status="downloading")
+    w = updater._race_download(
+        ["http://a/mirror", "http://b/mirror"], tmp_path,
+        "a4agent-setup-0.2.0.exe", "a" * 64, 1234, threading.Event(),
+    )
+    assert w is None
+    p = updater.progress()
+    assert p["status"] == "failed"
+    assert "connection refused" in (p["error"] or "")
+
+
 def test_download_reuse_verified_file(monkeypatch, keys, local_server):
     sha = hashlib.sha256(_PAYLOAD_BYTES).hexdigest()
     m = _local_manifest(local_server, keys)
@@ -491,6 +564,63 @@ def test_download_reuse_verified_file(monkeypatch, keys, local_server):
     updater._dl_thread.join(timeout=30)
     assert updater.progress()["status"] == "done"
     assert updater._sha256_of(d / "a4agent-setup-0.2.0.exe") == sha
+
+
+class _SlowChunkHandler(http.server.BaseHTTPRequestHandler):
+    """把 payload 按 1KB 分块、每块间隔 20ms 发送，模拟 GitHub 慢速源。"""
+
+    def do_GET(self):
+        if self.path != "/a4agent-setup-0.2.0.exe":
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(_PAYLOAD_BYTES)))
+        self.end_headers()
+        try:
+            for i in range(0, len(_PAYLOAD_BYTES), 1024):
+                self.wfile.write(_PAYLOAD_BYTES[i:i + 1024])
+                self.wfile.flush()
+                time.sleep(0.02)
+        except OSError:
+            pass  # 竞速落败后客户端断开，属预期
+
+    def log_message(self, *args):
+        pass
+
+
+def test_download_race_slow_github_loses_to_fast_gitee(monkeypatch, keys, local_server):
+    """端到端复现修复场景：清单首个镜像（GitHub 位）慢速流式发送，
+    第二个镜像（Gitee 位）瞬时完成 → 整体 done，且慢镜像连接被提前中止。
+    """
+    slow = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _SlowChunkHandler)
+    threading.Thread(target=slow.serve_forever, daemon=True).start()
+    try:
+        sha = hashlib.sha256(_PAYLOAD_BYTES).hexdigest()
+        m = make_signed(keys, assets=[
+            {"name": "a4agent-setup-0.2.0.exe", "size": len(_PAYLOAD_BYTES), "sha256": sha,
+             "url": f"http://127.0.0.1:{slow.server_address[1]}/a4agent-setup-0.2.0.exe"},
+            {"name": "a4agent-setup-0.2.0.exe", "size": len(_PAYLOAD_BYTES), "sha256": sha,
+             "url": f"http://127.0.0.1:{local_server}/a4agent-setup-0.2.0.exe"},
+        ])
+        m["signature"] = base64.b64encode(keys.sign(build_payload(m))).decode("ascii")
+        monkeypatch.setattr(updater, "fetch_manifest", lambda: m)
+        monkeypatch.setattr(updater, "allowed_host", lambda h: True)
+
+        updater.start_download("0.2.0")
+        updater._dl_thread.join(timeout=30)
+        p = updater.progress()
+        assert p["status"] == "done"
+        assert Path(p["path"]).read_bytes() == _PAYLOAD_BYTES
+
+        # 落败方收尾（断开 + 清理 .part）：给足时间轮询确认，不留残件
+        d = Path(p["path"]).parent
+        deadline = time.time() + 5
+        while time.time() < deadline and list(d.glob("*.part*")):
+            time.sleep(0.05)
+        assert not list(d.glob("*.part*"))
+    finally:
+        slow.shutdown()
 
 
 # ---------- check() ----------

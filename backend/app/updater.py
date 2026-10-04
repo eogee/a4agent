@@ -50,6 +50,7 @@ MAX_DOWNLOAD_SIZE = 300 * 1024 * 1024
 _HTTP_TIMEOUT = 30  # 大文件（安装包）下载超时
 _MANIFEST_TIMEOUT = 8  # 更新清单（GitHub/Gitee）单次请求超时；下载不经 _http_get，不受影响
 _MANIFEST_ATTEMPTS = 1  # 清单双源并行，冗余来自「两源」而非「重试」
+_WIN_MARGIN = 8 * 1024 * 1024  # 竞速判胜的领先量：领先 8MB 即判胜，落败方提前收手少抢带宽
 
 _ALLOWED_HOSTS = {
     "github.com",
@@ -565,15 +566,13 @@ def _sha256_of(path: Path) -> str:
     return h.hexdigest()
 
 
-def _set_download_progress(received: int) -> None:
-    with _lock:
-        if _download.get("status") == "downloading":
-            _download["downloaded"] = received
-
-
 def _download_file(url: str, dest: Path, expected_sha256: str, expected_size: int,
-                   cancel: threading.Event) -> None:
-    """下载单个 URL 到 dest，边下边算 SHA256；尺寸/哈希不符抛异常，不留 .part。"""
+                   cancel: threading.Event, on_progress=None) -> None:
+    """下载单个 URL 到 dest，边下边算 SHA256；尺寸/哈希不符抛异常，不留 .part。
+
+    cancel 只要求实现 is_set()（竞速时传入组合判定对象，不限于 threading.Event）；
+    on_progress(received_bytes) 每收到一个 chunk 调用一次，供竞速上报领先进度。
+    """
     opener = build_opener(_HostCheckRedirectHandler())
     req = Request(url, headers={"User-Agent": "a4agent-updater/1.0"})
     with opener.open(req, timeout=_HTTP_TIMEOUT) as resp:
@@ -593,15 +592,110 @@ def _download_file(url: str, dest: Path, expected_sha256: str, expected_size: in
                 if received > MAX_DOWNLOAD_SIZE:
                     raise URLError("download too large")
                 f.write(chunk)
-                _set_download_progress(received)
+                if on_progress is not None:
+                    on_progress(received)
     if received != expected_size:
         raise ValueError(f"size mismatch: expected {expected_size}, got {received}")
     if hasher.hexdigest() != expected_sha256.lower():
         raise ValueError("sha256 mismatch")
 
 
+def _race_download(urls: list[str], update_dir: Path, asset_name: str,
+                   expected_sha: str, expected_size: int,
+                   user_cancel: threading.Event) -> int | None:
+    """全部镜像并行竞速下载，返回首个通过校验的 url 下标；取消/全败返回 None。
+
+    之前按清单顺序串行回退：慢源只要「能连上」就永远不会抛异常触发回退
+    （国内实测 GitHub 资产 ~0.1 MB/s、Gitee ~2 MB/s），整个安装包都磨在慢源上。
+    改为全部镜像同时开下：快源自然先过校验胜出，慢源/挂源自动落败；
+    领先超过 _WIN_MARGIN 时提前判胜，落败方即刻收手，少抢快源的带宽。
+
+    状态机：done 由调用方在拿到胜者后写入；cancelled/failed 在此写入。
+    进度取各线程中的领先者（进度条按安装包大小归一，不会出现 200%）。
+    """
+    parts = [update_dir / f"{asset_name}.part{i}" for i in range(len(urls))]
+    received = [0] * len(urls)  # 仅各工作线程写自己的槽位，读不加锁（进度展示容许滞后）
+    errors: list[str | None] = [None] * len(urls)
+    winner: list[int | None] = [None]
+    decided = threading.Event()  # 胜负已定（或用户取消）：落败线程尽快退出
+    winner_done = threading.Event()  # 胜者已完成校验：主流程无需等落败线程收尾
+
+    def lost(i: int) -> bool:
+        return decided.is_set() and winner[0] != i
+
+    def report(i: int, n: int) -> None:
+        received[i] = n
+        with _lock:
+            if _download.get("status") != "downloading":
+                return
+            _download["downloaded"] = max(received)
+            if winner[0] is None and not decided.is_set():
+                alive = [j for j in range(len(urls)) if errors[j] is None]
+                if len(alive) > 1:
+                    lead = max(alive, key=lambda j: received[j])
+                    rest = min(received[j] for j in alive if j != lead)
+                    if received[lead] - rest >= _WIN_MARGIN:
+                        winner[0] = lead
+                        decided.set()
+
+    def worker(i: int) -> None:
+        # 每线程独立取消判定：用户取消，或别家已胜出
+        class _Cancel:
+            @staticmethod
+            def is_set() -> bool:
+                return user_cancel.is_set() or lost(i)
+
+        try:
+            if lost(i):
+                return
+            _download_file(urls[i], parts[i], expected_sha, expected_size,
+                           _Cancel(), on_progress=lambda n, i=i: report(i, n))
+            # 无条件记录（而非仅首个）：早判胜的胜者随后校验失败时，此处的
+            # 真正完成者才是 main 应落盘的 .part
+            winner[0] = i
+            decided.set()
+            winner_done.set()
+        except InterruptedError:
+            parts[i].unlink(missing_ok=True)
+            received[i] = 0
+            if user_cancel.is_set():
+                decided.set()  # 让其余线程尽快退出
+                with _lock:
+                    if _download.get("status") == "downloading":
+                        _download.update(status="cancelled", error="已取消下载", path=None)
+            # 竞速落败：静默清理退出
+        except Exception as e:
+            parts[i].unlink(missing_ok=True)
+            received[i] = 0
+            errors[i] = str(e)
+            logger.warning("下载 %s 失败：%s", urls[i], e)
+
+    ex = ThreadPoolExecutor(max_workers=len(urls))
+    futures = [ex.submit(worker, i) for i in range(len(urls))]
+    try:
+        # 胜者过验即返回，不等落败线程收尾（其可能卡在 connect 超时上，
+        # 最长 _HTTP_TIMEOUT 秒后自行清理退出，不持任何锁）
+        while not winner_done.is_set() and not all(f.done() for f in futures):
+            time.sleep(0.05)
+        w = winner[0]
+        # 已过校验的胜者优先落盘：校验完成的瞬间即使点了取消，也不再丢弃下载成果
+        if w is not None and parts[w].is_file():
+            return w
+        if user_cancel.is_set():
+            return None  # cancelled 状态已由工作线程写入
+        with _lock:
+            if _download.get("status") == "downloading":
+                detail = "；".join(f"{urls[i]}: {errors[i]}" for i in range(len(urls))
+                                  if errors[i])
+                _download.update(status="failed", path=None,
+                                 error=detail or "全部镜像下载失败")
+        return None
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+
+
 def _run_download(version: str) -> None:
-    """下载线程主体：GitHub 源失败自动回退 Gitee 源；校验通过才落盘。"""
+    """下载线程主体：全部镜像并行竞速，首个通过校验的落盘。"""
     try:
         manifest = fetch_manifest()
         asset = _asset_for_version(manifest, version)
@@ -612,7 +706,6 @@ def _run_download(version: str) -> None:
         update_dir = get_data_dir() / "updates" / version
         update_dir.mkdir(parents=True, exist_ok=True)
         final_path = update_dir / asset["name"]
-        part_path = update_dir / (asset["name"] + ".part")
 
         # 已存在且校验通过 → 直接复用
         if final_path.is_file():
@@ -625,34 +718,24 @@ def _run_download(version: str) -> None:
                 return
             final_path.unlink(missing_ok=True)
 
-        last_err: Exception | None = None
-        for url in urls:
-            part_path.unlink(missing_ok=True)
-            try:
-                with _lock:
-                    _download.update(status="downloading", version=version, url=url,
-                                     downloaded=0, total=expected_size, path=None,
-                                     sha256_ok=False, error=None)
-                _download_file(url, part_path, expected_sha, expected_size, _cancel_event)
-                os.replace(part_path, final_path)
-                with _lock:
-                    _download.update(status="done", version=version, path=str(final_path),
-                                     downloaded=expected_size, total=expected_size, sha256_ok=True,
-                                     error=None)
-                _mark_downloaded(version, final_path, expected_sha, expected_size)
-                return
-            except InterruptedError:
-                part_path.unlink(missing_ok=True)
-                with _lock:
-                    _download.update(status="cancelled", error="已取消下载", path=None)
-                return
-            except Exception as e:
-                last_err = e
-                logger.warning("下载 %s 失败：%s", url, e)
-        part_path.unlink(missing_ok=True)
+        # 清理历史残留（旧串行方案的 .part 与竞速中断留下的 .partN）
+        for p in update_dir.glob(asset["name"] + ".part*"):
+            p.unlink(missing_ok=True)
+
         with _lock:
-            _download.update(status="failed", path=None,
-                             error=str(last_err or "下载失败"))
+            _download.update(status="downloading", version=version, url=urls[0],
+                             downloaded=0, total=expected_size, path=None,
+                             sha256_ok=False, error=None)
+        w = _race_download(urls, update_dir, asset["name"], expected_sha, expected_size,
+                           _cancel_event)
+        if w is None:
+            return  # 取消/全败：状态已由 _race_download 写入
+        os.replace(update_dir / f"{asset['name']}.part{w}", final_path)
+        with _lock:
+            _download.update(status="done", version=version, path=str(final_path),
+                             downloaded=expected_size, total=expected_size, sha256_ok=True,
+                             error=None)
+        _mark_downloaded(version, final_path, expected_sha, expected_size)
     except Exception as e:
         logger.error("更新下载失败：%s", e)
         with _lock:
