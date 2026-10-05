@@ -14,7 +14,7 @@ router = APIRouter()
 
 @router.get("/mcp/discover")
 def discover_mcp():
-    """全量发现：全局三端与各项目（claude/codex）的 MCP server 聚合结果。"""
+    """全量发现：全局六端与各项目（claude/codex/zcode/pi）的 MCP server 聚合结果。"""
     return mcp_manager.discover()
 
 

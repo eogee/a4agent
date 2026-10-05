@@ -7,7 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import models  # noqa: F401  # 注册模型建表
-from .api.v1 import configs, feedback, llama, mcp, providers, skills, switch, update
+from .api.v1 import (configs, desktop, feedback, fs, llama, mcp, providers,
+                     skills, switch, tasks, update)
 from .database import Base, engine, ensure_schema
 from .logging_config import setup_logging
 from .seed import seed_providers
@@ -21,6 +22,16 @@ def _frontend_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(getattr(sys, "_MEIPASS", ".")) / "frontend"
     return Path(__file__).resolve().parent.parent.parent / "frontend"
+
+
+class _FrontendStatic(StaticFiles):
+    """前端资源每次回源校验：缺 Cache-Control 时浏览器按 Last-Modified 启发式长期缓存，
+    升级后会继续显示旧界面；no-cache 配合 ETag 命中 304，开销可忽略。"""
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 def create_app() -> FastAPI:
@@ -47,11 +58,14 @@ def create_app() -> FastAPI:
     app.include_router(update.router, prefix="/api/v1", tags=["update"])
     app.include_router(feedback.router, prefix="/api/v1", tags=["feedback"])
     app.include_router(llama.router, prefix="/api/v1", tags=["llama"])
+    app.include_router(tasks.router, prefix="/api/v1", tags=["tasks"])
+    app.include_router(fs.router, prefix="/api/v1", tags=["fs"])
+    app.include_router(desktop.router, prefix="/api/v1", tags=["desktop"])
 
     # 前端静态资源：开发/桌面运行时由后端统一托管
     frontend_dir = _frontend_dir()
     if frontend_dir.exists():
-        app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+        app.mount("/", _FrontendStatic(directory=str(frontend_dir), html=True), name="frontend")
 
     return app
 

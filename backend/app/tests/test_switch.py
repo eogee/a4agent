@@ -1,5 +1,6 @@
 """切换接口的目标应用与协议约束测试。"""
 import json
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -45,7 +46,7 @@ def _seed(db, *, api_type="anthropic", native_responses=False, targets="claude,c
 
 
 def _isolate_paths(tmp_path, monkeypatch):
-    """把 settings / codex 配置 / dsh / zcode / 备份目录 / 模型目录全部指到临时目录。"""
+    """把 settings / codex 配置 / dsh / zcode / pi / 备份目录 / 模型目录全部指到临时目录。"""
     monkeypatch.setenv("A4AGENT_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("A4AGENT_SETTINGS_PATH", str(tmp_path / "settings.json"))
     monkeypatch.setenv("A4AGENT_CODEX_CONFIG_PATH", str(tmp_path / "config.toml"))
@@ -53,6 +54,14 @@ def _isolate_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("A4AGENT_ZCODE_CLI_CONFIG_PATH", str(tmp_path / "zcode-cli.json"))
     monkeypatch.setenv(
         "A4AGENT_ZCODE_V2_CONFIG_PATH", str(tmp_path / "zcode-v2.json")
+    )
+    monkeypatch.setenv("A4AGENT_PI_AGENT_DIR", str(tmp_path / "pi-agent"))
+    # pi 的 contextWindow 提示取自 llama 运行时单例；默认桩为「非本地服务」，
+    # 需要本地模型场景的用例在 _isolate_paths 之后再覆盖它
+    monkeypatch.setattr(
+        switch.llama_runtime,
+        "runtime",
+        lambda: SimpleNamespace(served_context_for=lambda api_base, model: None),
     )
 
 
@@ -358,4 +367,170 @@ def test_zcode_model_entry_reuses_existing_model_capabilities(tmp_path, monkeypa
     entry = v2["provider"][f"a4a_p{cfg.provider_id}"]["models"]["test-model"]
     assert entry["limit"]["context"] == 1000000
     assert entry["modalities"]["input"] == ["text", "image"]
+    db.close()
+
+
+# ---------------- pi（本地 pi coding agent）----------------
+
+
+def _pi_files(tmp_path):
+    models = json.loads((tmp_path / "pi-agent" / "models.json").read_text(encoding="utf-8"))
+    settings = json.loads((tmp_path / "pi-agent" / "settings.json").read_text(encoding="utf-8"))
+    return models, settings
+
+
+def test_pi_switch_writes_managed_provider_and_default(tmp_path, monkeypatch):
+    """pi 端切换：models.json 写 a4a_p<id> 托管 provider，settings.json 切默认模型。"""
+    _isolate_paths(tmp_path, monkeypatch)
+    Session = _make_session(tmp_path)
+    db = Session()
+    cfg = _seed(db, api_type="anthropic", targets="pi")
+
+    result = switch.switch_config(cfg.id, schemas.SwitchRequest(restart=False), db)
+    assert result.success is True
+    models, settings = _pi_files(tmp_path)
+    entry = models["providers"][f"a4a_p{cfg.provider_id}"]
+    assert entry["api"] == "anthropic-messages"
+    assert entry["baseUrl"] == "https://api.example.com"
+    assert entry["apiKey"] == "sk-test-123"
+    assert entry["models"] == [{"id": "test-model"}]
+    assert settings["defaultProvider"] == f"a4a_p{cfg.provider_id}"
+    assert settings["defaultModel"] == "test-model"
+    assert "pi 配置已写入" in result.message
+    db.close()
+
+
+def test_pi_api_kind_follows_provider_protocol(tmp_path, monkeypatch):
+    """openai → openai-completions；原生 Responses 的上游 → openai-responses。"""
+    _isolate_paths(tmp_path, monkeypatch)
+    Session = _make_session(tmp_path)
+    db = Session()
+    cfg = _seed(db, api_type="openai", targets="pi")
+    switch.switch_config(cfg.id, schemas.SwitchRequest(restart=False), db)
+    models, _ = _pi_files(tmp_path)
+    assert models["providers"][f"a4a_p{cfg.provider_id}"]["api"] == "openai-completions"
+
+    cfg.provider.native_responses = True
+    db.commit()
+    switch.switch_config(cfg.id, schemas.SwitchRequest(restart=False), db)
+    models, _ = _pi_files(tmp_path)
+    assert models["providers"][f"a4a_p{cfg.provider_id}"]["api"] == "openai-responses"
+    db.close()
+
+
+def test_pi_switch_preserves_user_providers_and_other_settings(tmp_path, monkeypatch):
+    """只替换本工具托管条目，用户手工 provider 与 settings 其它键（theme 等）保留。"""
+    _isolate_paths(tmp_path, monkeypatch)
+    agent = tmp_path / "pi-agent"
+    agent.mkdir(parents=True)
+    (agent / "models.json").write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "my-selfhost": {
+                        "name": "Strata Local",
+                        "baseUrl": "http://127.0.0.1:8080/v1",
+                        "api": "openai-completions",
+                        "apiKey": "none",
+                        "compat": {"supportsDeveloperRole": False},
+                        "models": [{"id": "qwen-local", "contextWindow": 262144}],
+                    },
+                    "a4a_p999": {"name": "旧托管", "baseUrl": "https://stale", "api": "openai-completions", "apiKey": "stale", "models": []},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (agent / "settings.json").write_text(
+        json.dumps({"theme": "dark", "defaultProvider": "my-selfhost", "defaultModel": "qwen-local"}),
+        encoding="utf-8",
+    )
+
+    Session = _make_session(tmp_path)
+    db = Session()
+    cfg = _seed(db, api_type="openai", targets="pi")
+    switch.switch_config(cfg.id, schemas.SwitchRequest(restart=False), db)
+
+    models, settings = _pi_files(tmp_path)
+    assert models["providers"]["my-selfhost"]["compat"]["supportsDeveloperRole"] is False
+    assert "a4a_p999" not in models["providers"]
+    assert f"a4a_p{cfg.provider_id}" in models["providers"]
+    assert settings["theme"] == "dark"
+    db.close()
+
+
+def test_pi_switch_reuses_existing_model_metadata(tmp_path, monkeypatch):
+    """pi models.json 里已有同名模型定义时复用其元数据，不丢上下文长度等信息。"""
+    _isolate_paths(tmp_path, monkeypatch)
+    agent = tmp_path / "pi-agent"
+    agent.mkdir(parents=True)
+    (agent / "models.json").write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "local": {
+                        "name": "Local",
+                        "baseUrl": "http://127.0.0.1:8080/v1",
+                        "api": "openai-completions",
+                        "models": [{"id": "test-model", "contextWindow": 262144, "reasoning": True}],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    Session = _make_session(tmp_path)
+    db = Session()
+    cfg = _seed(db, api_type="openai", targets="pi")
+    switch.switch_config(cfg.id, schemas.SwitchRequest(restart=False), db)
+    models, _ = _pi_files(tmp_path)
+    entry = models["providers"][f"a4a_p{cfg.provider_id}"]["models"][0]
+    assert entry["contextWindow"] == 262144
+    assert entry["reasoning"] is True
+    db.close()
+
+
+def test_pi_selection_shows_in_status(tmp_path, monkeypatch):
+    """状态接口回显 pi 当前生效的 provider 与 model。"""
+    _isolate_paths(tmp_path, monkeypatch)
+    Session = _make_session(tmp_path)
+    db = Session()
+    cfg = _seed(db, api_type="anthropic", targets="pi")
+    switch.switch_config(cfg.id, schemas.SwitchRequest(restart=False), db)
+
+    status = switch.get_status(db=db)
+    assert status.pi_file_exists is True
+    assert status.current_pi_provider == f"a4a_p{cfg.provider_id}"
+    assert status.current_pi_model == "test-model"
+    db.close()
+
+
+def test_pi_switch_writes_local_llama_context(tmp_path, monkeypatch):
+    """服务商是本机 llama-server 时，pi 的模型条目带上服务实际 -c 的窗口。"""
+    _isolate_paths(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        switch.llama_runtime,
+        "runtime",
+        lambda: SimpleNamespace(served_context_for=lambda api_base, model: 262144),
+    )
+    Session = _make_session(tmp_path)
+    db = Session()
+    cfg = _seed(db, api_type="openai", targets="pi")
+    switch.switch_config(cfg.id, schemas.SwitchRequest(restart=False), db)
+    models, _ = _pi_files(tmp_path)
+    entry = models["providers"][f"a4a_p{cfg.provider_id}"]["models"][0]
+    assert entry == {"id": "test-model", "contextWindow": 262144}
+    db.close()
+
+
+def test_pi_switch_keeps_minimal_entry_for_remote_provider(tmp_path, monkeypatch):
+    """远程服务商不给窗口提示，条目仍是只写 id 的最小形态。"""
+    _isolate_paths(tmp_path, monkeypatch)
+    Session = _make_session(tmp_path)
+    db = Session()
+    cfg = _seed(db, api_type="openai", targets="pi")
+    switch.switch_config(cfg.id, schemas.SwitchRequest(restart=False), db)
+    models, _ = _pi_files(tmp_path)
+    assert models["providers"][f"a4a_p{cfg.provider_id}"]["models"] == [{"id": "test-model"}]
     db.close()

@@ -286,3 +286,69 @@ def test_env_first_prefers_new_name(monkeypatch):
     assert env_first("A4AGENT_DATA_DIR", "A4API_DATA_DIR") == "legacy"
     monkeypatch.setenv("A4AGENT_DATA_DIR", "modern")
     assert env_first("A4AGENT_DATA_DIR", "A4API_DATA_DIR") == "modern"
+
+
+# ---------------- pi 的 contextWindow 提示 ----------------
+
+
+def _pi_provider(pid=3, api_type="openai", api_base="http://127.0.0.1:8080/v1", native=False):
+    return SimpleNamespace(
+        id=pid, name=f"p{pid}", api_type=api_type, api_base=api_base, native_responses=native
+    )
+
+
+def test_pi_model_entry_gets_context_window_when_new():
+    """新写出的模型条目带上本地服务的实际窗口，不再是只靠 pi 兜底 128k。"""
+    models, settings = config_manager.build_pi_settings(
+        {}, {}, _pi_provider(), "none", "qwen-local", context_window=262144
+    )
+    assert models["providers"]["a4a_p3"]["models"] == [
+        {"id": "qwen-local", "contextWindow": 262144}
+    ]
+
+
+def test_pi_model_entry_refreshes_own_and_empty_only():
+    """窗口刷新只发生在本工具托管条目与缺窗口的条目上，用户手工设定的值不覆盖。"""
+    manual = {"providers": {"manual": {"models": [{"id": "m-x", "contextWindow": 65536, "cost": {"input": 1}}]}}}
+    models, _ = config_manager.build_pi_settings(
+        manual, {}, _pi_provider(), "none", "m-x", context_window=131072
+    )
+    entry = models["providers"]["a4a_p3"]["models"][0]
+    assert entry["contextWindow"] == 65536  # 手工值优先
+    assert entry["cost"] == {"input": 1}
+
+    # 本工具自己写的托管条目会随 -c 刷新
+    ours = {"providers": {"a4a_p99": {"models": [{"id": "m-x", "contextWindow": 32768}]}}}
+    models2, _ = config_manager.build_pi_settings(
+        ours, {}, _pi_provider(), "none", "m-x", context_window=131072
+    )
+    assert models2["providers"]["a4a_p3"]["models"][0]["contextWindow"] == 131072
+
+    # 有定义但没写窗口的条目被补上
+    partial = {"providers": {"manual": {"models": [{"id": "m-y", "name": "Y"}]}}}
+    models3, _ = config_manager.build_pi_settings(
+        partial, {}, _pi_provider(), "none", "m-y", context_window=262144
+    )
+    assert models3["providers"]["a4a_p3"]["models"][0]["contextWindow"] == 262144
+
+
+def test_pi_model_entry_unchanged_without_hint():
+    """远程服务商不给窗口提示：保持原有最小条目写法。"""
+    models, _ = config_manager.build_pi_settings({}, {}, _pi_provider(), "k", "glm-4")
+    assert models["providers"]["a4a_p3"]["models"] == [{"id": "glm-4"}]
+
+
+def test_qoder_is_not_an_api_target():
+    """Qoder 的服务商配置被专有加密挡住：不出现在配置方案的应用目标里。"""
+    assert config_manager.target_list("claude,qoder,pi") == ["claude", "pi"]
+    assert "qoder" not in config_manager.target_list("qoder")
+
+
+def test_qoder_skills_root_follows_home_env(tmp_path, monkeypatch):
+    """Qoder 全局 skill 根默认为 <配置目录>/skills，且可被 A4AGENT_QODER_SKILLS_PATH 覆盖。"""
+    for name in ("A4AGENT_QODER_HOME", "A4AGENT_QODER_SKILLS_PATH"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("A4AGENT_QODER_HOME", str(tmp_path / "qoder"))
+    assert config_manager.qoder_skills_root() == tmp_path / "qoder" / "skills"
+    monkeypatch.setenv("A4AGENT_QODER_SKILLS_PATH", str(tmp_path / "elsewhere"))
+    assert config_manager.qoder_skills_root() == tmp_path / "elsewhere"

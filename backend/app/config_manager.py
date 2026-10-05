@@ -48,6 +48,25 @@ ZCODE_V2_CONFIG_ENV = ("A4AGENT_ZCODE_V2_CONFIG_PATH", "A4API_ZCODE_V2_CONFIG_PA
 ZCODE_CLI_CONFIG_REL = "cli/config.json"  # CLI/用户配置文件（hooks/plugins/provider/model）
 ZCODE_V2_CONFIG_REL = "v2/config.json"  # 桌面端 provider/models 配置
 
+# pi（本地 pi coding agent）相关常量
+# pi 的全部配置都是明文 JSON：models.json（provider + 模型目录）、
+# settings.json（defaultProvider/defaultModel）。原生讲 anthropic-messages /
+# openai-completions / openai-responses 三种协议，因此与其它端一样直连上游。
+PI_AGENT_DIR_ENV = ("A4AGENT_PI_AGENT_DIR", "PI_CODING_AGENT_DIR")
+PI_MODELS_CONFIG_ENV = "A4AGENT_PI_MODELS_PATH"
+PI_SETTINGS_CONFIG_ENV = "A4AGENT_PI_SETTINGS_PATH"
+PI_MODELS_FILENAME = "models.json"
+PI_SETTINGS_FILENAME = "settings.json"
+# provider.api_type（+ native_responses）→ pi 的 models.json `api` 取值
+PI_API_ANTHROPIC = "anthropic-messages"
+PI_API_OPENAI = "openai-completions"
+PI_API_OPENAI_RESPONSES = "openai-responses"
+
+# Qoder（AI IDE）相关常量：只托管 skill 与 MCP，配置目录名随发行版而变
+QODER_HOME_ENV = ("A4AGENT_QODER_HOME",)
+QODER_HOME_DIRNAMES = (".qoder", ".qoder-cn")
+QODER_SKILLS_CONFIG_ENV = ("A4AGENT_QODER_SKILLS_PATH",)
+
 
 def settings_path() -> Path:
     override = env_first("A4AGENT_SETTINGS_PATH", "A4API_SETTINGS_PATH")
@@ -63,11 +82,11 @@ def backup_dir() -> Path:
 
 
 def target_list(targets) -> list:
-    """规范化配置方案的应用目标列表（claude / codex / dsh / zcode）。"""
+    """规范化配置方案的应用目标列表（claude / codex / dsh / zcode / pi）。"""
     result = []
     for t in (targets or "claude").split(","):
         t = (t or "").strip()
-        if t in ("claude", "codex", "dsh", "zcode") and t not in result:
+        if t in ("claude", "codex", "dsh", "zcode", "pi") and t not in result:
             result.append(t)
     return result or ["claude"]
 
@@ -661,10 +680,10 @@ def backup_zcode_configs() -> dict:
     return result
 
 
-def _atomic_write_json(path: Path, data: dict) -> None:
+def _atomic_write_json(path: Path, data: dict, prefix: str = ".zcode.") -> None:
     """原子写入 JSON：先写临时文件再替换，避免写入中断损坏配置。"""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".zcode.", suffix=".tmp")
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=prefix, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -777,3 +796,203 @@ def read_zcode_selection() -> tuple[str | None, str | None]:
         return None, str(model) if model else None
     provider_id, _, model_name = str(model).partition("/")
     return model_name, provider_id
+
+
+# ---------------- pi（本地 pi coding agent）配置读写 ----------------
+# pi 的用户配置全是明文 JSON，agent 目录默认 ~/.pi/agent。切换写两份：
+# models.json 的 providers.<id>（pi 支持从 models.json 取 apiKey）与
+# settings.json 的 defaultProvider / defaultModel。
+# auth.json 是 pi 自己的凭证库（可能存着 oauth 登录态，且只有它内部的
+# read-modify-write 路径保证并发安全），本工具不写入，避免覆盖用户凭证。
+
+
+def pi_agent_dir() -> Path:
+    """pi 的 agent 目录：A4AGENT_PI_AGENT_DIR（兼容 pi 自身的 PI_CODING_AGENT_DIR），否则 ~/.pi/agent。"""
+    override = env_first(*PI_AGENT_DIR_ENV)
+    if override:
+        return Path(override)
+    return Path.home() / ".pi" / "agent"
+
+
+def pi_skills_root() -> Path:
+    """pi 全局 skill 根，可用环境变量 A4AGENT_PI_SKILLS_PATH 覆盖。"""
+    override = env_first("A4AGENT_PI_SKILLS_PATH")
+    if override:
+        return Path(override)
+    return pi_agent_dir() / "skills"
+
+
+def pi_models_config_path() -> Path:
+    """pi 的 provider / 模型目录配置路径，可用 A4AGENT_PI_MODELS_PATH 覆盖。"""
+    override = env_first(PI_MODELS_CONFIG_ENV)
+    if override:
+        return Path(override)
+    return pi_agent_dir() / PI_MODELS_FILENAME
+
+
+def pi_settings_path() -> Path:
+    """pi 的会话默认配置路径，可用 A4AGENT_PI_SETTINGS_PATH 覆盖。"""
+    override = env_first(PI_SETTINGS_CONFIG_ENV)
+    if override:
+        return Path(override)
+    return pi_agent_dir() / PI_SETTINGS_FILENAME
+
+
+def read_pi_models_config() -> dict:
+    """读取 pi models.json。"""
+    return _read_json_config(pi_models_config_path())
+
+
+def read_pi_settings() -> dict:
+    """读取 pi settings.json。"""
+    return _read_json_config(pi_settings_path())
+
+
+def backup_pi_configs() -> dict:
+    """修改前备份 pi 两份配置，返回 {models, settings} 各自备份路径（无原文件时 None）。"""
+    result: dict = {}
+    for key, path in (
+        ("models", pi_models_config_path()),
+        ("settings", pi_settings_path()),
+    ):
+        if not path.exists():
+            result[key] = None
+            continue
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest = backup_dir() / f"pi.{key}.{ts}.json.bak"
+        shutil.copy2(path, dest)
+        backups = sorted(backup_dir().glob(f"pi.{key}.*.json.bak"))
+        for old in backups[:-DEFAULT_BACKUP_KEEP]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+        result[key] = str(dest)
+    return result
+
+
+def atomic_write_pi_models_config(data: dict) -> None:
+    """原子写入 pi models.json。"""
+    _atomic_write_json(pi_models_config_path(), data, prefix=".pi.")
+
+
+def atomic_write_pi_settings(data: dict) -> None:
+    """原子写入 pi settings.json。"""
+    _atomic_write_json(pi_settings_path(), data, prefix=".pi.")
+
+
+def pi_api_kind(provider) -> str:
+    """服务商协议 → pi models.json 的 `api` 取值（pi 三种协议原生支持，直连免代理）。"""
+    if provider.api_type == "anthropic":
+        return PI_API_ANTHROPIC
+    if provider.native_responses:
+        return PI_API_OPENAI_RESPONSES
+    return PI_API_OPENAI
+
+
+def _pi_model_entry(models_config: dict | None, model: str, context_window=None) -> dict:
+    """目标模型在 pi 里的条目：复用已有同名模型的完整定义，否则只写 id 交 pi 兜默认值。
+
+    pi 的 schema 里 contextWindow / cost 等字段均可选，但缺省 contextWindow
+    按 128000 计——接本地 llama-server 时用户把 `-c` 调到 256k，pi 仍会按 128k
+    管理上下文，故传入 context_window 时补写该字段。已有条目只在「本工具托管的
+    provider」或原本就缺 contextWindow 时更新，避免改写用户在 pi 里手工调过的值。
+    """
+    found = None
+    from_managed = False
+    providers = (models_config or {}).get("providers")
+    if isinstance(providers, dict):
+        for pid, entry in providers.items():
+            if not isinstance(entry, dict):
+                continue
+            for item in entry.get("models") or []:
+                if isinstance(item, dict) and item.get("id") == model:
+                    found = copy.deepcopy(item)
+                    from_managed = str(pid).startswith(
+                        (A4AGENT_PROVIDER_PREFIX,) + LEGACY_PROVIDER_PREFIXES
+                    )
+                    break
+            if found is not None:
+                break
+    out = found if found is not None else {"id": model}
+    if context_window:
+        if found is None or from_managed or not out.get("contextWindow"):
+            out["contextWindow"] = int(context_window)
+    return out
+
+
+def build_pi_settings(
+    models_existing: dict | None,
+    settings_existing: dict | None,
+    provider,
+    api_key: str,
+    model: str,
+    context_window: int | None = None,
+) -> tuple[dict, dict]:
+    """基于 pi 现有两份配置生成切换后的内容，返回 (models_config, settings)。
+
+    provider 条目以 a4a_p<id> 托管（整体替换本工具旧条目，保留用户手工添加的
+    provider 与 models.json 其它顶层键）；settings 只改 defaultProvider /
+    defaultModel，其它键（theme / enabledSkills 等）原样保留。
+    context_window 由调用方在服务商是本地 llama-server 时给出（pi 侧的窗口
+    需与服务实际 `-c` 对齐）。
+    """
+    provider_key = f"{A4AGENT_PROVIDER_PREFIX}{provider.id}"
+    entry = {
+        "name": provider.name,
+        "baseUrl": provider.api_base,
+        "api": pi_api_kind(provider),
+        "apiKey": api_key,
+        "models": [_pi_model_entry(models_existing, model, context_window)],
+    }
+
+    models_config = dict(models_existing or {})
+    providers = dict(models_config.get("providers") or {})
+    for key in [k for k in providers if str(k).startswith((A4AGENT_PROVIDER_PREFIX,) + LEGACY_PROVIDER_PREFIXES)]:
+        providers.pop(key, None)
+    providers[provider_key] = entry
+    models_config["providers"] = providers
+
+    settings = dict(settings_existing or {})
+    settings["defaultProvider"] = provider_key
+    settings["defaultModel"] = model
+    return models_config, settings
+
+
+def read_pi_selection() -> tuple[str | None, str | None]:
+    """读取 pi 当前生效的 model 与 provider（settings.json）。"""
+    settings = read_pi_settings()
+    model = settings.get("defaultModel")
+    provider_id = settings.get("defaultProvider")
+    return (str(model) if model else None), (str(provider_id) if provider_id else None)
+
+
+# ---------------- Qoder（AI IDE）配置读写 ----------------
+# Qoder 只托管 Skill 与 MCP 两类配置文件，**不参与 API 服务商切换**：
+# 它的 BYOK / external-provider 数据全部落在 ~/.qoder/.models/<uid>/ 下，
+# 且内容经 Qoder 自带的 WASM 原生模块按机器码加密（catalog-v6 / customs /
+# external-providers/catalog-v12-*），算法专有且随版本变化，无法像其它端那样
+# 原子写明文配置。因此 target_list 里刻意不含 qoder。
+
+
+def qoder_home() -> Path:
+    """Qoder 配置目录：优先 A4AGENT_QODER_HOME，其次取实际存在的发行版目录。
+
+    目录名随发行版变化（国际版 .qoder / 国内版 .qoder-cn），故按候选名探测。
+    """
+    override = env_first(*QODER_HOME_ENV)
+    if override:
+        return Path(override)
+    for name in QODER_HOME_DIRNAMES:
+        candidate = Path.home() / name
+        if candidate.is_dir():
+            return candidate
+    return Path.home() / QODER_HOME_DIRNAMES[0]
+
+
+def qoder_skills_root() -> Path:
+    """Qoder 全局 skill 根（~/.qoder/skills），可用 A4AGENT_QODER_SKILLS_PATH 覆盖。"""
+    override = env_first(*QODER_SKILLS_CONFIG_ENV)
+    if override:
+        return Path(override)
+    return qoder_home() / "skills"

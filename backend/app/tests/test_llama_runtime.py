@@ -236,3 +236,42 @@ def test_log_ring(runtime):
     assert runtime.logs.after(5) == []
     runtime.logs.clear()
     assert runtime.logs.after(0) == []
+
+
+# ───────────────────────── pi 的上下文窗口提示 ─────────────────────────
+
+def test_served_context_for_only_matches_local_service(runtime, tmp_path, monkeypatch):
+    """只有方案确实指向本机当前 llama-server 与当前默认模型时，才给出窗口值。"""
+    model_path = tmp_path / "models" / "qwen-coder.Q4_K_M.gguf"
+    model_path.parent.mkdir(parents=True)
+    model_path.write_bytes(b"GGUF")
+    runtime.cfg.default_model_path = str(model_path)
+    runtime.cfg.port = 8080
+    runtime.cfg.host = "127.0.0.1"
+    runtime.cfg.infer.context_tokens = 262144
+    model = model_path.stem
+    local = f"http://127.0.0.1:{runtime.cfg.port}/v1"
+
+    assert runtime.served_context_for(local, model) == 262144
+    assert runtime.served_context_for(f"http://localhost:{runtime.cfg.port}/v1", model) == 262144
+    # 端口不符 / 远程服务商 / 别的模型 → 不给提示，pi 维持原有写法
+    assert runtime.served_context_for("http://127.0.0.1:9090/v1", model) is None
+    assert runtime.served_context_for("https://api.deepseek.com/anthropic", model) is None
+    assert runtime.served_context_for(local, "another-model") is None
+    # 未设默认模型
+    runtime.cfg.default_model_path = ""
+    assert runtime.served_context_for(local, model) is None
+
+
+def test_served_context_for_matches_lan_address(runtime, tmp_path, monkeypatch):
+    """监听 0.0.0.0 时，局域网地址同样被视为本机服务。"""
+    model_path = tmp_path / "qwen.gguf"
+    model_path.write_bytes(b"GGUF")
+    runtime.cfg.default_model_path = str(model_path)
+    runtime.cfg.port = 8080
+    runtime.cfg.host = "0.0.0.0"
+    runtime.cfg.infer.context_tokens = 131072
+    monkeypatch.setattr(rt_mod.lan, "get_best_ipv4", lambda: "192.168.1.20")
+
+    assert runtime.served_context_for("http://192.168.1.20:8080/v1", "qwen") == 131072
+    assert runtime.served_context_for("http://10.0.0.5:8080/v1", "qwen") is None

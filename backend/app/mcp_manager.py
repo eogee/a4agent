@@ -1,4 +1,4 @@
-"""MCP 四端（Claude Code / Codex / dsh / zcode）server 发现、迁移、回收站。
+"""MCP 六端（Claude Code / Codex / dsh / zcode / pi / Qoder）server 发现、迁移、回收站。
 
 与 skill_manager 同构的管理骨架，差异在 MCP 配置是「配置文件内的子结构」
 而非独立目录，因此：
@@ -7,11 +7,19 @@
   .mcp.json；codex 读写 config.toml 的 [mcp_servers.*] 子表；dsh 读写
   profiles/<profile>/cordis.patch.yml 中 @deepseek-ai/dsh-mcp-client 插件的
   insert 条目；zcode 读写 ~/.zcode/cli/config.json 与 <repo>/.zcode/config.json
-  的嵌套 mcp.servers（官方 schema 严格，只写规范键）。
+  的嵌套 mcp.servers（官方 schema 严格，只写规范键）；pi 读写
+  ~/.pi/agent/mcp.json 与 <repo>/.pi/mcp.json 顶层 mcpServers（与 claude
+  同构，额外有 exposure/toolExposure/enabled/timeout/auth 等自有键，需原样
+  保留）；Qoder 读写 ~/.qoder/mcp.json 顶层 mcpServers（与 claude 同构，
+  额外有 disabled/timeout/authType 等自有键，需原样保留），项目级不托管——
+  Qoder 的项目级 MCP 与 Claude Code 共用同一个 <repo>/.mcp.json，由 claude
+  端一次写入即两端同时生效。
 - 归一 schema（迁移中枢）：{ name, transport, command, args, env, url,
   headers, cwd, ... }，transport ∈ {stdio, sse, http}。
 - 传输能力矩阵：claude 支持 stdio/sse/http；codex 仅 stdio；dsh 支持
-  stdio 与 streamable-http（归一 http）；zcode 支持 stdio/sse/http。
+  stdio 与 streamable-http（归一 http）；zcode 支持 stdio/sse/http；
+  pi 支持 stdio 与 streamable-http，且明确拒绝 sse；
+  Qoder 支持 stdio/sse/http（streamable-http 归一为 http）。
   不可转换的组合整对失败并留日志，不静默降级。
 - 安全：discover / content 响应中 env / headers 一律脱敏（只回键名）；
   迁移时从源配置文件直读明文写目标文件，API 永不回传明文；回收站快照中
@@ -41,14 +49,25 @@ except ModuleNotFoundError:  # Python 3.10
 
 logger = logging.getLogger(__name__)
 
-TOOLS = ("claude", "codex", "dsh", "zcode")
-TOOL_LABELS = {"claude": "Claude", "codex": "Codex", "dsh": "dsh", "zcode": "ZCode"}
+TOOLS = ("claude", "codex", "dsh", "zcode", "pi", "qoder")
+TOOL_LABELS = {
+    "claude": "Claude",
+    "codex": "Codex",
+    "dsh": "dsh",
+    "zcode": "ZCode",
+    "pi": "pi",
+    "qoder": "Qoder",
+}
 TRASH_DIR_NAME = "mcp_recycle"
 TRASH_KEEP_DAYS = 30
 BACKUP_KEEP = 5
 
 DSH_MCP_CLIENT_PLUGIN = "@deepseek-ai/dsh-mcp-client"
 DSH_MCP_ENTRY_PREFIX = "mcp-"
+# pi 的 server 名约束：仅字母数字与 _ -（含中文/点号的名字会被 pi 判为非法条目）
+PI_SERVER_NAME_CHARS = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+)
 
 # 传输能力矩阵：目标端可接收的 transport 集合
 TRANSPORT_CAPABILITY = {
@@ -56,15 +75,22 @@ TRANSPORT_CAPABILITY = {
     "codex": {"stdio"},
     "dsh": {"stdio", "http"},  # dsh 的 http 写回为 streamable-http
     "zcode": {"stdio", "sse", "http"},  # 官方 schema 明确支持三种传输
+    "pi": {"stdio", "http"},  # pi 明确拒绝 legacy SSE，只认 stdio / streamable HTTP
+    "qoder": {"stdio", "sse", "http"},  # 与 claude 同构，三种传输都认
 }
 
 # dsh 项目级不支持（cordis 配置为全局 profile 层）；zcode 项目级支持
-# （<repo>/.zcode/config.json → mcp.servers）
+# （<repo>/.zcode/config.json → mcp.servers）；pi 项目级支持
+# （<repo>/.pi/mcp.json，且仅在该项目被信任时生效）；Qoder 只托管全局
+# ~/.qoder/mcp.json —— 它的「项目级」读的就是 Claude Code 的
+# <repo>/.mcp.json，同一文件被两端各管一次会互相踩写，故项目级归 claude 端
 DASH_SCOPE_CAPABILITY = {
     "claude": ("global", "project"),
     "codex": ("global", "project"),
     "dsh": ("global",),
     "zcode": ("global", "project"),
+    "pi": ("global", "project"),
+    "qoder": ("global",),
 }
 
 # ---------------- MCP 简介知识库 ----------------
@@ -274,6 +300,35 @@ def zcode_project_mcp_path(project_root: Path) -> Path:
     return project_root / ".zcode" / "config.json"
 
 
+def pi_mcp_path() -> Path:
+    """pi 用户级 MCP 配置：~/.pi/agent/mcp.json 顶层 mcpServers。
+
+    复用 config_manager 的 A4AGENT_PI_AGENT_DIR / PI_CODING_AGENT_DIR 覆盖，
+    另有 A4AGENT_PI_MCP_PATH 可单独指向别处（测试与非标准安装用）。
+    """
+    override = os.environ.get("A4AGENT_PI_MCP_PATH")
+    if override:
+        return Path(override)
+    return config_manager.pi_agent_dir() / "mcp.json"
+
+
+def pi_project_mcp_path(project_root: Path) -> Path:
+    """pi 项目级 MCP 配置：<项目>/.pi/mcp.json（项目被信任时生效）。"""
+    return project_root / ".pi" / "mcp.json"
+
+
+def qoder_mcp_path() -> Path:
+    """Qoder 用户级 MCP 配置：~/.qoder/mcp.json 顶层 mcpServers。
+
+    复用 config_manager 的 A4AGENT_QODER_HOME 目录探测，另有
+    A4AGENT_QODER_MCP_PATH 可单独指向别处（测试用）。
+    """
+    override = os.environ.get("A4AGENT_QODER_MCP_PATH")
+    if override:
+        return Path(override)
+    return config_manager.qoder_home() / "mcp.json"
+
+
 def mcp_config_file(scope: str, tool: str, project: str | None) -> Path:
     """(scope, tool, project) → 配置文件路径；未知组合抛 ValueError。"""
     if scope == "global":
@@ -285,6 +340,10 @@ def mcp_config_file(scope: str, tool: str, project: str | None) -> Path:
             return dsh_mcp_patch_path()
         if tool == "zcode":
             return zcode_mcp_path()
+        if tool == "pi":
+            return pi_mcp_path()
+        if tool == "qoder":
+            return qoder_mcp_path()
     if scope == "project":
         if not project:
             raise ValueError("项目级位置缺少项目名")
@@ -301,6 +360,8 @@ def mcp_config_file(scope: str, tool: str, project: str | None) -> Path:
             return codex_project_mcp_path(root)
         if tool == "zcode":
             return zcode_project_mcp_path(root)
+        if tool == "pi":
+            return pi_project_mcp_path(root)
         raise ValueError(f"{TOOL_LABELS[tool]} 端不支持项目级 MCP 配置")
     raise ValueError(f"未知 scope：{scope}")
 
@@ -530,6 +591,149 @@ def render_zcode(server: dict) -> dict:
     return out
 
 
+# pi 的 mcp.json 与 claude 同构（顶层 mcpServers），额外有 pi 自有的键：
+# 这些键决定工具如何暴露给模型，任何一次「装/删/迁移」都会整表重写，
+# 因此必须无损读回并原样写回，否则会把用户调好的 exposure 配置抹平。
+PI_SERVER_OWNED_KEYS = (
+    "type",
+    "command",
+    "args",
+    "env",
+    "url",
+    "headers",
+    "cwd",
+    "description",
+)
+
+
+def normalize_pi(name: str, raw: dict, path: Path, tool: str, scope: str, project: str | None) -> dict:
+    """pi mcpServers 条目归一：streamable-http 记为 http，其余非规范键进 extra 原样保留。"""
+    typ = str(raw.get("type") or "").lower()
+    if typ == "streamable-http":
+        typ = "http"
+    if typ not in ("stdio", "sse", "http"):
+        typ = "http" if raw.get("url") else "stdio"
+    server = {
+        "name": name,
+        "transport": typ,
+        "command": raw.get("command"),
+        "args": list(raw.get("args") or []),
+        "env": dict(raw.get("env") or {}),
+        "url": raw.get("url"),
+        "headers": dict(raw.get("headers") or {}) if isinstance(raw.get("headers"), dict) else {},
+        "cwd": raw.get("cwd"),
+        "description": str(raw.get("description") or "").strip(),
+        "tool": tool,
+        "scope": scope,
+        "project": project,
+        "path": str(path),
+        "extra": {k: v for k, v in raw.items() if k not in PI_SERVER_OWNED_KEYS},
+    }
+    return server
+
+
+def render_pi(server: dict) -> dict:
+    """输出 pi 的 server 条目：stdio 写 command/args/env/cwd，HTTP 写 url/headers；
+    传输靠 command / url 的存在与否被 pi 推断，不写 type（pi 对 streamable HTTP
+    认 url 即可）。项目级文件不允许 auth（pi 会拒绝该条目），写项目时剔除。"""
+    out: dict = dict(server.get("extra") or {})
+    if server["transport"] == "stdio":
+        if server.get("command"):
+            out["command"] = _portable_command(server["command"])
+        if server.get("args"):
+            out["args"] = list(server["args"])
+        if server.get("env"):
+            out["env"] = dict(server["env"])
+        if server.get("cwd"):
+            out["cwd"] = server["cwd"]
+    else:  # http（sse 已被能力矩阵挡在门外）
+        if server.get("url"):
+            out["url"] = server["url"]
+        if server.get("headers"):
+            out["headers"] = dict(server["headers"])
+    if server.get("description"):
+        out["description"] = server["description"]
+    if server.get("scope") == "project" and "auth" in out:
+        out.pop("auth", None)
+        logger.warning("pi 项目级配置不支持 auth，写入「%s」时已剔除该键", server.get("name"))
+    return out
+
+
+def check_pi_server_name(name: str) -> None:
+    """pi 只认字母/数字/_/- 的 server 名，其它字符（如中文、点号）会被 pi 判废。"""
+    if not set(str(name)) <= PI_SERVER_NAME_CHARS:
+        raise ValueError(
+            f"pi 端 server 名只允许字母、数字、下划线与连字符，「{name}」无法写入；"
+            "请先在源端改名，或在 pi 端手工安装"
+        )
+
+
+# Qoder 的 mcp.json 与 Claude Code 同构（顶层 mcpServers），自有键是
+# disabled / timeout / authType / legacySseFallback / environment：
+# disabled 是用户在 Qoder 界面里关掉某个 server 的开关，重写整表时必须
+# 无损读回并原样写回，否则一迁移就把用户的停用状态清掉了。
+QODER_SERVER_OWNED_KEYS = (
+    "type",
+    "command",
+    "args",
+    "env",
+    "url",
+    "headers",
+    "cwd",
+    "description",
+)
+
+
+def normalize_qoder(name: str, raw: dict, path: Path, tool: str, scope: str, project: str | None) -> dict:
+    """Qoder mcpServers 条目归一：streamable-http 记为 http，非规范键进 extra 原样保留。"""
+    typ = str(raw.get("type") or "").lower().replace("streamablehttp", "streamable-http")
+    if typ == "streamable-http":
+        typ = "http"
+    if typ not in ("stdio", "sse", "http"):
+        typ = "http" if raw.get("url") else "stdio"
+    server = {
+        "name": name,
+        "transport": typ,
+        "command": raw.get("command"),
+        "args": list(raw.get("args") or []),
+        "env": dict(raw.get("env") or {}),
+        "url": raw.get("url"),
+        "headers": dict(raw.get("headers") or {}) if isinstance(raw.get("headers"), dict) else {},
+        "cwd": raw.get("cwd"),
+        "description": str(raw.get("description") or "").strip(),
+        "tool": tool,
+        "scope": scope,
+        "project": project,
+        "path": str(path),
+        "extra": {k: v for k, v in raw.items() if k not in QODER_SERVER_OWNED_KEYS},
+    }
+    return server
+
+
+def render_qoder(server: dict) -> dict:
+    """输出 Qoder 的 server 条目：写规范 type（stdio/sse/http）+ 对应字段，
+    并保留 normalize_qoder 收进 extra 的 Qoder 自有键。"""
+    out: dict = dict(server.get("extra") or {})
+    out["type"] = server["transport"]
+    if server["transport"] == "stdio":
+        if server.get("command"):
+            out["command"] = _portable_command(server["command"])
+        if server.get("args"):
+            out["args"] = list(server["args"])
+        if server.get("env"):
+            out["env"] = dict(server["env"])
+        if server.get("cwd"):
+            out["cwd"] = server["cwd"]
+    else:  # sse / http
+        if server.get("url"):
+            out["url"] = server["url"]
+        if server.get("headers"):
+            out["headers"] = dict(server["headers"])
+    if server.get("description"):
+        out["description"] = server["description"]
+    return out
+
+
 # ---------------- 读取 ----------------
 
 
@@ -639,6 +843,52 @@ def read_zcode_servers(path: Path, tool: str = "zcode", scope: str = "global", p
     return servers
 
 
+def read_pi_servers(path: Path, tool: str = "pi", scope: str = "global", project: str | None = None) -> list[dict]:
+    """读取 pi mcp.json 顶层 mcpServers（结构与 claude 一致，归一走 normalize_pi 以保留 pi 自有键）。"""
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as e:
+        logger.warning("读取 %s 失败：%s", path, e)
+        return []
+    mcp = data.get("mcpServers") if isinstance(data, dict) else None
+    if not isinstance(mcp, dict):
+        return []
+    servers = []
+    for name, raw in mcp.items():
+        if not isinstance(raw, dict):
+            continue
+        try:
+            servers.append(normalize_pi(str(name), raw, path, tool, scope, project))
+        except Exception:
+            continue
+    return servers
+
+
+def read_qoder_servers(path: Path, tool: str = "qoder", scope: str = "global", project: str | None = None) -> list[dict]:
+    """读取 ~/.qoder/mcp.json 顶层 mcpServers（与 claude 同构，归一走 normalize_qoder 以保留 disabled 等自有键）。"""
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as e:
+        logger.warning("读取 %s 失败：%s", path, e)
+        return []
+    mcp = data.get("mcpServers") if isinstance(data, dict) else None
+    if not isinstance(mcp, dict):
+        return []
+    servers = []
+    for name, raw in mcp.items():
+        if not isinstance(raw, dict):
+            continue
+        try:
+            servers.append(normalize_qoder(str(name), raw, path, tool, scope, project))
+        except Exception:
+            continue
+    return servers
+
+
 def read_servers(scope: str, tool: str, project: str | None = None) -> list[dict]:
     """从指定位置读取归一 server 列表（文件不存在返回空）。"""
     path = mcp_config_file(scope, tool, project)
@@ -648,6 +898,10 @@ def read_servers(scope: str, tool: str, project: str | None = None) -> list[dict
         return read_codex_servers(path, tool, scope, project)
     if tool == "zcode":
         return read_zcode_servers(path, tool, scope, project)
+    if tool == "pi":
+        return read_pi_servers(path, tool, scope, project)
+    if tool == "qoder":
+        return read_qoder_servers(path, tool, scope, project)
     return read_dsh_servers(path, tool, scope, project)
 
 
@@ -760,6 +1014,38 @@ def _write_zcode(path: Path, servers: list[dict]) -> None:
     _atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2))
 
 
+def _write_pi(path: Path, servers: list[dict]) -> None:
+    """重写 pi 的 mcp.json：只换 mcpServers，autoEnableCodemode 等顶层键原样保留。"""
+    data: dict = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8-sig"))
+            if isinstance(loaded, dict):
+                data = loaded
+        except (OSError, ValueError) as e:
+            raise ValueError(f"读取 {path} 失败，已中止写入：{e}")
+    data["mcpServers"] = {s["name"]: render_pi(s) for s in servers}
+    _atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def _write_qoder(path: Path, servers: list[dict]) -> None:
+    """重写 Qoder 的 mcp.json：只换 mcpServers，其余顶层键原样保留。
+
+    Qoder 自身也在写这个文件（界面里的连接器开关会改 disabled），因此读取
+    失败时必须中止，不能按空配置重建——那会把用户已启用的 server 全清掉。
+    """
+    data: dict = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8-sig"))
+            if isinstance(loaded, dict):
+                data = loaded
+        except (OSError, ValueError) as e:
+            raise ValueError(f"读取 {path} 失败，已中止写入：{e}")
+    data["mcpServers"] = {s["name"]: render_qoder(s) for s in servers}
+    _atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2))
+
+
 def write_servers(scope: str, tool: str, project: str | None, servers: list[dict]) -> Path:
     """把归一 server 列表写回指定位置（先备份），返回配置文件路径。"""
     path = mcp_config_file(scope, tool, project)
@@ -770,8 +1056,16 @@ def write_servers(scope: str, tool: str, project: str | None, servers: list[dict
         _write_codex(path, servers)
     elif tool == "zcode":
         _write_zcode(path, servers)
-    else:
+    elif tool == "pi":
+        _write_pi(path, servers)
+    elif tool == "qoder":
+        _write_qoder(path, servers)
+    elif tool == "dsh":
         _write_dsh(path, servers)
+    else:
+        # 未知端过去会静默落到 _write_dsh，把配置写进 dsh 的 patch 文件；
+        # 加新端时若忘了接 adapter，必须在这里明确失败。
+        raise ValueError(f"未知的 MCP 配置端：{tool}")
     return path
 
 
@@ -871,7 +1165,7 @@ def _mask_server(server: dict) -> dict:
 
 
 def discover() -> dict:
-    """全量发现：全局四端 + 各项目（claude/codex/zcode），按 name 聚合。"""
+    """全量发现：全局六端 + 各项目（claude/codex/zcode/pi），按 name 聚合。"""
     custom = load_mcp_descriptions()
     global_entries: list[dict] = []
     for tool in TOOLS:
@@ -883,7 +1177,7 @@ def discover() -> dict:
     projects_out = []
     for proj in project_dirs():
         entries: list[dict] = []
-        for tool in ("claude", "codex", "zcode"):
+        for tool in ("claude", "codex", "zcode", "pi"):
             entries.extend(read_servers("project", tool, proj["project"]))
         if not entries:
             continue
@@ -903,6 +1197,8 @@ def discover() -> dict:
             "codex": str(codex_mcp_path()),
             "dsh": str(dsh_mcp_patch_path()),
             "zcode": str(zcode_mcp_path()),
+            "pi": str(pi_mcp_path()),
+            "qoder": str(qoder_mcp_path()),
         },
         "project_roots": load_project_roots(),
         "capability": {tool: sorted(list(transports)) for tool, transports in TRANSPORT_CAPABILITY.items()},
@@ -1195,13 +1491,15 @@ def create_server(scope: str, tool: str, project: str | None, fields: dict) -> d
         raise ValueError(f"未知工具：{tool}")
     if scope not in ("global", "project"):
         raise ValueError(f"未知 scope：{scope}")
-    if scope == "project" and tool == "dsh":
-        raise ValueError("dsh 端不支持项目级 MCP 配置")
+    if scope == "project" and "project" not in DASH_SCOPE_CAPABILITY[tool]:
+        raise ValueError(f"{TOOL_LABELS[tool]} 端不支持项目级 MCP 配置")
     path = mcp_config_file(scope, tool, project)  # 位置合法性由该函数兜底
 
     name = str(fields.get("name") or "").strip()
     if not name:
         raise ValueError("缺少 MCP server 名称")
+    if tool == "pi":
+        check_pi_server_name(name)
     transport = str(fields.get("transport") or "stdio").lower()
     if transport not in TRANSPORT_CAPABILITY[tool]:
         raise ValueError(f"{TOOL_LABELS[tool]} 端不支持 {transport} 传输")
@@ -1280,8 +1578,8 @@ def migrate(db, sources: list[dict], targets: list[dict]) -> dict:
                 raise ValueError(f"未知工具：{t_tool}")
             if t_scope not in ("global", "project"):
                 raise ValueError(f"未知 scope：{t_scope}")
-            if t_tool == "dsh" and t_scope == "project":
-                raise ValueError("dsh 端不支持项目级 MCP 配置")
+            if t_scope == "project" and "project" not in DASH_SCOPE_CAPABILITY.get(t_tool, ()):
+                raise ValueError(f"{TOOL_LABELS[t_tool]} 端不支持项目级 MCP 配置")
             dest_key = ("global", t_tool, "") if t_scope == "global" else ("project", t_tool, t_project or "")
             target_label = (
                 f"全局 · {TOOL_LABELS[t_tool]}"
@@ -1329,9 +1627,13 @@ def migrate(db, sources: list[dict], targets: list[dict]) -> dict:
                         + (
                             "（dsh 仅支持 stdio / streamable-http）"
                             if t_tool == "dsh" and server["transport"] == "sse"
+                            else "（pi 仅支持 stdio / streamable-http，不认 legacy SSE）"
+                            if t_tool == "pi" and server["transport"] == "sse"
                             else ""
                         )
                     )
+                if t_tool == "pi":
+                    check_pi_server_name(s_name)
                 # 目标端同名 server 先快照进回收站
                 target_servers = read_servers(t_scope, t_tool, t_project)
                 conflicts_in = [

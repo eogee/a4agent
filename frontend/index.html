@@ -27,6 +27,7 @@
       <span class="proxy-label" id="proxy-label">代理服务</span>
       <input type="checkbox" id="proxy-switch" lay-skin="switch" lay-filter="proxy-switch" disabled>
       <a href="javascript:;" class="update-link" id="btn-check-update">检查更新</a>
+      <a href="javascript:;" class="update-link" id="btn-quit" title="退出 a4agent（关窗只是转入后台）">退出</a>
       <button class="layui-btn layui-btn-normal" id="btn-add">新增配置</button>
     </div>
   </div>
@@ -39,6 +40,7 @@
         <li lay-id="skills">技能管理</li>
         <li lay-id="mcp">MCP 管理</li>
         <li lay-id="llama">本地模型</li>
+        <li lay-id="tasks">任务下发</li>
       </ul>
       <div class="layui-tab-content">
         <div class="layui-tab-item layui-show">
@@ -61,6 +63,13 @@
               <button class="seg-btn seg-active" data-view="global">全局视图</button>
               <button class="seg-btn" data-view="project">项目视图</button>
             </div>
+            <div class="list-search">
+              <input type="text" id="skills-search" class="layui-input" placeholder="搜索技能名称或描述" autocomplete="off">
+              <button type="button" class="list-search-clear" id="skills-search-clear" title="清空" aria-label="清空搜索">
+                <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>
+              </button>
+              <svg class="list-search-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="6.8" cy="6.8" r="4.6"/><path d="M10.4 10.4L14 14"/></svg>
+            </div>
             <div class="skills-header-actions">
               <a href="javascript:;" class="update-link" id="btn-skills-roots">项目根目录</a>
               <a href="javascript:;" class="update-link" id="btn-skills-migrations">迁移日志</a>
@@ -78,6 +87,13 @@
               <button class="seg-btn seg-active" data-view="global">全局视图</button>
               <button class="seg-btn" data-view="project">项目视图</button>
             </div>
+            <div class="list-search">
+              <input type="text" id="mcp-search" class="layui-input" placeholder="搜索 MCP 名称或描述" autocomplete="off">
+              <button type="button" class="list-search-clear" id="mcp-search-clear" title="清空" aria-label="清空搜索">
+                <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>
+              </button>
+              <svg class="list-search-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="6.8" cy="6.8" r="4.6"/><path d="M10.4 10.4L14 14"/></svg>
+            </div>
             <div class="skills-header-actions">
               <a href="javascript:;" class="update-link" id="btn-mcp-migrations">迁移日志</a>
               <button class="layui-btn layui-btn-sm" id="btn-mcp-trash">回收站</button>
@@ -91,6 +107,11 @@
         </div>
         <div class="layui-tab-item">
           <div id="llama-content">
+            <div class="empty-tip">加载中…</div>
+          </div>
+        </div>
+        <div class="layui-tab-item">
+          <div id="tasks-content">
             <div class="empty-tip">加载中…</div>
           </div>
         </div>
@@ -132,5 +153,6 @@
   <script src="js/markdown.js"></script>
   <script src="js/app.js?v=20260924"></script>
   <script src="js/llama.js?v=20260924"></script>
+  <script src="js/tasks.js?v=20261006a"></script>
 </body>
 </html>

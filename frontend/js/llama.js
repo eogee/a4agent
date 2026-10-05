@@ -373,21 +373,51 @@ layui.use(['layer', 'form', 'element'], function () {
     }).catch(function () { });
   }
 
+  /* 接入配置方案：勾选要写入的应用（本地服务讲 OpenAI Chat Completions，
+   * Claude Code / Codex / dsh 经本地翻译代理，ZCode 与 pi 直连） */
+  var INTEGRATE_TARGETS = [
+    { key: 'claude', label: 'Claude Code', on: true },
+    { key: 'codex', label: 'Codex', on: false },
+    { key: 'dsh', label: 'dsh', on: false },
+    { key: 'zcode', label: 'ZCode', on: false },
+    { key: 'pi', label: 'pi', on: false }
+  ];
+
   function integrateToConfig() {
     var s = lastStatus;
     if (!s || !s.default_model_path) {
       layer.msg('请先在模型库中设置默认模型', { icon: 0 });
       return;
     }
-    layer.confirm(
-      '将创建（或更新）一个指向本地 llama-server 的配置方案，模型为当前默认模型。创建后到「配置方案」页点击切换即可让 Claude Code 使用本地模型。',
-      { title: '接入配置方案' },
-      function (index) {
-        layer.close(index);
-        apiSend('/integrate', 'POST', { targets: 'claude', activate: false }).then(function (r) {
+    var boxes = INTEGRATE_TARGETS.map(function (t) {
+      return '<input type="checkbox" name="it_' + t.key + '" title="' + t.label +
+        '" lay-skin="primary"' + (t.on ? ' checked' : '') + '>';
+    }).join('');
+    layer.open({
+      type: 1,
+      title: '接入配置方案',
+      area: ['440px', 'auto'],
+      content: '<div class="layui-form" lay-filter="llama-integrate" style="padding:20px 24px;">' +
+        '<p style="font-size:14px;margin-bottom:12px;">将创建（或更新）一个指向本地 llama-server 的配置方案，' +
+        '模型为当前默认模型，并写入勾选的应用：</p>' +
+        '<div class="target-checkboxes">' + boxes + '</div>' +
+        '<p style="font-size:12px;color:#8a8e94;margin-top:12px;">' +
+        '本地服务讲 OpenAI Chat Completions：Claude Code / Codex / dsh 经本地翻译代理，ZCode 与 pi 直连。</p>' +
+        '</div>',
+      btn: ['接入', '取消'],
+      success: function () { form.render('checkbox', 'llama-integrate'); },
+      yes: function (index) {
+        var picked = INTEGRATE_TARGETS.filter(function (t) {
+          var el = document.querySelector('input[name="it_' + t.key + '"]');
+          return el && el.checked;
+        }).map(function (t) { return t.key; });
+        if (!picked.length) { layer.msg('请至少选择一个应用', { icon: 2 }); return; }
+        apiSend('/integrate', 'POST', { targets: picked.join(','), activate: false }).then(function (r) {
+          layer.close(index);
           layer.msg(r.activated ? '已创建并切换' : '已创建配置方案，请到「配置方案」页切换生效', { icon: 1, time: 2500 });
         }).catch(function (e) { layer.msg(e.message, { icon: 2 }); });
-      });
+      }
+    });
   }
 
   /* ---------- 推理设置 ---------- */

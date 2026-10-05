@@ -155,3 +155,27 @@ class FeedbackImage(Base):
     filename = Column(String(200), default="")
     mime = Column(String(50), default="image/png")
     data = Column(LargeBinary, nullable=False)
+
+
+class AgentTask(Base):
+    """无头任务：下发即入库，后台线程执行，产出落文件（路径见 output_path）。"""
+
+    __tablename__ = "agent_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    prompt = Column(Text, nullable=False)
+    tool = Column(String(20), nullable=False)  # 无头引擎 pi / dsh
+    working_dir = Column(String(500), default="")
+    timeout_seconds = Column(Integer, default=600)
+    # pending / running / success / failed / timeout / cancelled / precheck_failed
+    status = Column(String(20), nullable=False, default="pending")
+    config_id = Column(Integer, nullable=True)  # 下发时生效的配置方案
+    model = Column(String(100), default="")
+    exit_code = Column(Integer, nullable=True)
+    error_summary = Column(Text, default="")
+    output_path = Column(String(500), default="")
+    precheck_result = Column(Text, default="")  # 预检明细 JSON（步骤/耗时/失败原因）
+    precheck_ms = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)

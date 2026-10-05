@@ -1,9 +1,9 @@
-"""Skill 管理：四端（Claude Code / Codex / dsh / zcode）skill 发现、迁移、回收站。
+"""Skill 管理：六端（Claude Code / Codex / dsh / zcode / pi / Qoder）skill 发现、迁移、回收站。
 
-四端均采用「<skill-name>/SKILL.md 目录 bundle + frontmatter（name/description）」
+六端均采用「<skill-name>/SKILL.md 目录 bundle + frontmatter（name/description）」
 格式，因此迁移即目录复制。本模块职责：
 
-- 路径解析：四端全局根（含 A4AGENT_*_SKILLS_PATH 环境变量覆盖）+ 可配置项目根
+- 路径解析：六端全局根（含 A4AGENT_*_SKILLS_PATH 环境变量覆盖）+ 可配置项目根
   列表下的项目级根；项目根列表持久化到 get_data_dir()/projects.json。
 - 发现：扫描各根下的 skill bundle，以 frontmatter name 为唯一标识做聚合与
   重复标注（「已在 N 端存在」）；Codex 全局根的保留目录 .system/ 等点开头
@@ -16,6 +16,7 @@
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 from datetime import datetime, timedelta
@@ -29,8 +30,15 @@ from .env_compat import env_first
 
 logger = logging.getLogger(__name__)
 
-TOOLS = ("claude", "codex", "dsh", "zcode")
-TOOL_LABELS = {"claude": "Claude", "codex": "Codex", "dsh": "dsh", "zcode": "ZCode"}
+TOOLS = ("claude", "codex", "dsh", "zcode", "pi", "qoder")
+TOOL_LABELS = {
+    "claude": "Claude",
+    "codex": "Codex",
+    "dsh": "dsh",
+    "zcode": "ZCode",
+    "pi": "pi",
+    "qoder": "Qoder",
+}
 SKILL_FILE = "SKILL.md"
 TRASH_DIR_NAME = "skills_recycle"
 TRASH_KEEP_DAYS = 30
@@ -77,13 +85,34 @@ def zcode_skills_root() -> Path:
     return Path.home() / ".zcode" / "skills"
 
 
+def pi_skills_root() -> Path:
+    """pi 全局 skill 根，可用环境变量 A4AGENT_PI_SKILLS_PATH 覆盖。
+
+    pi 的发现路径是 agent 目录下的 skills（默认 ~/.pi/agent/skills，而不是
+    ~/.pi/skills），项目级仍是通用的 <项目>/.pi/skills。
+    """
+    return config_manager.pi_skills_root()
+
+
+def qoder_skills_root() -> Path:
+    """Qoder 全局 skill 根，可用环境变量 A4AGENT_QODER_SKILLS_PATH 覆盖。
+
+    Qoder 同时扫描跨工具目录 ~/.agents/skills，但本工具统一托管到
+    ~/.qoder/skills（它优先级更高，且与其它端的 .{tool}/skills 约定一致，
+    项目级 <项目>/.qoder/skills 因此无需任何特判）。
+    """
+    return config_manager.qoder_skills_root()
+
+
 def global_skill_roots() -> dict:
-    """四端全局 skill 根映射 {tool: Path}。"""
+    """六端全局 skill 根映射 {tool: Path}。"""
     return {
         "claude": claude_skills_root(),
         "codex": codex_skills_root(),
         "dsh": dsh_skills_root(),
         "zcode": zcode_skills_root(),
+        "pi": pi_skills_root(),
+        "qoder": qoder_skills_root(),
     }
 
 
@@ -218,6 +247,38 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
     except yaml.YAMLError:
         return {}, body
     return (data if isinstance(data, dict) else {}), body
+
+
+# pi 对 skill 的校验比其它端严格：name 只认小写字母/数字/连字符（≤64，不得
+# 以连字符首尾或含连续连字符），description 必填且 ≤1024，不合规的条目 pi 直接
+# 不加载。迁到 pi 后按 pi 的规则复查一次，否则界面「迁移成功」但 pi 里找不到。
+PI_SKILL_NAME_MAX = 64
+PI_SKILL_DESC_MAX = 1024
+
+
+def pi_skill_notice(skill_dir: Path) -> str:
+    """返回该 skill 在 pi 端不会被加载的原因（多条以 ； 分隔）；合规时返回空串。"""
+    md = skill_dir / SKILL_FILE
+    if not md.exists():
+        return ""
+    try:
+        meta, _ = parse_frontmatter(md.read_text(encoding="utf-8-sig"))
+    except OSError:
+        return ""
+    problems: list[str] = []
+    name = str(meta.get("name") or skill_dir.name)
+    if not re.fullmatch(r"[a-z0-9-]+", name):
+        problems.append(f"pi 只认小写字母、数字与连字符的技能名，「{name}」不合规")
+    elif len(name) > PI_SKILL_NAME_MAX:
+        problems.append(f"技能名超过 pi 上限 {PI_SKILL_NAME_MAX} 字符（{len(name)}）")
+    elif name.startswith("-") or name.endswith("-") or "--" in name:
+        problems.append(f"技能名「{name}」不得以连字符开头/结尾或含连续连字符")
+    desc = meta.get("description")
+    if not (isinstance(desc, str) and desc.strip()):
+        problems.append("pi 要求 frontmatter 有非空 description")
+    elif len(desc) > PI_SKILL_DESC_MAX:
+        problems.append(f"description 超过 pi 上限 {PI_SKILL_DESC_MAX} 字符（{len(desc)}）")
+    return "；".join(problems)
 
 
 def read_skill(skill_dir: Path, full: bool = False) -> dict | None:
@@ -757,6 +818,10 @@ def migrate(db, sources: list[dict], targets: list[dict]) -> dict:
                 detail = f"已复制到 {dest}"
                 if trashed:
                     detail += f"；目标端旧版 {trashed} 份已移入回收站"
+                if t_tool == "pi":
+                    notice = pi_skill_notice(dest)
+                    if notice:
+                        detail += f"；⚠ pi 不会加载该 skill：{notice}"
                 db.add(models.SkillMigration(**base, status="success", detail=detail))
                 results.append(
                     {

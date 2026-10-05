@@ -7,6 +7,7 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
+from urllib.parse import urlparse
 
 from . import catalog, downloader, gguf, gpu, lan, presets, server
 from .config import (LlamaConfig, ModelEntry, default_engine_dir,
@@ -287,6 +288,27 @@ class LlamaRuntime:
             "download_progress": dl,
             "gpu": best_gpu.to_dict() if best_gpu else None,
         }
+
+    def served_context_for(self, api_base: str, model: str) -> int | None:
+        """方案确实指向本机当前 llama-server 时，返回服务实际的上下文窗口。
+
+        供 pi 写模型条目的 contextWindow 用：pi 缺省按 128000 计，用户在推理设置
+        里把 `-c` 调到 256k 后，若不同步给 pi，pi 会提前截断上下文。
+        """
+        cfg = self.cfg
+        if not cfg.default_model_path:
+            return None
+        if model != Path(cfg.default_model_path).stem:
+            return None
+        endpoints = {(h, int(cfg.port)) for h in ("127.0.0.1", "localhost")}
+        if cfg.host in ("0.0.0.0", "::"):
+            lan_ip = lan.get_best_ipv4()
+            if lan_ip:
+                endpoints.add((lan_ip, int(cfg.port)))
+        parsed = urlparse(str(api_base or ""))
+        if parsed.scheme != "http" or (parsed.hostname, parsed.port) not in endpoints:
+            return None
+        return int(cfg.infer.context_tokens) or None
 
     def connect(self) -> dict:
         """接入页：Base URL、Chat 地址、System One 决策端点、模型名、局域网地址与调用示例。"""

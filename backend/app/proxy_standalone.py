@@ -116,6 +116,24 @@ def _proxy_compatible(port) -> bool:
     )
 
 
+def _token_owner_ok(st: dict) -> bool:
+    """端口属主必须就是写这份状态文件的进程。
+
+    否则 token 是「上一个还占着端口的代理进程」留下的：新进程写文件、旧进程占端口
+    时（升级/崩溃后的孤儿），端口活着、版本兼容，但客户端拿这个 token 去请求必然
+    401 invalid bearer token —— 而 is_proxy_running() 报的却是运行中。
+    反查不到属主（权限不足等）时不误杀，维持原判定。
+    """
+    owner = _port_owner_pid(st.get("port"))
+    file_pid = st.get("pid")
+    if owner is None or not file_pid:
+        return True
+    try:
+        return int(owner) == int(file_pid)
+    except (TypeError, ValueError):
+        return True
+
+
 def _kill_owner(port) -> None:
     """强制结束占用指定端口的进程（旧代理重启前清理）。"""
     pid = _port_owner_pid(port)
@@ -183,13 +201,14 @@ def ensure_proxy_running() -> dict:
         try:
             st = json.loads(status_file.read_text(encoding="utf-8"))
             if _port_alive(st.get("port")) and st.get("token"):
-                if _proxy_compatible(st.get("port")):
+                if _proxy_compatible(st.get("port")) and _token_owner_ok(st):
                     _refresh_upstream(st.get("port"))
                     return {
                         "base_url": f"http://127.0.0.1:{st['port']}",
                         "token": st["token"],
                     }
-                # 端口活着但进程是旧构建（不支持 Responses）：杀掉后重启
+                # 端口活着但进程是旧构建（不支持 Responses）或不是写这份 token 的
+                # 那个进程：杀掉重启，否则客户端会拿到没人认的 token
                 _kill_owner(st.get("port"))
             # 端口已死、token 缺失或进程不兼容：清理陈旧状态文件后重新拉起
             _remove_status_file(status_file)

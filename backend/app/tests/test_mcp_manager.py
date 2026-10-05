@@ -24,13 +24,15 @@ from backend.app.models import McpMigration, McpTrash
 
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
-    """隔离四端配置文件、dsh patch、数据目录与项目根列表。"""
+    """隔离六端配置文件、dsh patch、数据目录与项目根列表。"""
     ctx = {
         "data": tmp_path / "data",
         "claude_json": tmp_path / "claude.json",
         "codex_toml": tmp_path / "codex.toml",
         "dsh_patch": tmp_path / "cordis.patch.yml",
         "zcode_cli": tmp_path / "zcode-cli.json",
+        "pi_mcp": tmp_path / "pi-mcp.json",
+        "qoder_mcp": tmp_path / "qoder-mcp.json",
         "projects_root": tmp_path / "projects",
     }
     monkeypatch.setenv("A4AGENT_DATA_DIR", str(ctx["data"]))
@@ -38,6 +40,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("A4AGENT_CODEX_CONFIG_PATH", str(ctx["codex_toml"]))
     monkeypatch.setenv("A4AGENT_DSH_MCP_PATCH_PATH", str(ctx["dsh_patch"]))
     monkeypatch.setenv("A4AGENT_ZCODE_CLI_CONFIG_PATH", str(ctx["zcode_cli"]))
+    monkeypatch.setenv("A4AGENT_PI_MCP_PATH", str(ctx["pi_mcp"]))
+    monkeypatch.setenv("A4AGENT_QODER_MCP_PATH", str(ctx["qoder_mcp"]))
     # 项目根指向临时目录下的 projects_root（skill 的 project_roots 复用于 MCP）
     ctx["projects_root"].mkdir(parents=True)
     from backend.app import skill_manager
@@ -1087,3 +1091,291 @@ def test_dsh_normalize_names_by_id_not_servername(env):
     items = [i for e in entries2 if isinstance(e, dict) for i in (e.get("insert") or [])]
     managed = [i for i in items if i.get("name") == "@deepseek-ai/dsh-mcp-client"]
     assert managed[0]["id"] == "mcp-open-websearch"
+
+# ---------------- pi 端 ----------------
+
+
+def make_pi_global(env, name, entry, extra_top=None):
+    """向 pi 的 mcp.json 写入一个 server，保留/附带顶层键（如 autoEnableCodemode）。"""
+    loaded = {}
+    if env["pi_mcp"].exists():
+        try:
+            loaded = json.loads(env["pi_mcp"].read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            loaded = {}
+    loaded = loaded if isinstance(loaded, dict) else {}
+    if extra_top:
+        loaded.update(extra_top)
+    servers = dict(loaded.get("mcpServers") or {})
+    servers[name] = entry
+    loaded["mcpServers"] = servers
+    env["pi_mcp"].write_text(json.dumps(loaded, ensure_ascii=False), encoding="utf-8")
+    return env["pi_mcp"]
+
+
+def make_pi_project(env, project, name, entry):
+    """向 <项目>/.pi/mcp.json 写入一个 server。"""
+    p = make_project(env, project)
+    f = p / ".pi" / "mcp.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps({"mcpServers": {name: entry}}, ensure_ascii=False), encoding="utf-8")
+    return f
+
+
+def test_discover_includes_pi_global_and_project(env):
+    """pi 端：全局 agent/mcp.json 与项目级 .pi/mcp.json 均被发现，能力矩阵不含 sse。"""
+    make_pi_global(env, "sentry", {"url": "https://mcp.sentry.dev/mcp"}, extra_top={"autoEnableCodemode": False})
+    make_claude_global(env, "sentry")
+    make_pi_project(env, "proj-pi", "internal", {"command": "node", "args": ["i.js"], "exposure": "deferred"})
+
+    data = mcp_manager.discover()
+    assert data["roots"]["pi"] == str(env["pi_mcp"])
+    assert data["capability"]["pi"] == ["http", "stdio"]
+
+    groups = {g["name"]: g for g in data["global"]}
+    assert groups["sentry"]["ends"] == ["claude", "pi"]
+
+    projects = {p["project"]: p for p in data["projects"]}
+    assert projects["proj-pi"]["servers"][0]["name"] == "internal"
+
+
+def test_pi_read_preserves_native_keys_in_extra(env):
+    """pi 自有键（exposure / toolExposure / enabled / timeout / auth）归一进 extra，不外泄明文。"""
+    make_pi_global(
+        env,
+        "docs",
+        {
+            "url": "https://example.com/mcp",
+            "headers": {"Authorization": "Bearer secret"},
+            "exposure": "codemode",
+            "toolExposure": {"search": "direct"},
+            "enabled": False,
+            "timeout": 120,
+            "auth": {"provider": "corporate"},
+        },
+    )
+    servers = mcp_manager.read_servers("global", "pi")
+    assert len(servers) == 1
+    extra = servers[0]["extra"]
+    assert extra["exposure"] == "codemode"
+    assert extra["enabled"] is False
+    assert extra["timeout"] == 120
+    assert extra["auth"] == {"provider": "corporate"}
+    masked = mcp_manager._mask_server(servers[0])
+    assert masked["headers"]["Authorization"] == mcp_manager.MASK
+
+
+def test_pi_write_round_trip_keeps_native_keys_and_top_level(env):
+    """向 pi 安装新 server 时，既有条目的 pi 自有键与顶层 autoEnableCodemode 不被抹平。"""
+    path = make_pi_global(
+        env,
+        "legacy",
+        {"command": "node", "args": ["l.js"], "exposure": "hidden", "timeout": 30},
+        extra_top={"autoEnableCodemode": False},
+    )
+    mcp_manager.create_server(
+        "global",
+        "pi",
+        None,
+        {
+            "name": "fs",
+            "transport": "stdio",
+            "command": "node",
+            "args": ["f.js"],
+            "env": {},
+            "url": None,
+            "headers": {},
+            "cwd": None,
+            "description": "文件系统",
+        },
+    )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["autoEnableCodemode"] is False
+    assert data["mcpServers"]["legacy"]["exposure"] == "hidden"
+    assert data["mcpServers"]["legacy"]["timeout"] == 30
+    assert data["mcpServers"]["fs"]["command"] == "node"
+    assert data["mcpServers"]["fs"]["description"] == "文件系统"
+
+
+def test_migrate_sse_server_to_pi_fails(tmp_path, env, db):
+    """Claude 的 sse server 迁到 pi：按能力矩阵整对失败，不静默降级（pi 拒绝 legacy SSE）。"""
+    make_claude_global(env, "legacy-sse")
+    env["claude_json"].write_text(
+        json.dumps({"mcpServers": {"legacy-sse": {"type": "sse", "url": "https://old.example/sse"}}}),
+        encoding="utf-8",
+    )
+    result = mcp_manager.migrate(
+        db,
+        [{"scope": "global", "tool": "claude", "project": None, "name": "legacy-sse"}],
+        [{"scope": "global", "tool": "pi", "project": None}],
+    )
+    assert result["migrated"] == 0 and result["failed"] == 1
+    assert "不支持 sse 传输" in result["results"][0]["detail"]
+    assert not env["pi_mcp"].exists()
+
+
+def test_migrate_server_with_illegal_name_to_pi_fails(env, db):
+    """pi 的 server 名只认字母数字与 _ -：含点号/中文的名字整对失败并留日志，不写出废条目。"""
+    make_pi_global(env, "keepme", {"command": "node", "args": ["k.js"]})
+    env["claude_json"].write_text(
+        json.dumps({"mcpServers": {"内部工具": {"command": "node", "args": ["i.js"]}}}),
+        encoding="utf-8",
+    )
+    result = mcp_manager.migrate(
+        db,
+        [{"scope": "global", "tool": "claude", "project": None, "name": "内部工具"}],
+        [{"scope": "global", "tool": "pi", "project": None}],
+    )
+    assert result["migrated"] == 0 and result["failed"] == 1
+    assert "只允许字母、数字、下划线与连字符" in result["results"][0]["detail"]
+    assert json.loads(env["pi_mcp"].read_text(encoding="utf-8"))["mcpServers"].keys() == {"keepme"}
+
+
+def test_create_server_pi_project_drops_auth(env):
+    """pi 项目级配置不接受 auth 键：迁移/写入项目文件时剔除，避免整条被 pi 判废。"""
+    make_project(env, "proj-pi")
+    servers = [
+        {
+            "name": "docs",
+            "transport": "http",
+            "command": None,
+            "args": [],
+            "env": {},
+            "url": "https://example.com/mcp",
+            "headers": {},
+            "cwd": None,
+            "description": "",
+            "tool": "pi",
+            "scope": "project",
+            "project": "proj-pi",
+            "path": "",
+            "extra": {"auth": {"provider": "corporate"}, "exposure": "direct"},
+        }
+    ]
+    path = mcp_manager.write_servers("project", "pi", "proj-pi", servers)
+    entry = json.loads(path.read_text(encoding="utf-8"))["mcpServers"]["docs"]
+    assert "auth" not in entry
+    assert entry["exposure"] == "direct"
+
+
+# ---------------- Qoder 端 ----------------
+
+
+def make_qoder_global(env, name, entry, extra_top=None):
+    """向 Qoder 的 mcp.json 写入一个 server，保留/附带顶层键。"""
+    loaded = {}
+    if env["qoder_mcp"].exists():
+        try:
+            loaded = json.loads(env["qoder_mcp"].read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            loaded = {}
+    loaded = loaded if isinstance(loaded, dict) else {}
+    if extra_top:
+        loaded.update(extra_top)
+    servers = dict(loaded.get("mcpServers") or {})
+    servers[name] = entry
+    loaded["mcpServers"] = servers
+    env["qoder_mcp"].write_text(json.dumps(loaded, ensure_ascii=False), encoding="utf-8")
+    return env["qoder_mcp"]
+
+
+def test_discover_includes_qoder_global(env):
+    """Qoder 端：全局 ~/.qoder/mcp.json 被发现，三种传输都在能力矩阵里。"""
+    make_qoder_global(env, "sentry", {"type": "http", "url": "https://mcp.sentry.dev/mcp"})
+    make_claude_global(env, "sentry")
+
+    data = mcp_manager.discover()
+    assert data["roots"]["qoder"] == str(env["qoder_mcp"])
+    assert data["capability"]["qoder"] == ["http", "sse", "stdio"]
+    groups = {g["name"]: g for g in data["global"]}
+    assert groups["sentry"]["ends"] == ["claude", "qoder"]
+
+
+def test_qoder_read_preserves_native_keys_in_extra(env):
+    """Qoder 自有键（disabled / timeout / authType）归一进 extra，敏感头不外泄明文。"""
+    make_qoder_global(
+        env,
+        "docs",
+        {
+            "type": "http",
+            "url": "https://example.com/mcp",
+            "headers": {"Authorization": "Bearer secret"},
+            "disabled": True,
+            "timeout": 120,
+            "authType": "oauth",
+        },
+    )
+    servers = mcp_manager.read_servers("global", "qoder")
+    assert len(servers) == 1
+    assert servers[0]["transport"] == "http"
+    extra = servers[0]["extra"]
+    assert extra["disabled"] is True
+    assert extra["timeout"] == 120
+    assert extra["authType"] == "oauth"
+    masked = mcp_manager._mask_server(servers[0])
+    assert masked["headers"]["Authorization"] == mcp_manager.MASK
+
+
+def test_qoder_write_round_trip_keeps_native_keys_and_top_level(env):
+    """向 Qoder 装新 server：既有条目的 disabled / timeout 与顶层非 mcpServers 键不被抹平。"""
+    path = make_qoder_global(
+        env,
+        "legacy",
+        {"type": "stdio", "command": "node", "args": ["l.js"], "disabled": True, "timeout": 30},
+        extra_top={"version": 2},
+    )
+    mcp_manager.create_server(
+        "global",
+        "qoder",
+        None,
+        {
+            "name": "fs",
+            "transport": "stdio",
+            "command": "node",
+            "args": ["f.js"],
+            "env": {},
+            "url": None,
+            "headers": {},
+            "cwd": None,
+            "description": "文件系统",
+        },
+    )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["version"] == 2
+    assert data["mcpServers"]["legacy"]["disabled"] is True
+    assert data["mcpServers"]["legacy"]["timeout"] == 30
+    assert data["mcpServers"]["fs"]["type"] == "stdio"
+    assert data["mcpServers"]["fs"]["description"] == "文件系统"
+
+
+def test_migrate_claude_to_qoder_keeps_sse(env, db):
+    """Claude 全局 server 迁到 Qoder：sse 条目按 Qoder 认的 type 原样写出。"""
+    env["claude_json"].write_text(
+        json.dumps({"mcpServers": {"old": {"type": "sse", "url": "https://a.example/sse"}}}),
+        encoding="utf-8",
+    )
+    result = mcp_manager.migrate(
+        db,
+        [{"scope": "global", "tool": "claude", "project": None, "name": "old"}],
+        [{"scope": "global", "tool": "qoder", "project": None}],
+    )
+    assert result["migrated"] == 1 and result["failed"] == 0
+    entry = json.loads(env["qoder_mcp"].read_text(encoding="utf-8"))["mcpServers"]["old"]
+    assert entry == {"type": "sse", "url": "https://a.example/sse"}
+
+
+def test_qoder_project_scope_is_rejected(env, db):
+    """Qoder 的项目级 MCP 就是 Claude Code 的 <repo>/.mcp.json：不重复托管，安装与迁移都拒绝项目级。"""
+    make_project(env, "proj-qoder")
+    with pytest.raises(ValueError, match="Qoder 端不支持项目级"):
+        mcp_manager.create_server(
+            "project", "qoder", "proj-qoder", {"name": "fs", "transport": "stdio", "command": "node"}
+        )
+    make_claude_global(env, "sentry")
+    with pytest.raises(ValueError, match="Qoder 端不支持项目级"):
+        mcp_manager.migrate(
+            db,
+            [{"scope": "global", "tool": "claude", "project": None, "name": "sentry"}],
+            [{"scope": "project", "tool": "qoder", "project": "proj-qoder"}],
+        )
+    assert not env["qoder_mcp"].exists()

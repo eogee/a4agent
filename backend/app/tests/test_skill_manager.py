@@ -22,13 +22,15 @@ from backend.app.models import SkillMigration, SkillTrash
 
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
-    """隔离四端 skill 根、数据目录与项目根列表。返回上下文字典。"""
+    """隔离六端 skill 根、数据目录与项目根列表。返回上下文字典。"""
     ctx = {
         "data": tmp_path / "data",
         "claude": tmp_path / "claude-skills",
         "codex": tmp_path / "codex-skills",
         "dsh": tmp_path / "dsh-skills",
         "zcode": tmp_path / "zcode-skills",
+        "pi": tmp_path / "pi-skills",
+        "qoder": tmp_path / "qoder-skills",
         "projects_root": tmp_path / "projects",
     }
     monkeypatch.setenv("A4AGENT_DATA_DIR", str(ctx["data"]))
@@ -36,7 +38,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("A4AGENT_CODEX_SKILLS_PATH", str(ctx["codex"]))
     monkeypatch.setenv("A4AGENT_DSH_SKILLS_PATH", str(ctx["dsh"]))
     monkeypatch.setenv("A4AGENT_ZCODE_SKILLS_PATH", str(ctx["zcode"]))
-    for key in ("claude", "codex", "dsh", "zcode"):
+    monkeypatch.setenv("A4AGENT_PI_SKILLS_PATH", str(ctx["pi"]))
+    monkeypatch.setenv("A4AGENT_QODER_SKILLS_PATH", str(ctx["qoder"]))
+    for key in ("claude", "codex", "dsh", "zcode", "pi", "qoder"):
         ctx[key].mkdir(parents=True)
     ctx["projects_root"].mkdir(parents=True)
     # 项目根指向临时目录下的 projects_root
@@ -487,3 +491,163 @@ def test_junction_pointing_into_known_root_not_double_counted(env):
     located = skill_manager.locate_skill(str(link))
     loc = skill_manager.skill_location(located)
     assert loc["tool"] == "zcode" and loc["scope"] == "global"
+
+
+# ---------------- pi 端 ----------------
+
+
+def test_discover_includes_pi_global_and_project_roots(env):
+    """pi 端：全局 agent/skills 与项目级 .pi/skills 均被发现、聚合标注。"""
+    make_skill(env["pi"], "git-commit", "git-commit", "pi 版提交技能")
+    make_skill(env["claude"], "git-commit", "git-commit", "Claude 版提交技能")
+    proj = make_project(env, "proj-pi")
+    make_skill(proj / ".pi" / "skills", "deploy", "deploy", "pi 项目级部署")
+
+    data = skill_manager.discover()
+    global_groups = {g["name"]: g for g in data["global"]}
+    assert global_groups["git-commit"]["ends"] == ["claude", "pi"]
+    assert global_groups["git-commit"]["end_count"] == 2
+
+    projects = {p["project"]: p for p in data["projects"]}
+    groups = {g["name"]: g for g in projects["proj-pi"]["skills"]}
+    assert groups["deploy"]["ends"] == ["pi"]
+    location = skill_manager.skill_location(pathlib.Path(groups["deploy"]["copies"][0]["path"]))
+    assert location == {"scope": "project", "tool": "pi", "project": "proj-pi"}
+
+
+def test_migrate_to_pi_writes_global_and_project_roots(env, db):
+    """迁移到 pi 端：全局 → agent/skills，项目级 → <repo>/.pi/skills（目录缺失自动创建）。"""
+    make_skill(env["claude"], "git-commit", "git-commit", "v1")
+    proj = make_project(env, "pi-proj")
+
+    result = skill_manager.migrate(
+        db,
+        [{"scope": "global", "tool": "claude", "project": None, "name": "git-commit"}],
+        [
+            {"scope": "global", "tool": "pi", "project": None},
+            {"scope": "project", "tool": "pi", "project": "pi-proj"},
+        ],
+    )
+    assert result["migrated"] == 2 and result["failed"] == 0
+    assert (env["pi"] / "git-commit" / "SKILL.md").exists()
+    assert (proj / ".pi" / "skills" / "git-commit" / "SKILL.md").exists()
+    assert {l.target_tool for l in db.query(SkillMigration).all()} == {"pi"}
+
+
+def test_pi_skills_root_follows_pi_agent_dir_env(tmp_path, monkeypatch):
+    """pi 全局 skill 根默认在 agent 目录下（~/.pi/agent/skills），并跟随 pi 自己的 PI_CODING_AGENT_DIR。"""
+    from backend.app import config_manager
+
+    for name in ("A4AGENT_PI_SKILLS_PATH", "A4AGENT_PI_AGENT_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "pi-agent"))
+    assert config_manager.pi_agent_dir() == tmp_path / "pi-agent"
+    assert skill_manager.pi_skills_root() == tmp_path / "pi-agent" / "skills"
+
+
+def test_pi_skills_root_default_is_hidden_pi_agent(tmp_path, monkeypatch):
+    """未设置任何覆盖时，pi 根为 ~/.pi/agent/skills（不是 ~/.pi/skills）。"""
+    from backend.app import config_manager
+
+    for name in ("A4AGENT_PI_SKILLS_PATH", "A4AGENT_PI_AGENT_DIR", "PI_CODING_AGENT_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(config_manager.Path, "home", classmethod(lambda cls: tmp_path))
+    assert skill_manager.pi_skills_root() == tmp_path / ".pi" / "agent" / "skills"
+
+
+def test_pi_skill_notice_flags_skills_pi_would_not_load(env):
+    """迁到 pi 的 skill 若不合 pi 的严格校验，迁移结果里带明确提示而非静默无声。"""
+    ok = make_skill(env["claude"], "good-one", "good-one", "合规技能")
+    assert skill_manager.pi_skill_notice(ok) == ""
+
+    # name 含大写与中文 → pi 不加载
+    bad_name = make_skill(env["claude"], "Bad_Name", "Bad_Name", "名字不合规")
+    assert "只认小写字母" in skill_manager.pi_skill_notice(bad_name)
+
+    # 双连字符
+    double = make_skill(env["claude"], "a--b", "a--b", "连续连字符")
+    assert "连续连字符" in skill_manager.pi_skill_notice(double)
+
+    # description 为空（pi 要求非空，无 description 的 bundle 直接不被识别）
+    no_desc = env["claude"] / "no-desc"
+    no_desc.mkdir()
+    (no_desc / "SKILL.md").write_text('---\nname: "no-desc"\ndescription: ""\n---\n正文\n', encoding="utf-8")
+    assert "非空 description" in skill_manager.pi_skill_notice(no_desc)
+
+
+def test_migrate_to_pi_reports_incompatibility(env, db):
+    """迁移到 pi：不合 pi 规则时仍复制成功，但 detail 里给出 pi 不加载的警告。"""
+    make_skill(env["claude"], "Bad_Name", "Bad_Name", "名字不合规")
+    result = skill_manager.migrate(
+        db,
+        [{"scope": "global", "tool": "claude", "project": None, "name": "Bad_Name"}],
+        [{"scope": "global", "tool": "pi", "project": None}],
+    )
+    assert result["migrated"] == 1 and result["failed"] == 0
+    assert (env["pi"] / "Bad_Name" / "SKILL.md").exists()
+    detail = result["results"][0]["detail"]
+    assert "pi 不会加载" in detail and "只认小写字母" in detail
+    assert "pi 不会加载" in db.query(SkillMigration).all()[0].detail
+
+
+# ---------------- Qoder 端 ----------------
+
+
+def test_discover_includes_qoder_global_and_project_roots(env):
+    """Qoder 端：全局 ~/.qoder/skills 与项目级 <repo>/.qoder/skills 均被发现并聚合标注。"""
+    make_skill(env["qoder"], "release", "release", "Qoder 版发布技能")
+    make_skill(env["claude"], "release", "release", "Claude 版发布技能")
+    proj = make_project(env, "proj-qoder")
+    make_skill(proj / ".qoder" / "skills", "deploy", "deploy", "Qoder 项目级部署")
+
+    data = skill_manager.discover()
+    global_groups = {g["name"]: g for g in data["global"]}
+    assert global_groups["release"]["ends"] == ["claude", "qoder"]
+
+    projects = {p["project"]: p for p in data["projects"]}
+    groups = {g["name"]: g for g in projects["proj-qoder"]["skills"]}
+    assert groups["deploy"]["ends"] == ["qoder"]
+    location = skill_manager.skill_location(pathlib.Path(groups["deploy"]["copies"][0]["path"]))
+    assert location == {"scope": "project", "tool": "qoder", "project": "proj-qoder"}
+
+
+def test_migrate_to_qoder_writes_global_and_project_roots(env, db):
+    """迁移到 Qoder：全局 → ~/.qoder/skills，项目级 → <repo>/.qoder/skills（缺失自动创建）。"""
+    make_skill(env["pi"], "git-commit", "git-commit", "v1")
+    proj = make_project(env, "qoder-proj")
+
+    result = skill_manager.migrate(
+        db,
+        [{"scope": "global", "tool": "pi", "project": None, "name": "git-commit"}],
+        [
+            {"scope": "global", "tool": "qoder", "project": None},
+            {"scope": "project", "tool": "qoder", "project": "qoder-proj"},
+        ],
+    )
+    assert result["migrated"] == 2 and result["failed"] == 0
+    assert (env["qoder"] / "git-commit" / "SKILL.md").exists()
+    assert (proj / ".qoder" / "skills" / "git-commit" / "SKILL.md").exists()
+    assert {l.target_tool for l in db.query(SkillMigration).all()} == {"qoder"}
+
+
+def test_qoder_skills_root_follows_home_env(tmp_path, monkeypatch):
+    """未单独指定 skill 路径时，Qoder 全局根跟随 A4AGENT_QODER_HOME。"""
+    from backend.app import config_manager
+
+    monkeypatch.delenv("A4AGENT_QODER_SKILLS_PATH", raising=False)
+    monkeypatch.setenv("A4AGENT_QODER_HOME", str(tmp_path / "qoder-home"))
+    assert config_manager.qoder_home() == tmp_path / "qoder-home"
+    assert skill_manager.qoder_skills_root() == tmp_path / "qoder-home" / "skills"
+
+
+def test_qoder_home_prefers_existing_distribution_dir(tmp_path, monkeypatch):
+    """Qoder 目录名随发行版而变：默认根不存在而国内版目录存在时取后者，否则用国际版。"""
+    from backend.app import config_manager
+
+    for name in ("A4AGENT_QODER_HOME", "A4AGENT_QODER_SKILLS_PATH"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(config_manager.Path, "home", classmethod(lambda cls: tmp_path))
+    assert config_manager.qoder_home() == tmp_path / ".qoder"
+
+    (tmp_path / ".qoder-cn").mkdir()
+    assert config_manager.qoder_home() == tmp_path / ".qoder-cn"

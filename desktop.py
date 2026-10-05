@@ -74,6 +74,11 @@ from backend.app.main import app  # noqa: E402
 from backend.app.singleton import acquire  # noqa: E402
 
 
+_WINDOW = None
+# pywebview 的 Window 没有 visible 属性，可见性由关窗/唤回事件自己记
+_STATE = {"quitting": False, "visible": True}
+
+
 class DesktopApi:
     """暴露给前端 JS 的原生对话框能力（window.pywebview.api.*）。
 
@@ -106,6 +111,25 @@ class DesktopApi:
             result = win.create_file_dialog(_webview.FileDialog.OPEN)
         return result[0] if result else None
 
+    def running_tasks(self):
+        """当前在跑/排队的无头任务数：前端据此决定关窗确认与退出按钮是否可用。"""
+        from backend.app import task_runner
+
+        return {"running": task_runner.outstanding_count()}
+
+    def quit_app(self):
+        """应用内「退出」：放行关窗策略并关闭窗口，由 main() 统一回收后台资源。"""
+        _STATE["quitting"] = True
+        if _WINDOW is not None:
+            try:
+                _WINDOW.destroy()
+            except Exception:  # noqa: BLE001 - 兜底：销毁失败则关闭
+                try:
+                    _WINDOW.close()
+                except Exception:
+                    pass
+        return {"ok": True}
+
 
 def find_free_port() -> int:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -113,6 +137,56 @@ def find_free_port() -> int:
     port = s.getsockname()[1]
     s.close()
     return port
+
+
+def instance_file() -> "os.PathLike":
+    """记录运行实例的端口，供二次启动唤回隐藏窗口。"""
+    from pathlib import Path
+
+    from backend.app.database import get_data_dir
+
+    return Path(get_data_dir()) / "desktop.json"
+
+
+def write_instance(port: int) -> None:
+    import json
+
+    try:
+        instance_file().write_text(json.dumps({"port": port, "pid": os.getpid()}), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def clear_instance() -> None:
+    try:
+        instance_file().unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def wake_running_instance() -> bool:
+    """已有实例在跑（可能是隐藏常驻）时，唤回它的窗口；成功返回 True。"""
+    import json
+    import urllib.request
+    from pathlib import Path
+
+    path = Path(instance_file())
+    if not path.exists():
+        return False
+    try:
+        port = int(json.loads(path.read_text(encoding="utf-8")).get("port"))
+    except (OSError, ValueError):
+        return False
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/v1/desktop/wake", method="POST", data=b"{}",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            body = json.loads(resp.read().decode("utf-8", "replace") or "{}")
+        return bool(body.get("restored"))
+    except Exception:
+        return False
 
 
 def start_server(port: int) -> None:
@@ -124,7 +198,67 @@ def start_server(port: int) -> None:
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning", log_config=None)
 
 
+def _hwnd_of(win) -> int:
+    """尽力取得原生窗口句柄（任务栏闪烁用），拿不到返回 0。
+
+    pywebview 6 在 Windows 上把 WinForms 窗体挂在 Window.native，句柄是
+    .NET IntPtr（.Handle.ToInt64()）；Window 本身没有 hwnd/handle 属性可拿。
+    """
+    native = getattr(win, "native", None)
+    if native is not None:
+        try:
+            return int(native.Handle.ToInt64())
+        except (AttributeError, TypeError, ValueError):
+            pass
+    for attr in ("hwnd", "handle"):
+        try:
+            value = getattr(win, attr, None)
+            if value:
+                return int(value)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _bring_to_front(win) -> None:
+    """把窗口交给系统置前；句柄探测不到时保持已显示的状态即可。"""
+    hwnd = _hwnd_of(win)
+    if not hwnd or sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.user32.SetForegroundWindow(hwnd)
+    except (OSError, AttributeError):
+        pass
+
+
+def _apply_closing_policy(win, state) -> None:
+    """关窗不等于退出：拦截关闭并隐藏窗口，真正退出走应用内「退出」按钮。
+
+    pywebview 的 closing 事件只在「handler 返回值严格为 False」时取消关闭，
+    且触发时按 Event.set 的调用约定给的是零参调用（winforms 不传任何参数）——
+    handler 必须是零参并显式 return False，否则窗口会照常销毁、任务全被带走。
+    不在 closing 回调里弹原生对话框——该回调运行在窗口消息线程上，
+    阻塞式原生对话框有死锁风险。
+    """
+
+    def on_closing():
+        if state["quitting"]:
+            return None  # 应用内「退出」：放行，走正常回收流程
+        state["visible"] = False
+        try:
+            win.hide()
+        except Exception:  # noqa: BLE001 - 隐藏失败也不能让窗口把任务带下去
+            pass
+        return False  # 取消关闭：窗口转后台，任务继续跑
+
+    win.events.closing += on_closing  # Event 没有 listen 方法，订阅只能用 +=
+
+
 def main() -> None:
+    global _WINDOW
+
     if "--proxy" in sys.argv:
         from backend.app.proxy_standalone import main as proxy_main
 
@@ -132,6 +266,10 @@ def main() -> None:
         return
 
     if not acquire():
+        # 已有实例可能是「关窗后隐藏常驻」的状态：先尝试唤回它的窗口，
+        # 唤不到（老实例即将退出等）才提示已在运行。
+        if wake_running_instance():
+            return
         import ctypes
         ctypes.windll.user32.MessageBoxW(None, "a4agent 已在运行中。", "提示", 0x40)
         return
@@ -139,25 +277,72 @@ def main() -> None:
     port = find_free_port()
     t = threading.Thread(target=start_server, args=(port,), daemon=True)
     t.start()
+    write_instance(port)
 
-    webview.create_window(
+    win = webview.create_window(
         "a4agent",
         f"http://127.0.0.1:{port}",
         width=1000,
         height=720,
         min_size=(800, 560),
         js_api=DesktopApi(),
+        # 关窗策略由 events.closing 接管（隐藏常驻），不用后端自带的确认框
+        confirm_close=False,
     )
+    _WINDOW = win
+    _apply_closing_policy(win, _STATE)
+    _register_desktop_hooks(win)
+    _subscribe_task_notifications(win)
+
     webview.start()
-    # 窗口关闭后先回收本地推理引擎（llama-server 子进程），再强制退出，
-    # 避免后台线程/子进程挂住进程
+    # 窗口关闭后先回收本地推理引擎（llama-server 子进程）与无头任务子进程，
+    # 再强制退出，避免后台线程/子进程挂住进程
+    try:
+        from backend.app import task_runner
+
+        task_runner.shutdown_all("应用退出")
+    except Exception:
+        pass
     try:
         from backend.app.llama import runtime as llama_runtime
 
         llama_runtime.shutdown()
     except Exception:
         pass
+    clear_instance()
     os._exit(0)
+
+
+def _register_desktop_hooks(win) -> None:
+    """把「唤回窗口」交给 /api/v1/desktop/wake（二次启动时调用）。"""
+    from backend.app.api.v1 import desktop as desktop_api
+
+    def wake() -> None:
+        try:
+            win.show()
+        except Exception:  # noqa: BLE001 - show 不可用时退回 restore
+            pass
+        try:
+            win.restore()
+        except Exception:
+            pass
+        _STATE["visible"] = True
+        _bring_to_front(win)
+
+    desktop_api.set_wake_hook(wake)
+
+
+def _subscribe_task_notifications(win) -> None:
+    """任务到终态时：窗口隐藏则闪任务栏，用户看得见时交给页面自己提示。"""
+    from backend.app import task_notify
+
+    def on_event(event: dict) -> None:
+        if _STATE["visible"]:
+            return
+        # Window 没有 visible 属性，可见性由 on_closing / wake 自己记
+        task_notify.flash_taskbar(_hwnd_of(win))
+
+    task_notify.subscribe(on_event)
 
 
 if __name__ == "__main__":

@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ... import crud
-from ...crypto import encrypt_text
+from ... import config_manager, crud
+from ...crypto import decrypt_text, encrypt_text
 from ...database import get_db
 from ...llama import catalog
 from ...llama import gpu as llama_gpu
@@ -183,7 +183,7 @@ def connect():
 
 
 class IntegrateBody(BaseModel):
-    targets: str = "claude"       # claude / codex / dsh / zcode，逗号分隔
+    targets: str = "claude"       # claude / codex / dsh / zcode / pi，逗号分隔
     activate: bool = False        # 创建后是否立即切换
 
 
@@ -199,6 +199,10 @@ def integrate(body: IntegrateBody, db: Session = Depends(get_db)):
 
     api_base = f"http://127.0.0.1:{r.cfg.port}/v1"
     model = Path(r.cfg.default_model_path).stem
+    # 鉴权开启时沿用服务的 --api-key；未开启时写占位值。空 Key 会让切换在
+    # 「API Key 解密失败」处直接失败（本地方案根本切不动），且 pi 的
+    # models.json 要求 apiKey 非空，"none" 正是本机服务的通行写法。
+    api_key = r.cfg.infer.api_key.strip() or "none"
 
     provider = db.query(Provider).filter(
         Provider.name == "本地 llama-server").first()
@@ -213,11 +217,23 @@ def integrate(body: IntegrateBody, db: Session = Depends(get_db)):
         provider.api_base = api_base  # type: ignore[assignment]
         db.commit()
 
+    # 勾选的目标先规范化：未知端名丢弃、空选择回落 claude（本方案由接入功能托管，
+    # 新建与重复接入都按这份规范化结果写入）
+    wanted = ",".join(config_manager.target_list(body.targets))
+
     existing = db.query(Configuration).filter(
         Configuration.provider_id == provider.id).first()
     if existing:
         if existing.model != model:
             existing.model = model  # type: ignore[assignment]
+            db.commit()
+        if decrypt_text(existing.api_key_encrypted) != api_key:
+            # 本地方案的 Key 就是服务自身的鉴权值（未开鉴权时为占位 none）：
+            # 跟随当前服务刷新，同时补上早期版本留下的空 Key
+            existing.api_key_encrypted = encrypt_text(api_key)
+            db.commit()
+        if existing.targets != wanted:
+            existing.targets = wanted  # type: ignore[assignment]
             db.commit()
         config_id = existing.id
         created = False
@@ -225,9 +241,9 @@ def integrate(body: IntegrateBody, db: Session = Depends(get_db)):
         data = {
             "name": f"本地模型 · {model}",
             "provider_id": provider.id,
-            "api_key_encrypted": encrypt_text(""),
+            "api_key_encrypted": encrypt_text(api_key),
             "model": model,
-            "targets": body.targets or "claude",
+            "targets": wanted,
             "max_tokens": None,
         }
         config = crud.create_config(db, data)

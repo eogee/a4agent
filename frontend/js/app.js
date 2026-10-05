@@ -13,6 +13,56 @@ layui.use(['layer', 'form', 'element'], function () {
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  /* ---------- 列表搜索 ---------- */
+  /* 关键词按空格切分，全部命中才算匹配；空关键词返回 null 表示不过滤。 */
+  function makeMatcher(query) {
+    var tokens = String(query || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return null;
+    return function (g) {
+      var text = (String(g.name || '') + ' ' + String(g.description || '')).toLowerCase();
+      return tokens.every(function (t) { return text.indexOf(t) !== -1; });
+    };
+  }
+
+  function noMatchTip(query, label) {
+    return '<div class="empty-tip">没有匹配「' + escapeHtml(String(query).trim()) + '」的' + label + '<br>' +
+      '<span style="font-size:12px;">按名称与功能描述搜索，空格分隔表示同时满足</span></div>';
+  }
+
+  /* 输入防抖 120ms 后回调；清空按钮与 Esc 立即生效 */
+  function bindListSearch(inputId, clearId, onChange) {
+    var input = document.getElementById(inputId);
+    var clear = document.getElementById(clearId);
+    var timer = null;
+
+    function syncClearButton() {
+      input.parentNode.classList.toggle('has-value', !!input.value);
+    }
+
+    function reset() {
+      if (timer) { clearTimeout(timer); timer = null; }
+      input.value = '';
+      syncClearButton();
+      onChange('');
+    }
+
+    input.addEventListener('input', function () {
+      syncClearButton();
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(function () {
+        timer = null;
+        onChange(input.value);
+      }, 120);
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') reset();
+    });
+    clear.addEventListener('click', function () {
+      reset();
+      input.focus();
+    });
+  }
+
   /* 统一解析响应文本：后端异常时可能返回纯文本（如 500 的 Internal Server
    * Error），直接 r.json() 会把 JSON 解析错误当报错弹出，掩盖真实原因。 */
   function parseResponse(r) {
@@ -65,6 +115,9 @@ layui.use(['layer', 'form', 'element'], function () {
     if (document.querySelector('form[lay-filter="config-form"] [name="target_zcode"]').checked) {
       targets.push('zcode');
     }
+    if (document.querySelector('form[lay-filter="config-form"] [name="target_pi"]').checked) {
+      targets.push('pi');
+    }
     var mtEl = document.querySelector('form[lay-filter="config-form"] [name="max_tokens"]');
     var mtVal = mtEl && mtEl.value !== undefined ? String(mtEl.value).trim() : '';
     return {
@@ -105,6 +158,11 @@ layui.use(['layer', 'form', 'element'], function () {
           text += s.current_zcode_model
             ? ' · ZCode: ' + s.current_zcode_model
             : ' · ZCode 待配置';
+        }
+        if ((c.targets || '').indexOf('pi') !== -1) {
+          text += s.current_pi_model
+            ? ' · pi: ' + s.current_pi_model
+            : ' · pi 待配置';
         }
         el.textContent = text;
         el.classList.add('status-active');
@@ -320,6 +378,7 @@ layui.use(['layer', 'form', 'element'], function () {
       if (t === 'codex') html += '<span class="target-badge target-codex">Codex</span>';
       else if (t === 'dsh') html += '<span class="target-badge target-dsh">dsh</span>';
       else if (t === 'zcode') html += '<span class="target-badge target-zcode">ZCode</span>';
+      else if (t === 'pi') html += '<span class="target-badge target-pi">pi</span>';
       else if (t === 'claude') html += '<span class="target-badge target-claude">Claude</span>';
     });
     return html;
@@ -376,13 +435,17 @@ layui.use(['layer', 'form', 'element'], function () {
     var zcodeNote = hasZcode
       ? '<p style="font-size:12px;color:#8a8e94;margin-top:10px;">ZCode 配置已写入（直连上游），重启 ZCode 或新建会话后生效</p>'
       : '';
+    var hasPi = (targets || '').indexOf('pi') !== -1;
+    var piNote = hasPi
+      ? '<p style="font-size:12px;color:#8a8e94;margin-top:10px;">pi 配置直连上游、无需本地代理，下次启动 pi 会话生效</p>'
+      : '';
     layer.open({
       type: 1,
       title: '确认切换',
       area: ['420px', 'auto'],
       content: '<div style="padding:20px 24px;">' +
         '<p style="font-size:15px;">确定切换到「' + escapeHtml(name) + '」？</p>' +
-        restartHtml + codexNote + dshNote + zcodeNote + '</div>',
+        restartHtml + codexNote + dshNote + zcodeNote + piNote + '</div>',
       btn: ['确认切换', '取消'],
       success: function () {
         if (hasClaude) form.render('checkbox');
@@ -455,8 +518,9 @@ layui.use(['layer', 'form', 'element'], function () {
               '<input type="checkbox" name="target_codex" title="Codex" lay-skin="primary">' +
               '<input type="checkbox" name="target_dsh" title="dsh" lay-skin="primary">' +
               '<input type="checkbox" name="target_zcode" title="ZCode" lay-skin="primary">' +
+              '<input type="checkbox" name="target_pi" title="pi" lay-skin="primary">' +
             '</div>' +
-            '<div class="layui-form-mid layui-word-aux" style="margin-left:110px;">Codex / dsh 需 OpenAI 接口；ZCode 原生支持 Anthropic 与 OpenAI 两种协议</div>' +
+            '<div class="layui-form-mid layui-word-aux" style="margin-left:110px;">Codex / dsh 需 OpenAI 接口；ZCode 与 pi 原生支持 Anthropic 与 OpenAI 两种协议</div>' +
           '</div>' +
         '</form>';
 
@@ -489,6 +553,7 @@ layui.use(['layer', 'form', 'element'], function () {
           document.querySelector('input[name="target_codex"]').checked = targets.indexOf('codex') !== -1;
           document.querySelector('input[name="target_dsh"]').checked = targets.indexOf('dsh') !== -1;
           document.querySelector('input[name="target_zcode"]').checked = targets.indexOf('zcode') !== -1;
+          document.querySelector('input[name="target_pi"]').checked = targets.indexOf('pi') !== -1;
         }
         form.render(null, 'config-form');
         var link = document.getElementById('link-add-provider');
@@ -513,7 +578,7 @@ layui.use(['layer', 'form', 'element'], function () {
           return;
         }
         if (!data.targets) {
-          layer.msg('请至少选择一个应用目标（Claude Code / Codex / dsh / ZCode）', { icon: 2 });
+          layer.msg('请至少选择一个应用目标（Claude Code / Codex / dsh / ZCode / pi）', { icon: 2 });
           return;
         }
         if (data.max_tokens != null && (!Number.isInteger(data.max_tokens) || data.max_tokens < 1)) {
@@ -706,9 +771,14 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   /* ---------- 技能管理 ---------- */
-  var TOOL_LABEL = { claude: 'Claude', codex: 'Codex', dsh: 'dsh', zcode: 'ZCode' };
+  var TOOL_LABEL = { claude: 'Claude', codex: 'Codex', dsh: 'dsh', zcode: 'ZCode', pi: 'pi', qoder: 'Qoder' };
+  // 六端清单唯一定义处：新增/删除端只改这里（后端 TOOLS 与 schemas 闸门需同步）
+  var TOOL_KEYS = ['claude', 'codex', 'dsh', 'zcode', 'pi', 'qoder'];
+  // MCP 项目级只有这四端有独立文件：dsh 是全局 profile 层，Qoder 复用 Claude Code 的 <repo>/.mcp.json
+  var MCP_PROJECT_TOOLS = ['claude', 'codex', 'zcode', 'pi'];
   var skillView = 'global'; // global | project
   var skillData = null;
+  var skillQuery = ''; // 搜索关键词，仅前端过滤已缓存的 skillData
   var migrationBusy = false; // 迁移/适配执行中：阻塞其他技能操作
 
   /* 迁移执行期间拦截一切点击（捕获阶段），进度层之外无任何可操作目标 */
@@ -719,10 +789,7 @@ layui.use(['layer', 'form', 'element'], function () {
   }, true);
 
   function endBadge(t) {
-    if (t === 'codex') return '<span class="target-badge target-codex">Codex</span>';
-    if (t === 'dsh') return '<span class="target-badge target-dsh">dsh</span>';
-    if (t === 'zcode') return '<span class="target-badge target-zcode">ZCode</span>';
-    return '<span class="target-badge target-claude">Claude</span>';
+    return '<span class="target-badge target-' + t + '">' + TOOL_LABEL[t] + '</span>';
   }
 
   function scopeLabel(scope, project) {
@@ -777,12 +844,15 @@ layui.use(['layer', 'form', 'element'], function () {
   function renderSkills() {
     var box = document.getElementById('skills-content');
     if (!skillData) { box.innerHTML = '<div class="empty-tip">加载中…</div>'; return; }
+    var match = makeMatcher(skillQuery);
     if (skillView === 'global') {
       box.classList.add('card-grid');
       var gs = skillData.global || [];
+      if (match) gs = gs.filter(match);
       if (!gs.length) {
-        box.innerHTML = '<div class="empty-tip">四个工具的全局目录还没有任何 skill<br>' +
-          '<span style="font-size:12px;">~/.claude/skills · ~/.codex/skills · ~/.dsh/skills · ~/.zcode/skills</span></div>';
+        if (match) { box.innerHTML = noMatchTip(skillQuery, '技能'); return; }
+        box.innerHTML = '<div class="empty-tip">六端的全局目录还没有任何 skill<br>' +
+          '<span style="font-size:12px;">~/.claude/skills · ~/.codex/skills · ~/.dsh/skills · ~/.zcode/skills · ~/.pi/agent/skills · ~/.qoder/skills</span></div>';
         return;
       }
       box.innerHTML = gs.map(function (g) { return skillGroupCard(g, 'global', ''); }).join('');
@@ -790,6 +860,16 @@ layui.use(['layer', 'form', 'element'], function () {
     }
     var projects = skillData.projects || [];
     box.classList.remove('card-grid');
+    if (match) {
+      projects = projects.map(function (p) {
+        return {
+          project: p.project,
+          root: p.root,
+          skills: (p.skills || []).filter(match),
+        };
+      }).filter(function (p) { return p.skills.length; });
+      if (!projects.length) { box.innerHTML = noMatchTip(skillQuery, '技能'); return; }
+    }
     if (!projects.length) {
       box.innerHTML = '<div class="empty-tip">未发现任何含 skill 的项目，可点击右上角「项目根目录」调整扫描范围</div>';
       return;
@@ -800,7 +880,7 @@ layui.use(['layer', 'form', 'element'], function () {
         '<div class="proj-head">' +
           '<span class="proj-name">' + escapeHtml(p.project) + '</span>' +
           '<span class="proj-root" title="' + escapeHtml(p.root) + '">' + escapeHtml(p.root) + '</span>' +
-          '<button class="layui-btn layui-btn-xs" data-sk="adapt" data-project="' + escapeHtml(p.project) + '">一键适配四端</button>' +
+          '<button class="layui-btn layui-btn-xs" data-sk="adapt" data-project="' + escapeHtml(p.project) + '">一键适配六端</button>' +
         '</div>';
       if (!p.skills.length) {
         html += '<div class="empty-tip proj-empty">该项目下没有 skill</div>';
@@ -968,11 +1048,11 @@ layui.use(['layer', 'form', 'element'], function () {
         }).join('') + '</div>';
       html += '<div class="mig-section"><div class="mig-title">复制到哪些位置？（目标端同名旧版将移入回收站）</div>';
       html += '<div class="mig-group"><span class="mig-group-name">全局</span>';
-      ['claude', 'codex', 'dsh', 'zcode'].forEach(function (t) { html += destRow('global', t, '', src); });
+      TOOL_KEYS.forEach(function (t) { html += destRow('global', t, '', src); });
       html += '</div>';
       (skillData.projects || []).forEach(function (p) {
         html += '<div class="mig-group"><span class="mig-group-name">' + escapeHtml(p.project) + '</span>';
-        ['claude', 'codex', 'dsh', 'zcode'].forEach(function (t) { html += destRow('project', t, p.project, src); });
+        TOOL_KEYS.forEach(function (t) { html += destRow('project', t, p.project, src); });
         html += '</div>';
       });
       // 自选项目文件夹：不要求已被发现（可能还没有任何 skill）；
@@ -984,7 +1064,7 @@ layui.use(['layer', 'form', 'element'], function () {
           '<span class="mig-place" data-mig-custom-path title="' + escapeHtml(customRoot || '') + '">' +
             (customRoot ? escapeHtml(customRoot) : '未选择') + '</span>' +
         '</div>';
-      ['claude', 'codex', 'dsh', 'zcode'].forEach(function (t) {
+      TOOL_KEYS.forEach(function (t) {
         html += '<label class="mig-item' + (customRoot ? '' : ' mig-disabled') + '">' +
           '<input type="checkbox" data-mig="project|' + t + '|' + CUSTOM + '"' + (customRoot ? '' : ' disabled') + '>' +
           '<span class="target-badge target-' + t + '">' + TOOL_LABEL[t] + '</span>' +
@@ -1055,7 +1135,7 @@ layui.use(['layer', 'form', 'element'], function () {
         });
         if (wantCustom) {
           if (!customRoot) { layer.msg('请先选择项目文件夹', { icon: 2 }); return; }
-          ['claude', 'codex', 'dsh', 'zcode'].forEach(function (t) {
+          TOOL_KEYS.forEach(function (t) {
             var cb = document.querySelector('[data-mig="project|' + t + '|' + CUSTOM + '"]:checked');
             if (cb) targets.push({ scope: 'project', tool: t, project: null, project_root: customRoot });
           });
@@ -1080,14 +1160,14 @@ layui.use(['layer', 'form', 'element'], function () {
     });
   }
 
-  /* ---- 项目一键适配四端：把项目内所有 skill 补齐到缺失的端 ---- */
+  /* ---- 项目一键适配六端：把项目内所有 skill 补齐到缺失的端 ---- */
   function adaptProject(project) {
     if (migrationBusy) return;
     var p = (skillData.projects || []).find(function (x) { return x.project === project; });
     if (!p || !p.skills.length) { layer.msg('该项目没有可迁移的 skill', { icon: 0 }); return; }
     var plan = []; // [{source, targets[], name, missing[]}]
     p.skills.forEach(function (g) {
-      var missing = ['claude', 'codex', 'dsh', 'zcode'].filter(function (t) { return g.ends.indexOf(t) === -1; });
+      var missing = TOOL_KEYS.filter(function (t) { return g.ends.indexOf(t) === -1; });
       if (!missing.length || !g.copies.length) return;
       plan.push({
         source: { scope: 'project', tool: g.copies[0].tool, project: project, name: g.name },
@@ -1096,13 +1176,13 @@ layui.use(['layer', 'form', 'element'], function () {
         missing: missing
       });
     });
-    if (!plan.length) { layer.msg('该项目的 skill 已在 Claude / Codex / dsh / ZCode 四端齐全', { icon: 1 }); return; }
+    if (!plan.length) { layer.msg('该项目的 skill 已在 ' + TOOL_KEYS.map(function (t) { return TOOL_LABEL[t]; }).join(' / ') + ' 六端齐全', { icon: 1 }); return; }
     var lines = plan.map(function (x) {
       return '<li>「' + escapeHtml(x.name) + '」→ ' + x.missing.map(function (t) { return TOOL_LABEL[t]; }).join('、') + '</li>';
     }).join('');
     layer.open({
       type: 1,
-      title: '一键适配四端 · ' + escapeHtml(project),
+      title: '一键适配六端 · ' + escapeHtml(project),
       area: ['440px', 'auto'],
       content: '<div style="padding:18px 24px;"><p style="margin-bottom:10px;">将按以下计划复制补齐（源端保留）：</p><ul class="adapt-list">' + lines + '</ul></div>',
       btn: ['执行迁移', '取消'],
@@ -1116,7 +1196,7 @@ layui.use(['layer', 'form', 'element'], function () {
             label: '「' + x.name + '」→ ' + x.missing.map(function (t) { return TOOL_LABEL[t]; }).join('、')
           };
         });
-        runMigrateTasks(tasks, '一键适配四端 · ' + project + '（源端保留）', function (res) {
+        runMigrateTasks(tasks, '一键适配六端 · ' + project + '（源端保留）', function (res) {
           if (!res.failed) {
             layer.msg('适配完成：已迁移 ' + res.migrated + ' 处', { icon: 1, time: 2600 });
           } else {
@@ -1289,6 +1369,7 @@ layui.use(['layer', 'form', 'element'], function () {
   /* ---------- MCP 管理 ---------- */
   var mcpView = 'global'; // global | project
   var mcpData = null;
+  var mcpQuery = ''; // 搜索关键词，仅前端过滤已缓存的 mcpData
 
   function transportBadge(t) {
     var cls = t === 'stdio' ? 'target-claude' : (t === 'sse' ? 'target-codex' : 'target-dsh');
@@ -1342,12 +1423,15 @@ layui.use(['layer', 'form', 'element'], function () {
   function renderMcps() {
     var box = document.getElementById('mcp-content');
     if (!mcpData) { box.innerHTML = '<div class="empty-tip">加载中…</div>'; return; }
+    var match = makeMatcher(mcpQuery);
     if (mcpView === 'global') {
       box.classList.add('card-grid');
       var gs = mcpData.global || [];
+      if (match) gs = gs.filter(match);
       if (!gs.length) {
-        box.innerHTML = '<div class="empty-tip">四端还未配置任何 MCP server<br>' +
-          '<span style="font-size:12px;">~/.claude.json · ~/.codex/config.toml · cordis.patch.yml · ~/.zcode/cli/config.json</span></div>';
+        if (match) { box.innerHTML = noMatchTip(mcpQuery, ' MCP server'); return; }
+        box.innerHTML = '<div class="empty-tip">六端还未配置任何 MCP server<br>' +
+          '<span style="font-size:12px;">~/.claude.json · ~/.codex/config.toml · cordis.patch.yml · ~/.zcode/cli/config.json · ~/.pi/agent/mcp.json · ~/.qoder/mcp.json</span></div>';
         return;
       }
       box.innerHTML = gs.map(function (g) { return mcpGroupCard(g, 'global', ''); }).join('');
@@ -1355,6 +1439,16 @@ layui.use(['layer', 'form', 'element'], function () {
     }
     var projects = mcpData.projects || [];
     box.classList.remove('card-grid');
+    if (match) {
+      projects = projects.map(function (p) {
+        return {
+          project: p.project,
+          root: p.root,
+          servers: (p.servers || []).filter(match),
+        };
+      }).filter(function (p) { return p.servers.length; });
+      if (!projects.length) { box.innerHTML = noMatchTip(mcpQuery, ' MCP server'); return; }
+    }
     if (!projects.length) {
       box.innerHTML = '<div class="empty-tip">未发现任何含 MCP server 的项目</div>';
       return;
@@ -1446,11 +1540,11 @@ layui.use(['layer', 'form', 'element'], function () {
         }).join('') + '</div>';
       html += '<div class="mig-section"><div class="mig-title">复制到哪些位置？（目标端同名旧版将移入回收站）</div>';
       html += '<div class="mig-group"><span class="mig-group-name">全局</span>';
-      ['claude', 'codex', 'dsh', 'zcode'].forEach(function (t) { html += destRow('global', t, '', src); });
+      TOOL_KEYS.forEach(function (t) { html += destRow('global', t, '', src); });
       html += '</div>';
       (mcpData.projects || []).forEach(function (p) {
         html += '<div class="mig-group"><span class="mig-group-name">' + escapeHtml(p.project) + '</span>';
-        ['claude', 'codex', 'zcode'].forEach(function (t) { html += destRow('project', t, p.project, src); }); // dsh 无项目级 MCP
+        MCP_PROJECT_TOOLS.forEach(function (t) { html += destRow('project', t, p.project, src); });
         html += '</div>';
       });
       html += '</div></div>';
@@ -1580,7 +1674,7 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   /* ---- MCP 安装（向指定端新建 server） ---- */
-  var MCP_TOOLS = ['claude', 'codex', 'dsh', 'zcode'];
+  var MCP_TOOLS = TOOL_KEYS;  // 安装/导入面向全局配置，六端都支持全局
 
   function kvFromTextarea(text) {
     var out = {};
@@ -1896,6 +1990,33 @@ layui.use(['layer', 'form', 'element'], function () {
     checkUpdate(false);
   });
 
+  /* 关窗只是转入后台继续跑任务，真正的退出入口在这里（会先问清有没有任务在跑） */
+  var quitBtn = document.getElementById('btn-quit');
+  if (quitBtn) {
+    quitBtn.addEventListener('click', function () {
+      var api = window.pywebview && window.pywebview.api;
+      if (!api || !api.quit_app) {
+        layer.msg('浏览器形态请直接关闭页面', { icon: 0 });
+        return;
+      }
+      function ask(running) {
+        layer.confirm(
+          running ? '仍有 ' + running + ' 个任务在跑，退出会终止它们。确定退出 a4agent？'
+                  : '确定退出 a4agent？',
+          { title: '退出', btn: ['退出', '取消'] },
+          function (idx) { layer.close(idx); api.quit_app(); }
+        );
+      }
+      if (api.running_tasks) {
+        Promise.resolve(api.running_tasks())
+          .then(function (r) { ask((r && r.running) || 0); })
+          .catch(function () { ask(0); });
+      } else {
+        ask(0);
+      }
+    });
+  }
+
   document.getElementById('card-grid').addEventListener('click', function (e) {
     var btn = e.target.closest('[data-action]');
     if (!btn) return;
@@ -1919,6 +2040,11 @@ layui.use(['layer', 'form', 'element'], function () {
   /* ---------- 技能管理事件 ---------- */
   document.querySelectorAll('#skills-scope-seg .seg-btn').forEach(function (btn) {
     btn.addEventListener('click', function () { setSkillView(btn.getAttribute('data-view')); });
+  });
+
+  bindListSearch('skills-search', 'skills-search-clear', function (q) {
+    skillQuery = q;
+    renderSkills();
   });
 
   document.getElementById('btn-skills-refresh').addEventListener('click', function () { loadSkills(); });
@@ -1954,6 +2080,11 @@ layui.use(['layer', 'form', 'element'], function () {
   /* ---------- MCP 管理事件 ---------- */
   document.querySelectorAll('#mcp-scope-seg .seg-btn').forEach(function (btn) {
     btn.addEventListener('click', function () { setMcpView(btn.getAttribute('data-view')); });
+  });
+
+  bindListSearch('mcp-search', 'mcp-search-clear', function (q) {
+    mcpQuery = q;
+    renderMcps();
   });
 
   document.getElementById('btn-mcp-refresh').addEventListener('click', function () { loadMcps(); });

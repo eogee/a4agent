@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ... import config_manager, crud, proxy_standalone, schemas, version as app_version
 from ...crypto import decrypt_text
 from ...database import get_db
+from ...llama import runtime as llama_runtime
 from ...process import is_claude_running, restart_claude
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ def get_status(db: Session = Depends(get_db)):
     codex = config_manager.read_codex_settings()
     dsh_model, dsh_provider = config_manager.read_dsh_selection()
     zcode_model, zcode_provider = config_manager.read_zcode_selection()
+    pi_model, pi_provider = config_manager.read_pi_selection()
     return schemas.StatusOut(
         version=app_version.current_version(),
         active_config=active,
@@ -35,6 +37,9 @@ def get_status(db: Session = Depends(get_db)):
         zcode_file_exists=config_manager.zcode_cli_config_path().exists(),
         current_zcode_model=zcode_model,
         current_zcode_provider=zcode_provider,
+        pi_file_exists=config_manager.pi_models_config_path().exists(),
+        current_pi_model=pi_model,
+        current_pi_provider=pi_provider,
     )
 
 
@@ -65,6 +70,7 @@ def switch_config(config_id: int, body: schemas.SwitchRequest, db: Session = Dep
     codex_backup_path = None
     dsh_backup_path = None
     zcode_backup_path = None
+    pi_backup_path = None
     try:
         api_key = decrypt_text(config.api_key_encrypted)
         if not api_key:
@@ -145,6 +151,26 @@ def switch_config(config_id: int, body: schemas.SwitchRequest, db: Session = Dep
             )
             config_manager.atomic_write_zcode_cli_config(zcode_cli)
             config_manager.atomic_write_zcode_v2_config(zcode_v2)
+        if "pi" in targets:
+            # pi 原生支持 anthropic-messages / openai-completions / openai-responses
+            # 三种协议，直连上游、无需本地翻译代理：托管 provider 条目（a4a_p<id>）
+            # 写 models.json，生效的 provider/model 写 settings.json。auth.json 是
+            # pi 自己的凭证库（可能存 oauth 登录态），不参与切换。
+            pi_backup_path = config_manager.backup_pi_configs().get("models")
+            # 服务商是本机 llama-server 时，把服务实际的 -c 窗口同步给 pi：
+            # pi 的模型条目缺省按 128000 计，不同步会让放大后的窗口被提前截断。
+            pi_models, pi_settings = config_manager.build_pi_settings(
+                config_manager.read_pi_models_config(),
+                config_manager.read_pi_settings(),
+                config.provider,
+                api_key,
+                config.model,
+                context_window=llama_runtime.runtime().served_context_for(
+                    config.provider.api_base, config.model
+                ),
+            )
+            config_manager.atomic_write_pi_models_config(pi_models)
+            config_manager.atomic_write_pi_settings(pi_settings)
         detail = "切换成功"
         if "codex" in targets:
             detail += "，Codex 配置已写入"
@@ -152,6 +178,8 @@ def switch_config(config_id: int, body: schemas.SwitchRequest, db: Session = Dep
             detail += "，dsh 配置已写入"
         if "zcode" in targets:
             detail += "，ZCode 配置已写入"
+        if "pi" in targets:
+            detail += "，pi 配置已写入"
         crud.add_log(db, config_id, "success", detail)
     except Exception as e:
         logger.exception("切换配置「%s」失败", config.name)
@@ -173,6 +201,8 @@ def switch_config(config_id: int, body: schemas.SwitchRequest, db: Session = Dep
         message += "；dsh 配置已写入（经本地代理，热加载生效）"
     if "zcode" in targets:
         message += "；ZCode 配置已写入（直连上游）"
+    if "pi" in targets:
+        message += "；pi 配置已写入（直连上游），下次启动 pi 会话生效"
     return schemas.SwitchResult(
         success=True,
         message=message,
@@ -180,6 +210,7 @@ def switch_config(config_id: int, body: schemas.SwitchRequest, db: Session = Dep
         codex_backup_path=str(codex_backup_path) if codex_backup_path else None,
         dsh_backup_path=str(dsh_backup_path) if dsh_backup_path else None,
         zcode_backup_path=str(zcode_backup_path) if zcode_backup_path else None,
+        pi_backup_path=str(pi_backup_path) if pi_backup_path else None,
         restart=restarted,
         process_info=process_info,
     )
