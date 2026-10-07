@@ -30,7 +30,7 @@ a4agent 现在的定位更清晰了：**为没有图形界面的 CLI 工具（Cl
 ### 想继续用 dsh / ZCode / pi 怎么办
 
 在这三个应用**自己的设置界面**里重新配一次即可，字段对照与各端坑位见仓库文档：
-[`docs/迁移对照表-三端API配置.md`](https://github.com/eogee/a4agent/blob/main/docs/迁移对照表-三端API配置.md)
+[`docs/迁移对照表-三端API配置.md`](https://github.com/eogee/a4agent/blob/master/docs/%E8%BF%81%E7%A7%BB%E5%AF%B9%E7%85%A7%E8%A1%A8-%E4%B8%89%E7%AB%AFAPI%E9%85%8D%E7%BD%AE.md)
 
 各端入口：
 
