@@ -17,24 +17,18 @@ def _require_provider(db: Session, provider_id: int):
 
 
 def _validate_targets(provider, targets: str | None) -> None:
-    """Codex / dsh 依赖 OpenAI 兼容接口：目标含二者之一但服务商非 openai 时拒绝保存。
+    """Codex 依赖 OpenAI 兼容接口：目标含 codex 但服务商非 openai 时拒绝保存。
 
     与切换时 [switch.py] 的校验保持一致，让错误在保存阶段就暴露，而非留到切换才报。
     """
     if not targets:
         return
     has_codex = any(t.strip() == "codex" for t in targets.split(","))
-    has_dsh = any(t.strip() == "dsh" for t in targets.split(","))
-    if (has_codex or has_dsh) and provider.api_type != "openai":
-        need = "、".join(
-            name
-            for name, has in (("Codex", has_codex), ("dsh", has_dsh))
-            if has
-        )
+    if has_codex and provider.api_type != "openai":
         raise HTTPException(
             400,
-            f"{need} 需使用 OpenAI 兼容接口，"
-            f"当前服务商「{provider.name}」不是 OpenAI 兼容类型，请更换服务商或去掉对应目标",
+            "Codex 需使用 OpenAI 兼容接口，"
+            f"当前服务商「{provider.name}」不是 OpenAI 兼容类型，请更换服务商或去掉 Codex 目标",
         )
 
 

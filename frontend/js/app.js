@@ -109,24 +109,12 @@ layui.use(['layer', 'form', 'element'], function () {
     if (document.querySelector('form[lay-filter="config-form"] [name="target_codex"]').checked) {
       targets.push('codex');
     }
-    if (document.querySelector('form[lay-filter="config-form"] [name="target_dsh"]').checked) {
-      targets.push('dsh');
-    }
-    if (document.querySelector('form[lay-filter="config-form"] [name="target_zcode"]').checked) {
-      targets.push('zcode');
-    }
-    if (document.querySelector('form[lay-filter="config-form"] [name="target_pi"]').checked) {
-      targets.push('pi');
-    }
-    var mtEl = document.querySelector('form[lay-filter="config-form"] [name="max_tokens"]');
-    var mtVal = mtEl && mtEl.value !== undefined ? String(mtEl.value).trim() : '';
     return {
       name: val('name'),
       provider_id: val('provider_id'),
       api_key: val('api_key'),
       model: val('model'),
-      targets: targets.join(','),
-      max_tokens: mtVal === '' ? null : Number(mtVal)
+      targets: targets.join(',')
     };
   }
 
@@ -148,21 +136,6 @@ layui.use(['layer', 'form', 'element'], function () {
           text += s.current_codex_model
             ? ' · Codex: ' + s.current_codex_model
             : ' · Codex 待配置';
-        }
-        if ((c.targets || '').indexOf('dsh') !== -1) {
-          text += s.current_dsh_model
-            ? ' · dsh: ' + s.current_dsh_model
-            : ' · dsh 待配置';
-        }
-        if ((c.targets || '').indexOf('zcode') !== -1) {
-          text += s.current_zcode_model
-            ? ' · ZCode: ' + s.current_zcode_model
-            : ' · ZCode 待配置';
-        }
-        if ((c.targets || '').indexOf('pi') !== -1) {
-          text += s.current_pi_model
-            ? ' · pi: ' + s.current_pi_model
-            : ' · pi 待配置';
         }
         el.textContent = text;
         el.classList.add('status-active');
@@ -371,15 +344,21 @@ layui.use(['layer', 'form', 'element'], function () {
   });
 
   /* ---------- 卡片 ---------- */
+  // v0.6.0 起只代管 Claude Code 与 Codex。三端（dsh/ZCode/pi）自v0.6.0
+  // 起改由用户在应用内自配，旧数据里残留的值以灰色「已移交」样式呈现，
+  // 告诉用户曾经配过、现在归谁管——而不是静默消失让人以为没配过。
+  var TARGET_HANDED_OVER = { dsh: 'dsh', zcode: 'ZCode', pi: 'pi' };
+
   function targetBadges(targets) {
     var list = (targets || 'claude').split(',');
     var html = '';
     list.forEach(function (t) {
       if (t === 'codex') html += '<span class="target-badge target-codex">Codex</span>';
-      else if (t === 'dsh') html += '<span class="target-badge target-dsh">dsh</span>';
-      else if (t === 'zcode') html += '<span class="target-badge target-zcode">ZCode</span>';
-      else if (t === 'pi') html += '<span class="target-badge target-pi">pi</span>';
       else if (t === 'claude') html += '<span class="target-badge target-claude">Claude</span>';
+      else if (TARGET_HANDED_OVER[t]) {
+        html += '<span class="target-badge target-handed" title="该端已改为在应用内自配，本工具不再代管">'
+          + TARGET_HANDED_OVER[t] + ' · 已移交</span>';
+      }
     });
     return html;
   }
@@ -419,7 +398,6 @@ layui.use(['layer', 'form', 'element'], function () {
   function confirmSwitch(id, name, targets) {
     var hasClaude = (targets || '').indexOf('claude') !== -1;
     var hasCodex = (targets || '').indexOf('codex') !== -1;
-    var hasDsh = (targets || '').indexOf('dsh') !== -1;
     var restartHtml = hasClaude
       ? '<div class="layui-form" style="margin-top:16px;">' +
           '<input type="checkbox" id="chk-restart" lay-skin="primary" title="切换后重启 Claude Code（若正在运行）">' +
@@ -428,16 +406,16 @@ layui.use(['layer', 'form', 'element'], function () {
     var codexNote = hasCodex
       ? '<p style="font-size:12px;color:#8a8e94;margin-top:10px;">Codex 配置写入后需重启 Codex 才生效</p>'
       : '';
-    var dshNote = hasDsh
-      ? '<p style="font-size:12px;color:#8a8e94;margin-top:10px;">dsh 配置热加载，新会话即生效</p>'
-      : '';
-    var hasZcode = (targets || '').indexOf('zcode') !== -1;
-    var zcodeNote = hasZcode
-      ? '<p style="font-size:12px;color:#8a8e94;margin-top:10px;">ZCode 配置已写入（直连上游），重启 ZCode 或新建会话后生效</p>'
-      : '';
-    var hasPi = (targets || '').indexOf('pi') !== -1;
-    var piNote = hasPi
-      ? '<p style="font-size:12px;color:#8a8e94;margin-top:10px;">pi 配置直连上游、无需本地代理，下次启动 pi 会话生效</p>'
+    // 旧数据里可能还带着已移交的三端，在这里如实告知它们不再被写入
+    var handedOver = ['dsh', 'zcode', 'pi'].filter(function (t) {
+      return (targets || '').indexOf(t) !== -1;
+    });
+    var handedNote = handedOver.length
+      ? '<p style="font-size:12px;color:#8a8e94;margin-top:10px;">'
+        + handedOver.map(function (t) {
+            return ({ dsh: 'dsh', zcode: 'ZCode', pi: 'pi' })[t];
+          }).join(' / ')
+        + ' 的配置不再由本工具写入，请在该应用内自行配置</p>'
       : '';
     layer.open({
       type: 1,
@@ -445,7 +423,7 @@ layui.use(['layer', 'form', 'element'], function () {
       area: ['420px', 'auto'],
       content: '<div style="padding:20px 24px;">' +
         '<p style="font-size:15px;">确定切换到「' + escapeHtml(name) + '」？</p>' +
-        restartHtml + codexNote + dshNote + zcodeNote + piNote + '</div>',
+        restartHtml + codexNote + handedNote + '</div>',
       btn: ['确认切换', '取消'],
       success: function () {
         if (hasClaude) form.render('checkbox');
@@ -508,19 +486,12 @@ layui.use(['layer', 'form', 'element'], function () {
             '<div class="layui-input-block"><input type="text" name="model" class="layui-input" placeholder="如：glm-4.7-flash"></div>' +
           '</div>' +
           '<div class="layui-form-item">' +
-            '<label class="layui-form-label">输出上限</label>' +
-            '<div class="layui-input-block"><input type="number" name="max_tokens" class="layui-input" min="1" step="1" placeholder="留空自动兜底（131072）；dsh 目标生效"></div>' +
-          '</div>' +
-          '<div class="layui-form-item">' +
             '<label class="layui-form-label">应用目标</label>' +
             '<div class="layui-input-block target-checkboxes">' +
               '<input type="checkbox" name="target_claude" title="Claude Code" lay-skin="primary" checked>' +
               '<input type="checkbox" name="target_codex" title="Codex" lay-skin="primary">' +
-              '<input type="checkbox" name="target_dsh" title="dsh" lay-skin="primary">' +
-              '<input type="checkbox" name="target_zcode" title="ZCode" lay-skin="primary">' +
-              '<input type="checkbox" name="target_pi" title="pi" lay-skin="primary">' +
             '</div>' +
-            '<div class="layui-form-mid layui-word-aux" style="margin-left:110px;">Codex / dsh 需 OpenAI 接口；ZCode 与 pi 原生支持 Anthropic 与 OpenAI 两种协议</div>' +
+            '<div class="layui-form-mid layui-word-aux" style="margin-left:110px;">dsh / ZCode / pi 已在各自应用内支持自定义供应商，请直接在那里配置</div>' +
           '</div>' +
         '</form>';
 
@@ -545,15 +516,9 @@ layui.use(['layer', 'form', 'element'], function () {
           document.querySelector('input[name="name"]').value = c.name;
           document.querySelector('select[name="provider_id"]').value = String(c.provider_id);
           document.querySelector('input[name="model"]').value = c.model;
-          if (c.max_tokens) {
-            document.querySelector('input[name="max_tokens"]').value = c.max_tokens;
-          }
           var targets = (c.targets || 'claude').split(',');
           document.querySelector('input[name="target_claude"]').checked = targets.indexOf('claude') !== -1;
           document.querySelector('input[name="target_codex"]').checked = targets.indexOf('codex') !== -1;
-          document.querySelector('input[name="target_dsh"]').checked = targets.indexOf('dsh') !== -1;
-          document.querySelector('input[name="target_zcode"]').checked = targets.indexOf('zcode') !== -1;
-          document.querySelector('input[name="target_pi"]').checked = targets.indexOf('pi') !== -1;
         }
         form.render(null, 'config-form');
         var link = document.getElementById('link-add-provider');
@@ -578,19 +543,14 @@ layui.use(['layer', 'form', 'element'], function () {
           return;
         }
         if (!data.targets) {
-          layer.msg('请至少选择一个应用目标（Claude Code / Codex / dsh / ZCode / pi）', { icon: 2 });
+          layer.msg('请至少选择一个应用目标（Claude Code / Codex）', { icon: 2 });
           return;
         }
-        if (data.max_tokens != null && (!Number.isInteger(data.max_tokens) || data.max_tokens < 1)) {
-          layer.msg('最大输出上限需为正整数', { icon: 2 });
-          return;
-        }
-        // Codex / dsh 需使用 OpenAI 兼容接口：保存前拦截 Anthropic 服务商 + 勾选相应目标
-        // （ZCode 原生支持 Anthropic / OpenAI 两种协议，无此限制）
+        // Codex 用 OpenAI 兼容协议：保存前拦截 Anthropic 服务商 + 勾选 Codex
         var selProvider = providers.find(function (p) { return p.id === Number(data.provider_id); });
-        var needOpenai = data.targets.indexOf('codex') !== -1 || data.targets.indexOf('dsh') !== -1;
+        var needOpenai = data.targets.indexOf('codex') !== -1;
         if (needOpenai && selProvider && selProvider.api_type !== 'openai') {
-          layer.msg('Codex / dsh 需使用 OpenAI 兼容接口，请更换服务商或去掉对应目标', { icon: 2 });
+          layer.msg('Codex 需使用 OpenAI 兼容接口，请更换服务商或去掉 Codex 目标', { icon: 2 });
           return;
         }
         var body = {
@@ -600,7 +560,6 @@ layui.use(['layer', 'form', 'element'], function () {
           targets: data.targets
         };
         if (data.api_key) body.api_key = data.api_key;
-        body.max_tokens = data.max_tokens;  // 显式置空=清除，回到自动兜底
 
         var req = isEdit
           ? apiSend('/configs/' + c.id, 'PUT', body)
@@ -667,19 +626,69 @@ layui.use(['layer', 'form', 'element'], function () {
     });
   }
 
+  // v0.6.0 起 API 切换不再代管 dsh/ZCode/pi——这是破坏性变更，必须在更新弹窗里
+  // 明确告知，不能埋在更新说明的正文里（用户多半不会点开「查看完整发布说明」）。
+  // 这里按「受影响版本区间」判断是否命中，命中就把横幅提到最前面。
+  //   affectedBelow：变更只对当前版本低于它的用户生效（老版本才有旧行为）
+  //   landedIn：变更在哪个版本引入（目标版本达到它才需要提示）
+  var BREAKING_CHANGES = [{
+    affectedBelow: '0.5.99',
+    landedIn: '0.6.0',
+    title: 'dsh / ZCode / pi 不再由 a4agent 代管API 配置',
+    detail: '这三端应用自带完整的供应商配置界面，由你在应用内自行配置更可靠。' +
+      '你原先用 a4agent 配的条目已自动清理（清理前已做永久快照），你自己配的 provider 与 Key 一概未动。' +
+      '如需继续使用，请到各应用设置里重新配置一次。'
+  }];
+
+  // 版本号按三元组数组比较。注意不能直接 parseFloat('0.5.0')——三段式版本号
+  // 不是合法数字会得到 NaN，比较恒为 false，横幅就永远不会显示；
+  // 也不能只取前两段（'0.5.0' 与 '0.5.1' 都会被压成 0.5 而丢掉修订号）。
+  function parseVersion(v) {
+    var m = String(v || '').match(/(\d+)\.(\d+)(?:\.(\d+))?/);
+    return m ? [+m[1], +m[2], +(m[3] || 0)] : [0, 0, 0];
+  }
+
+  function compareVersion(a, b) {
+    for (var i = 0; i < 3; i++) {
+      if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+    }
+    return 0;
+  }
+
+  function breakingChangesFor(currentVersion, latestVersion) {
+    var cur = parseVersion(currentVersion);
+    var latest = parseVersion(latestVersion);
+    return BREAKING_CHANGES.filter(function (c) {
+      return compareVersion(cur, parseVersion(c.affectedBelow)) < 0
+        && compareVersion(latest, parseVersion(c.landedIn)) >= 0;
+    });
+  }
+
+  function breakingBanner(currentVersion, latestVersion) {
+    var items = breakingChangesFor(currentVersion, latestVersion);
+    if (!items.length) return '';
+    return items.map(function (c) {
+      return '<div class="update-breaking">' +
+        '<div class="update-breaking-title">破坏性变更：' + escapeHtml(c.title) + '</div>' +
+        '<div class="update-breaking-detail">' + escapeHtml(c.detail) + '</div>' +
+      '</div>';
+    }).join('');
+  }
+
   function showUpdatePrompt(r) {
     var notes = (r.notes || '').trim();
     var notesHtml = '<div class="update-notes">' + (notes ? renderMarkdown(notes) : '暂无更新说明') + '</div>';
     if (r.notes_url && /^https:\/\//.test(r.notes_url)) {
       notesHtml += '<div class="update-notes-url"><a href="' + escapeHtml(r.notes_url) + '" target="_blank" rel="noopener">查看完整发布说明</a></div>';
     }
+    var breaking = breakingBanner(r.current_version, r.latest_version);
     layer.open({
       type: 1,
       title: '发现新版本 v' + escapeHtml(r.latest_version),
       area: ['460px', 'auto'],
       content: '<div class="update-panel">' +
         '<p class="update-versions">当前 <b>v' + escapeHtml(r.current_version) + '</b> → 最新 <b>v' + escapeHtml(r.latest_version) + '</b></p>' +
-        notesHtml + '</div>',
+        breaking + notesHtml + '</div>',
       btn: ['立即下载更新', '忽略此版本', '暂不'],
       yes: function (index) {
         layer.close(index);

@@ -392,19 +392,13 @@ body {
   color: #2f6fb4;
 }
 
-.target-dsh {
-  background: #ececec;
-  color: #3a3a3a;
-}
-
-.target-zcode {
-  background: #efe9fb;
-  color: #6d43c4;
-}
-
-.target-pi {
-  background: #e6f4f0;
-  color: #1f7a63;
+/* 已移交应用的标记：灰调+ 虚线感，表示「曾经配过，现在归应用内自管」，
+   刻意与仍生效的实色标签区分开，避免用户误以为本工具还在管它 */
+.target-handed {
+  background: #f2f2f2;
+  color: #8a8a8a;
+  border: 1px solid #dcdcdc;
+  font-weight: 400;
 }
 
 .target-qoder {
@@ -813,6 +807,30 @@ body {
 
 .update-versions {
   color: #5a5e63;
+}
+
+/* 破坏性变更横幅：必须比更新说明更醒目——用户多半不会点开完整发布说明，
+   埋进正文的破坏性变更等于没告知 */
+.update-breaking {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border: 1px solid #f0c36d;
+  border-left: 4px solid #e8a33d;
+  border-radius: 8px;
+  background: #fdf6ec;
+}
+
+.update-breaking-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #8a5a12;
+  margin-bottom: 6px;
+}
+
+.update-breaking-detail {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #6b4c1c;
 }
 
 .update-notes {

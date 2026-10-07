@@ -122,8 +122,16 @@ def test_create_task_blocked_by_precheck_records_failed_row(db, monkeypatch):
 
 def test_create_task_rejects_unknown_engine(db):
     _seed_config(db)
-    with pytest.raises(Exception):  # pydantic 校验：pattern ^(pi|dsh)$
-        tasks_api.schemas.TaskCreate(prompt="x", tool="zcode")
+    # v0.6.0 起六端合法（claude/codex/zcode/qoder/dsh/pi），
+    # 只有名单外的名字该被 pydantic 拒绝
+    with pytest.raises(Exception):
+        tasks_api.schemas.TaskCreate(prompt="x", tool="not-a-tool")
+
+
+def test_create_task_accepts_all_six_engines(db):
+    """六端都必须能被接受——这是任务下发扩展的核心契约。"""
+    for tool in ("claude", "codex", "zcode", "qoder", "dsh", "pi"):
+        assert tasks_api.schemas.TaskCreate(prompt="x", tool=tool).tool == tool
 
 
 # ---------------- 列表 / 详情 ----------------

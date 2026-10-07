@@ -18,7 +18,7 @@ def _clear_probe_cache():
 
 def test_resolve_command_rejects_unknown_tool(monkeypatch):
     with pytest.raises(ValueError):
-        task_engines.resolve_command("zcode")
+        task_engines.resolve_command("not-a-tool")
 
 
 def test_probe_reports_missing_engine(monkeypatch):
@@ -57,8 +57,9 @@ def test_build_argv_matrix(monkeypatch):
     # 别让测试去读真实的 ~/.dsh profile
     monkeypatch.setattr(task_engines, "foreign_plugin_ids", lambda path=None: [])
     pi = task_engines.build_argv("pi", "写个测试")
-    assert pi == ["pi", "-p", "写个测试", "--mode", "json", "--no-session"]
+    assert pi == ["pi", "-p", "写个测试", "--mode", "json", "--no-session", "--yolo"]
     dsh = task_engines.build_argv("dsh", "写个测试")
+    # dsh 不加 yolo：headless profile 本身即无头入口
     assert dsh == ["dsh", "--profile", "headless", "写个测试"]
 
 
@@ -271,3 +272,127 @@ def test_healthy_probe_output_is_not_treated_as_crash():
     done = type("R", (), {"stdout": "1.0.2\n", "stderr": ""})()
     assert task_engines._crash_line(done) == ""
     assert task_engines._failure_summary(["1.0.2"]) == "1.0.2"
+
+
+# ---------------- v0.6.0：六端覆盖 ----------------
+
+
+def test_engines_cover_all_six_tools():
+    """任务下发覆盖六个确认支持无头调用的目标。"""
+    assert task_engines.ENGINES == ("claude", "codex", "zcode", "qoder", "dsh", "pi")
+    for tool in task_engines.ENGINES:
+        assert tool in task_engines.ENGINE_LABELS
+        assert tool in task_engines.CONFIG_HINTS
+        assert tool in task_engines._YOLO_FLAG
+
+
+def test_qoder_command_name_has_fallback():
+    """官方文档写 qodercli、博客写 qoder，两个名字都要探测。"""
+    assert "qodercli" in task_engines._SHIM["qoder"]
+    assert "qoder" in task_engines._SHIM["qoder"]
+
+
+def test_build_argv_is_headless_and_preauthorized(monkeypatch):
+    """六端命令都必须：无头入口 + 结构化输出 + 权限预授权。
+
+    无人值守下没有审批人，不预授权会卡死或被直接拒绝——这是实测踩过的坑。
+    """
+    monkeypatch.setattr(task_engines, "resolve_command", lambda tool: f"/bin/{tool}")
+    for tool in task_engines.ENGINES:
+        argv = task_engines.build_argv(tool, "PROMPT")
+        joined = " ".join(argv)
+        assert "PROMPT" in joined
+        if tool == "dsh":
+            # dsh 的 headless profile 本身就是官方无头入口，无需额外预授权
+            assert "--profile" in argv
+            continue
+        yolo = task_engines._YOLO_FLAG[tool]
+        assert yolo, f"{tool} 未声明权限预授权参数"
+        assert all(flag in argv for flag in yolo), (
+            f"{tool} 权限预授权参数未落到命令里：{joined}"
+        )
+
+
+def test_build_argv_json_output_per_tool():
+    """结构化输出是解析产出与用量的前提，逐端确认。"""
+    monkey = task_engines
+    orig = monkey.resolve_command
+    monkey.resolve_command = lambda tool: f"/bin/{tool}"
+    try:
+        assert "--output-format" in " ".join(monkey.build_argv("claude", "P"))
+        assert "--json" in " ".join(monkey.build_argv("codex", "P"))
+        assert "--json" in " ".join(monkey.build_argv("zcode", "P"))
+        assert "-o" in monkey.build_argv("qoder", "P")
+        assert "--mode" in monkey.build_argv("pi", "P")
+    finally:
+        monkey.resolve_command = orig
+
+
+def test_parse_claude_json():
+    raw = ('{"type":"result","subtype":"success","result":"已完成","is_error":false,'
+           '"total_cost_usd":0.003,"usage":{"input_tokens":1500,"output_tokens":420}}')
+    out = task_engines.parse_output("claude", raw, 0)
+    assert out["ok"] is True
+    assert out["text"] == "已完成"
+    assert out["usage"]["input"] == 1500
+    assert out["usage"]["output"] == 420
+    assert out["usage"]["cost"] == 0.003
+
+
+def test_parse_claude_is_error_flag_catches_silent_failure():
+    """退出码 0 但 is_error=true 必须判失败，否则会把失败当成功交付。"""
+    raw = '{"type":"result","is_error":true,"result":"上游拒绝"}'
+    out = task_engines.parse_output("claude", raw, 0)
+    assert out["ok"] is False
+    assert "上游拒绝" in out["error"]
+
+
+def test_parse_zcode_json():
+    raw = ('{"sessionId":"s1","provider":"openai-compatible:deepseek","model":"m",'
+           '"text":"已修复","usage":{"inputTokens":100,"outputTokens":20,'
+           '"totalTokens":120},"stopReason":"end_turn"}')
+    out = task_engines.parse_output("zcode", raw, 0)
+    assert out["ok"] is True
+    assert out["text"] == "已修复"
+    assert out["usage"]["totalTokens"] == 120
+
+
+def test_parse_zcode_stop_reason_error():
+    raw = '{"text":"","stopReason":"error","errorMessage":"上游403"}'
+    out = task_engines.parse_output("zcode", raw, 0)
+    assert out["ok"] is False
+    assert "上游403" in out["error"]
+
+
+def test_parse_codex_jsonl_picks_agent_message():
+    raw = "\n".join([
+        '{"type":"thread.started","thread_id":"t1"}',
+        '{"type":"item.completed","item":{"type":"command_execution","command":"ls"}}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"仓库含 3 个目录"}}',
+        '{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":50}}',
+    ])
+    out = task_engines.parse_output("codex", raw, 0)
+    assert out["ok"] is True
+    assert out["text"] == "仓库含 3 个目录"
+    # 进度类事件必须被忽略，不能混进产出
+    assert "command_execution" not in out["text"]
+    assert out["usage"]["output"] == 50
+
+
+def test_parse_codex_turn_failed():
+    out = task_engines.parse_output("codex", '{"type":"turn.failed","message":"模型不可用"}', 0)
+    assert out["ok"] is False
+    assert "模型不可用" in out["error"]
+
+
+def test_parse_qoder_json():
+    out = task_engines.parse_output("qoder", '{"result":"done"}', 0)
+    assert out["ok"] is True
+    assert out["text"] == "done"
+
+
+def test_parse_non_json_output_degrades_to_text():
+    """引擎没吐 JSON（如模型返回裸文本）时按纯文本收，而不是判失败。"""
+    out = task_engines.parse_output("claude", "直接一段文字", 0)
+    assert out["ok"] is True
+    assert out["text"] == "直接一段文字"

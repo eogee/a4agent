@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import models  # noqa: F401  # 注册模型建表
 from .api.v1 import (configs, desktop, feedback, fs, llama, mcp, providers,
-                     skills, switch, tasks, update)
+                     removal, skills, switch, tasks, update)
 from .database import Base, engine, ensure_schema
 from .logging_config import setup_logging
 from .seed import seed_providers
@@ -59,6 +59,7 @@ def create_app() -> FastAPI:
     app.include_router(feedback.router, prefix="/api/v1", tags=["feedback"])
     app.include_router(llama.router, prefix="/api/v1", tags=["llama"])
     app.include_router(tasks.router, prefix="/api/v1", tags=["tasks"])
+    app.include_router(removal.router, prefix="/api/v1", tags=["removal"])
     app.include_router(fs.router, prefix="/api/v1", tags=["fs"])
     app.include_router(desktop.router, prefix="/api/v1", tags=["desktop"])
 

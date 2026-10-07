@@ -86,9 +86,16 @@ def test_atomic_write_settings(tmp_path, monkeypatch):
 # ---------------- dsh（DeepSeek Harness） ----------------
 
 
-def test_target_list_includes_dsh():
-    assert config_manager.target_list("claude,dsh,codex") == ["claude", "dsh", "codex"]
-    assert config_manager.target_list("dsh") == ["dsh"]
+def test_target_list_only_claude_and_codex():
+    """v0.6.0 起只代管claude / codex；旧数据里的三端值被静默丢弃。"""
+    assert config_manager.target_list("claude,codex") == ["claude", "codex"]
+    # 旧库里的 dsh/zcode/pi 不再是合法目标，全部剔除后回退 claude
+    assert config_manager.target_list("claude,dsh,codex") == ["claude", "codex"]
+    assert config_manager.target_list("dsh") == ["claude"]
+    assert config_manager.target_list("zcode,pi") == ["claude"]
+    # 无效值同样回退，保证调用方永远拿到非空列表
+    assert config_manager.target_list("") == ["claude"]
+    assert config_manager.target_list(None) == ["claude"]
 
 
 def test_build_dsh_settings_merges_and_rtrips_baseurl():
@@ -339,8 +346,12 @@ def test_pi_model_entry_unchanged_without_hint():
 
 
 def test_qoder_is_not_an_api_target():
-    """Qoder 的服务商配置被专有加密挡住：不出现在配置方案的应用目标里。"""
-    assert config_manager.target_list("claude,qoder,pi") == ["claude", "pi"]
+    """Qoder 自带完整供应商配置界面，无需 a4agent 代管。
+
+    注意判定依据不是「配置读不到」（那是技术障碍，不是产品理由），
+    而是「用户自己能配」——这是 v0.6.0 收敛判定标准的基准用例。
+    """
+    assert config_manager.target_list("claude,qoder") == ["claude"]
     assert "qoder" not in config_manager.target_list("qoder")
 
 

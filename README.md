@@ -1,14 +1,14 @@
 # a4agent
 
-**六端 AI 编程工具管理台 + 本地大模型推理控制台**：为 **Claude Code、Codex、dsh（DeepSeek Harness）、ZCode（智谱 Agentic 开发环境）、pi（本地 pi coding agent）与 Qoder（AI IDE）** 提供统一的**技能管理（Skill）**、**MCP 管理**与 **API 服务商切换**（Qoder 端托管技能与 MCP，不参与 API 切换，原因见「API 服务商切换」），并内置 **llama.cpp 本地模型推理**（原 a4agent 能力完整合并）。所有操作通过可视化界面完成，无需手动编辑配置文件。
+**六端 AI 编程工具管理台 + 本地大模型推理控制台**：为 **Claude Code、Codex、dsh（DeepSeek Harness）、ZCode（智谱 Agentic 开发环境）、pi（本地 pi coding agent）与 Qoder（AI IDE）** 提供统一的**技能管理（Skill）**与**MCP 管理**（六端全覆盖），并为**没有图形配置界面的 CLI 工具**（Claude Code、Codex）提供 **API 服务商切换**——其余四端应用自带完整的供应商配置界面，由用户自行配置，理由见「API 服务商切换」，并内置 **llama.cpp 本地模型推理**（原 a4agent 能力完整合并）。所有操作通过可视化界面完成，无需手动编辑配置文件。
 
 | 能力 | 说明 |
 |---|---|
 | **技能管理** | 六端全局/项目级 skill 自动发现、聚合标注、跨端迁移、回收站恢复，一键把项目 skill 补齐到所有缺失的端 |
 | **MCP 管理** | 六端 MCP server 自动发现与**一键安装**、跨端迁移（按传输能力矩阵校验）、快照回收站、自动/自定义**功能介绍**，密钥全程脱敏/加密 |
-| **API 切换** | 五端不同服务商、模型、API Key 一键切换，配置自动备份、原子写入，密钥 DPAPI 加密存储 |
-| **本地模型** | 把任意 `.gguf` 模型一键变成 OpenAI 兼容的本地/局域网 API 服务：引擎按显卡自动获取、模型库扫描、显存风险评估，一键接入五端配置方案 |
-| **任务下发** | 让各端 CLI 以**无头模式**后台执行任务：下发即返回、下发前自动预检（引擎 / 服务商连通 / 端配置一致）、队列轮询、产出留档、取消与超时、关窗不杀任务 |
+| **API 切换** | 为无图形界面的 CLI（Claude Code、Codex）一键切换服务商、模型、API Key，配置自动备份、原子写入，密钥 DPAPI 加密存储；其余四端应用自带供应商配置界面，由用户自行配置 |
+| **本地模型** | 把任意 `.gguf` 模型一键变成 OpenAI 兼容的本地/局域网 API 服务：引擎按显卡自动获取、模型库扫描、显存风险评估，一键接入配置方案（Claude Code / Codex） |
+| **任务下发** | 六端 CLI 以**无头模式**后台执行任务：下发即返回、下发前自动预检（引擎可用 / 配置就绪 / 真实连通）、队列轮询、产出留档、取消与超时、关窗不杀任务。直接使用你在各应用内配好的配置 |
 
 ---
 
@@ -102,16 +102,30 @@
 
 ## API 服务商切换
 
-在以上管理能力之外，a4agent 也可为五端一键切换服务商、模型与 API Key：
+a4agent 为**没有图形配置界面的 CLI 工具**提供一键切换：目前是 **Claude Code** 与 **Codex** 两端。
 
 - **Claude Code**：Anthropic 协议直连，或经内置**本地翻译代理**把请求实时翻译为 OpenAI Chat Completions 转发给 OpenAI 兼容服务商（代理仅监听 `127.0.0.1`、随机 token 鉴权，工具退出后仍存活）。
 - **Codex**：OpenAI Responses 协议写入 `~/.codex/config.toml`；上游原生支持 Responses（如 DeepSeek）时直连，否则经本地代理翻译转发。
-- **dsh**：经本地代理 `/chat/completions` 透传连接上游（顺带归一上游流式分片中的 `null` 字段，规避 dsh 适配器把工具名覆盖为空的问题），配置热加载、新会话即生效。
-- **ZCode**：原生支持 Anthropic / OpenAI 两种协议，**直连**写入 CLI 与桌面端两份配置（provider 条目以 `a4a_p<id>` 托管、保留手工条目），无需本地代理。
-- **pi**：原生支持 `anthropic-messages` / `openai-completions` / `openai-responses` 三种协议，**直连**写入 `~/.pi/agent/models.json`（provider 条目同样以 `a4a_p<id>` 托管）与 `settings.json` 的 `defaultProvider` / `defaultModel`，无需本地代理；pi 自己的凭证库 `auth.json`（可能存有 OAuth 登录态）不参与切换，下次启动 pi 会话生效。
-- **Qoder 不参与 API 切换**：Qoder 有 BYOK / 自定义服务商能力，但它把服务商与模型目录落在 `~/.qoder/.models/<uid>/` 下（`catalog-v6`、`customs`、`external-providers/catalog-v12-*`），内容经其自带 WASM 原生模块按机器码加密，算法专有且随版本变化，外部无法像其它端那样写明文配置生效。因此 a4agent 只在**技能与 MCP** 两栏托管 Qoder；需要换服务商时请在 Qoder 界面内填写。
+
+> **为什么只有这两端**：判定标准是「目标应用是否自带完整的供应商配置界面」。dsh、ZCode、pi、Qoder 这类应用都在自己的界面里提供了 BYOK——dsh 可选三种 API 协议并自动拉取模型清单，ZCode 可填双接口地址并按模型声明能力，pi 在 `/model` 里直接切换，Qoder 更有 9 个预置供应商加自定义端点。对这些应用，外部代管配置文件既不省事（用户点几下更快），又有额外风险（界面上的能力开关、上下文窗口、启用状态外部写入时无从得知，只能填保守默认值）。
+>
+> 判定依据是「用户自己能配」，不是「我们读不懂它的配置」——例如 Qoder 的模型目录虽经专有加密，但用户自己在界面里配得好好的。
+>
+> 换服务商请直接在对应应用的设置里操作，各端的入口位置见 [迁移对照表](docs/迁移对照表-三端API配置.md)。
 
 切换前自动备份目标配置文件（滚动保留最近 5 份）并原子写入；API Key 使用 Windows DPAPI 加密存储，接口永不回显明文。
+
+### 无头任务下发与配置的关系
+
+无头任务下发覆盖六端（Claude Code / Codex / ZCode / Qoder / dsh / pi），**直接使用你在各应用内自己配好的配置**——a4agent 不再为这些应用写入 API 配置，改为在下发前做一次真实连通性验证：
+
+| 步骤 | 检查什么 |
+|---|---|
+| 引擎可用 | 命令是否存在、能否执行、版本号 |
+| 配置就绪 | 读你自己的配置，判断是否已配好服务商与模型（Qoder 因配置加密读不到，如实说明并以实测为准） |
+| 真实连通 | 用最小提示词真实跑一次无头调用，拿到产出才算通过 |
+
+这样配置自由完全归你：无论你在界面里怎么配，验证的都是「能不能真跑」，而不是「配置字段是否等于我们写的值」。
 
 ### 预置服务商模板
 
@@ -152,7 +166,7 @@
 ### 局域网开放与一键接入
 
 - 「接入」卡片直接给出 Base URL、Chat Completions 地址、模型名（`model` 字段）与可直接复制的 **curl / openai SDK** 示例；推理设置切换为 `0.0.0.0` 监听后显示实际局域网调用地址
-- **「接入配置方案」**一键创建指向本地服务的配置方案，弹窗里勾选要写入的应用（Claude Code / Codex / dsh / ZCode / pi），到「配置方案」页切换即可让对应应用使用本地模型，与云上 API 无缝互切；接入 pi 时会把服务的实际上下文窗口（`-c`）一并写入模型条目，避免 pi 按默认 128K 提前截断
+- **「接入配置方案」**一键创建指向本地服务的配置方案，弹窗里勾选要写入的应用（Claude Code / Codex），到「配置方案」页切换即可让对应应用使用本地模型，与云上 API 无缝互切
 
 ---
 
@@ -164,19 +178,27 @@
 
 | 引擎 | 无头命令 | 产出形态 |
 |---|---|---|
-| **pi** | `pi -p "<任务>" --mode json --no-session` | JSONL 事件流，按 `stopReason` 定成败、按事件取文本 |
+| **Claude Code** | `claude -p "<任务>" --output-format json` | JSON 单对象，产出在 `result`，含 token 用量与成本 |
+| **Codex** | `codex exec --json --ephemeral` | JSONL 事件流，取 `agent_message` 类型的产出 |
+| **ZCode** | `zcode -p "<任务>" --json` | JSON 单对象，产出在 `text`，含 `toolCalls` / `usage` / `stopReason` |
+| **Qoder** | `qodercli -p "<任务>" -o json` | JSON 单对象 |
 | **dsh** | `dsh --profile headless "<任务>"` | stdout 直出（能解析为 JSON 时抽正文字段） |
+| **pi** | `pi -p "<任务>" --mode json --no-session` | JSONL 事件流，按 `stopReason` 定成败、按事件取文本 |
 
-- 引擎自动探测（安装状态 / 版本 / 可执行路径），**未安装的在界面置灰**并给出原因；Claude Code / Codex / ZCode 属后续批次
+- 引擎自动探测（安装状态 / 版本 / 可执行路径），**未安装的在界面置灰**并给出原因
 - 所有命令都先把命令名解析成绝对路径：Windows 上这些 CLI 都是 npm 的 `.cmd` 壳，直接把命令名交给 `subprocess` 会启动失败
+- 无头模式下没有人能点审批，因此每条命令都带权限预授权参数（`--permission-mode bypassPermissions` / `--sandbox danger-full-access` / `--mode yolo` / `--yolo`），否则会卡在审批或被直接拒绝
+- dsh 额外需要屏蔽 profile 里的外部插件：headless profile 缺少它们依赖的 host 服务，不屏蔽会在启动阶段直接失败。a4agent 生成 `--patch` 覆盖层只禁用那批相对路径插入的外部插件，不改 profile 本身
 
 ### 下发前自动预检（不通就不入队）
 
 点「下发任务」会先同步做三步检查，任一步失败就**不启动引擎**，并用人话告诉你为什么：
 
 1. **引擎可用**：目标 CLI 已安装且真能执行（结果缓存 5 分钟）
-2. **服务商连通**：用当前生效方案打一次最小请求（Anthropic 走 `max_tokens=1`，OpenAI 走 `/models`）；401/403 → 「密钥无效或已过期」，超时/断连 → 「服务商暂不可达」；服务商是**本地模型**时改为探活，失败提示「本地推理服务未启动」，不要求 API Key
-3. **端配置一致**：无头 CLI 读的是自己的配置文件，与数据库里的生效方案可能漂移，所以预检会读目标端的实际配置比对（pi 读 `settings.json` 的 `defaultProvider` + `models.json` 的 `baseUrl` / 模型；dsh 读 `settings.yaml` 的连接地址并检查本地翻译代理是否活着）。不一致就拦下并提示「重新切换方案」，避免任务用错模型/错服务商跑完
+2. **配置就绪**：读**你自己在应用内配好的配置**，判断是否已配好服务商与模型。读不到时（如 Qoder 的模型目录经专有加密）如实说明「无法校验，请以实测结果为准」，不假装通过
+3. **真实连通**：用最小提示词真实跑一次无头调用，拿到产出才算通过
+
+第 2、3 步不再比对「配置字段是否等于我们写的值」——那会把「配置得和我不一样」误判成不可用。真实调用不管怎么配都能给出诚实答案：密钥有效没、模型名拼写对不对、网络通不通，一次调用全都会暴露出来。配置还没配好时不会跑实测（跑必然失败，白白等待）。
 
 被拦下的任务仍会留一条 `precheck_failed` 记录，在队列里可以看到失败在哪一步、耗时多少。
 
@@ -213,20 +235,20 @@
 
 1. 安装完成后，从**开始菜单**或**桌面快捷方式**启动 a4agent
 2. 首次安装/运行时若出现 **Windows SmartScreen 提示**，点击「更多信息 → 仍要运行」即可（应用未做商业代码签名，属正常现象，不影响功能）
-3. 界面六个页签：配置方案（API 切换）、供应商管理、**技能管理**、**MCP 管理**、**本地模型**（llama.cpp 推理控制台）、**任务下发**（无头 Agent 任务）
+3. 界面六个页签：配置方案（API 切换，仅 Claude Code 与 Codex）、供应商管理、**技能管理**、**MCP 管理**、**本地模型**（llama.cpp 推理控制台）、**任务下发**（无头 Agent 任务）
 
 ### 数据与隐私
 
 - 运行时数据（数据库、配置备份）写入 `%APPDATA%\a4agent\`，日志写入 `~/.a4agent/logs/`
 - 无头任务的引擎产出写入 `%APPDATA%\a4agent\task_outputs\`（与配置备份同级、仅本机用户可访问）；产出是引擎原始输出，可能包含代码与路径等敏感内容，「问题反馈」**不会**自动附带任务产出，删除任务会同步删除其产出文件
 - API Key 使用 Windows DPAPI 加密存储，与当前 Windows 用户绑定
-- 修改前自动备份原配置文件（`~/.claude/settings.json` / `~/.codex/config.toml` / `~/.dsh/settings.yaml` / `~/.dsh/.credentials.yaml` / `~/.zcode/cli/config.json` / `~/.zcode/v2/config.json` / `~/.pi/agent/models.json` / `~/.pi/agent/settings.json` 等，滚动保留最近 5 份）
+- 修改前自动备份原配置文件（`~/.claude/settings.json` / `~/.codex/config.toml`，滚动保留最近 5 份）
 
 ### 常见问题
 
 - **杀毒软件报毒**：PyInstaller 打包的程序偶被安全软件误报，请添加信任或排除；可将样本提交给对应厂商申诉误报
 - **升级**：直接运行新版 `a4agent-setup-*.exe` 覆盖安装即可，数据与配置（`%APPDATA%\a4agent\`）会保留；升级前会自动停止后台翻译代理并清理旧文件
-- **从 a4api 升级（v0.3.x → v0.4.0+）**：产品已更名为 a4agent，直接安装新版即可——首次启动会把 `%APPDATA%\a4api\` 数据自动迁入 `%APPDATA%\a4agent\`，安装器会把程序目录从 `Programs\a4api` 迁到 `Programs\a4agent` 并清理旧快捷方式；此前写入 Claude Code / Codex / dsh / zcode 的 `a4api_p*` 托管条目会在下次切换时自动替换为 `a4a_p*`，无需手工处理。v0.3.x 的「检查更新」也能直接升级到新版
+- **从 a4api 升级（v0.3.x → v0.4.0+）**：产品已更名为 a4agent，直接安装新版即可——首次启动会把 `%APPDATA%\a4api\` 数据自动迁入 `%APPDATA%\a4agent\`，安装器会把程序目录从 `Programs\a4api` 迁到 `Programs\a4agent` 并清理旧快捷方式；此前写入 Claude Code / Codex 的 `a4api_p*` 托管条目会在下次切换时自动替换为 `a4a_p*`，无需手工处理。v0.3.x 的「检查更新」也能直接升级到新版
 - **卸载**：在「设置 → 应用」中卸载；程序文件会移除，运行数据（数据库、配置备份）保留在 `%APPDATA%\a4agent\`，如需彻底清除请手动删除该目录
 - **任务下发**：关闭主窗口**不等于退出**——a4agent 会转入后台把任务跑完，再次启动程序即唤回原窗口；要真正结束请用顶栏「退出」（会先告知还有几个任务在跑）。任务到终态时，窗口已隐藏则闪烁任务栏图标提醒
 - **反馈问题**：推荐用应用内入口——页脚「问题反馈」直接提交，支持截图（≤10 张 × ≤1MB）、自动附带环境信息与可选日志，直达开发者邮箱 eogee@qq.com；也可附上 `~/.a4agent/logs/a4agent.log` 日志片段提 Issue

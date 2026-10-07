@@ -15,6 +15,7 @@ except ModuleNotFoundError:  # Python 3.10
 import tomli_w
 import yaml
 
+from .config_io import atomic_write_doc, backup_doc, backup_many, read_doc, resolve_path
 from .database import get_data_dir
 from .env_compat import env_first
 
@@ -69,10 +70,10 @@ QODER_SKILLS_CONFIG_ENV = ("A4AGENT_QODER_SKILLS_PATH",)
 
 
 def settings_path() -> Path:
-    override = env_first("A4AGENT_SETTINGS_PATH", "A4API_SETTINGS_PATH")
-    if override:
-        return Path(override)
-    return Path.home() / ".claude" / "settings.json"
+    return resolve_path(
+        ("A4AGENT_SETTINGS_PATH", "A4API_SETTINGS_PATH"),
+        lambda: Path.home() / ".claude" / CONFIG_FILENAME,
+    )
 
 
 def backup_dir() -> Path:
@@ -82,61 +83,34 @@ def backup_dir() -> Path:
 
 
 def target_list(targets) -> list:
-    """规范化配置方案的应用目标列表（claude / codex / dsh / zcode / pi）。"""
+    """规范化配置方案的应用目标列表（仅 claude / codex）。
+
+    v0.6.0 起不再代管dsh / ZCode / pi 的 API 配置：这三端应用自身都自带完整
+    的供应商配置界面，由用户自行配置更可靠（应用界面上的能力开关、上下文
+    窗口等状态外部写入时无从得知）。技能与 MCP 托管不受影响。
+    旧数据里残留的这三个值在读入时被静默丢弃。
+    """
     result = []
     for t in (targets or "claude").split(","):
         t = (t or "").strip()
-        if t in ("claude", "codex", "dsh", "zcode", "pi") and t not in result:
+        if t in ("claude", "codex") and t not in result:
             result.append(t)
     return result or ["claude"]
 
 
 def read_settings() -> dict:
-    """读取当前配置；文件不存在或损坏时返回空字典。"""
-    path = settings_path()
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8-sig"))  # type: ignore[no-any-return]
-    except json.JSONDecodeError:
-        return {}
+    """读取 Claude Code settings.json；不存在或损坏时返回空字典。"""
+    return read_doc(settings_path(), "json_sig")
 
 
 def backup_settings() -> Path | None:
-    """修改前备份，返回备份文件路径；原文件不存在时返回 None。滚动保留最近 N 份。"""
-    path = settings_path()
-    if not path.exists():
-        return None
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dest = backup_dir() / f"settings.{ts}.json.bak"
-    shutil.copy2(path, dest)
-    backups = sorted(backup_dir().glob("settings.*.json.bak"))
-    for old in backups[:-DEFAULT_BACKUP_KEEP]:
-        try:
-            old.unlink()
-        except OSError:
-            pass
-    return dest
+    """修改前备份 settings.json（滚动保留最近 N 份）。"""
+    return backup_doc(settings_path(), "settings.{stamp}{ext}.bak")
 
 
 def atomic_write_settings(data: dict) -> None:
-    """原子写入：先写临时文件再替换，避免写入中断导致配置损坏。"""
-    path = settings_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".settings.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    except Exception:
-        if os.path.exists(tmp):
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-        raise
+    """原子写入 Claude Code settings.json。"""
+    atomic_write_doc(settings_path(), data, "json_sig")
 
 
 def build_settings(
@@ -184,42 +158,26 @@ def build_settings(
 
 
 def codex_settings_path() -> Path:
-    """Codex 全局配置文件路径，可用环境变量 A4AGENT_CODEX_CONFIG_PATH 覆盖。"""
-    override = env_first("A4AGENT_CODEX_CONFIG_PATH", "A4API_CODEX_CONFIG_PATH")
-    if override:
-        return Path(override)
-    return Path.home() / ".codex" / CODEX_CONFIG_FILENAME
+    """Codex 全局配置文件路径，可用 A4AGENT_CODEX_CONFIG_PATH 覆盖。"""
+    return resolve_path(
+        ("A4AGENT_CODEX_CONFIG_PATH", "A4API_CODEX_CONFIG_PATH"),
+        lambda: Path.home() / ".codex" / CODEX_CONFIG_FILENAME,
+    )
 
 
 def read_codex_settings() -> dict:
     """读取 Codex config.toml；文件不存在或损坏时返回空字典。"""
-    path = codex_settings_path()
-    if not path.exists():
-        return {}
-    try:
-        raw = path.read_bytes()
-        if raw.startswith(b"\xef\xbb\xbf"):
-            raw = raw[3:]
-        return tomllib.loads(raw.decode("utf-8"))  # type: ignore[no-any-return]
-    except (OSError, ValueError):
-        return {}
+    return read_doc(codex_settings_path(), "toml")
 
 
 def backup_codex_settings() -> Path | None:
-    """修改前备份 config.toml，返回备份文件路径；原文件不存在时返回 None。"""
-    path = codex_settings_path()
-    if not path.exists():
-        return None
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dest = backup_dir() / f"codex.config.{ts}.toml.bak"
-    shutil.copy2(path, dest)
-    backups = sorted(backup_dir().glob("codex.config.*.toml.bak"))
-    for old in backups[:-DEFAULT_BACKUP_KEEP]:
-        try:
-            old.unlink()
-        except OSError:
-            pass
-    return dest
+    """修改前备份 config.toml（滚动保留最近 N 份）。"""
+    return backup_doc(codex_settings_path(), "codex.config.{stamp}.toml.bak")
+
+
+def atomic_write_codex_settings(data: dict) -> None:
+    """原子写入 config.toml。"""
+    atomic_write_doc(codex_settings_path(), data, "toml")
 
 
 def build_codex_settings(
@@ -257,26 +215,6 @@ def build_codex_settings(
     data["model"] = model
     data["model_provider"] = provider_key
     return data
-
-
-def atomic_write_codex_settings(data: dict) -> None:
-    """原子写入 config.toml：先写临时文件再替换，避免写入中断损坏配置。"""
-    path = codex_settings_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".codex-config.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as f:
-            tomli_w.dump(data, f)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    except Exception:
-        if os.path.exists(tmp):
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-        raise
 
 
 # ---------------- Codex 模型目录（model_catalog_json） ----------------
@@ -422,66 +360,61 @@ def dsh_home() -> Path:
 
 
 def dsh_settings_path() -> Path:
-    """dsh 全局设置文档路径，可用环境变量 A4AGENT_DSH_SETTINGS_PATH 覆盖。"""
-    override = env_first("A4AGENT_DSH_SETTINGS_PATH", "A4API_DSH_SETTINGS_PATH")
-    if override:
-        return Path(override)
-    return dsh_home() / DSH_SETTINGS_FILENAME
+    """dsh 全局设置文档路径，可用 A4AGENT_DSH_SETTINGS_PATH 覆盖。"""
+    return resolve_path(
+        ("A4AGENT_DSH_SETTINGS_PATH", "A4API_DSH_SETTINGS_PATH"),
+        lambda: dsh_home() / DSH_SETTINGS_FILENAME,
+    )
+
+
+def dsh_settings_candidates() -> list:
+    """dsh 设置文档的所有可能落点（存在与否都返回）。
+
+    主路径是 `settings.yaml`，但实测发现部分安装环境下该文件名为
+    `settings.yaml.imported`（来源未能确证——dsh 主体包、dsh-tui 与本工具
+    都未使用该名）。两种落点都纳入处理范围，避免残留断链。
+    读取一律以主路径为准，此列表只用于清理与诊断。
+    """
+    primary = dsh_settings_path()
+    return [primary, Path(f"{primary}.imported")]
 
 
 def dsh_credentials_path() -> Path:
-    """dsh 凭证文档路径，可用环境变量 A4AGENT_DSH_CREDENTIALS_PATH 覆盖。"""
-    override = env_first("A4AGENT_DSH_CREDENTIALS_PATH", "A4API_DSH_CREDENTIALS_PATH")
-    if override:
-        return Path(override)
-    return dsh_home() / DSH_CREDENTIALS_FILENAME
-
-
-def _read_yaml(path: Path) -> dict:
-    """读取 YAML 文档为 dict；文件不存在或损坏时返回空字典。"""
-    if not path.exists():
-        return {}
-    try:
-        value = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
-        return {}
-    return value if isinstance(value, dict) else {}
+    """dsh 凭证文档路径，可用 A4AGENT_DSH_CREDENTIALS_PATH 覆盖。"""
+    return resolve_path(
+        ("A4AGENT_DSH_CREDENTIALS_PATH", "A4API_DSH_CREDENTIALS_PATH"),
+        lambda: dsh_home() / DSH_CREDENTIALS_FILENAME,
+    )
 
 
 def read_dsh_settings() -> dict:
     """读取 dsh settings.yaml。"""
-    return _read_yaml(dsh_settings_path())
+    return read_doc(dsh_settings_path(), "yaml")
 
 
 def read_dsh_credentials() -> dict:
     """读取 dsh .credentials.yaml。"""
-    return _read_yaml(dsh_credentials_path())
-
-
-def _backup_yaml(path: Path, prefix: str) -> Path | None:
-    """修改前备份 YAML 文档，返回备份路径；原文件不存在时返回 None。滚动保留最近 N 份。"""
-    if not path.exists():
-        return None
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dest = backup_dir() / f"{prefix}.{ts}.yaml.bak"
-    shutil.copy2(path, dest)
-    backups = sorted(backup_dir().glob(f"{prefix}.*.yaml.bak"))
-    for old in backups[:-DEFAULT_BACKUP_KEEP]:
-        try:
-            old.unlink()
-        except OSError:
-            pass
-    return dest
+    return read_doc(dsh_credentials_path(), "yaml")
 
 
 def backup_dsh_settings() -> Path | None:
-    """修改前备份 settings.yaml，返回备份文件路径。"""
-    return _backup_yaml(dsh_settings_path(), "dsh.settings")
+    """修改前备份 settings.yaml。"""
+    return backup_doc(dsh_settings_path(), "dsh.settings.{stamp}.yaml.bak")
 
 
 def backup_dsh_credentials() -> Path | None:
-    """修改前备份 .credentials.yaml，返回备份文件路径。"""
-    return _backup_yaml(dsh_credentials_path(), "dsh.credentials")
+    """修改前备份 .credentials.yaml。"""
+    return backup_doc(dsh_credentials_path(), "dsh.credentials.{stamp}.yaml.bak")
+
+
+def atomic_write_dsh_settings(data: dict) -> None:
+    """原子写入 dsh settings.yaml。"""
+    atomic_write_doc(dsh_settings_path(), data, "yaml")
+
+
+def atomic_write_dsh_credentials(data: dict) -> None:
+    """原子写入 dsh .credentials.yaml。"""
+    atomic_write_doc(dsh_credentials_path(), data, "yaml")
 
 
 def build_dsh_settings(
@@ -560,37 +493,6 @@ def build_dsh_credentials(existing: dict | None, api_key: str, proxy_token: str 
     return out
 
 
-def _atomic_write_yaml(path: Path, data: dict) -> None:
-    """原子写入 YAML：先写临时文件再替换，避免写入中断损坏配置。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".dsh.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            yaml.safe_dump(
-                data, f, allow_unicode=True, sort_keys=False, default_flow_style=False
-            )
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    except Exception:
-        if os.path.exists(tmp):
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-        raise
-
-
-def atomic_write_dsh_settings(data: dict) -> None:
-    """原子写入 dsh settings.yaml。"""
-    _atomic_write_yaml(dsh_settings_path(), data)
-
-
-def atomic_write_dsh_credentials(data: dict) -> None:
-    """原子写入 dsh .credentials.yaml。"""
-    _atomic_write_yaml(dsh_credentials_path(), data)
-
-
 def read_dsh_selection() -> tuple[str | None, str | None]:
     """读取 dsh 当前生效的默认模型与 provider（agent-default-model 段）。"""
     section = read_dsh_settings().get(DSH_MODEL_NS)
@@ -619,94 +521,42 @@ def zcode_home() -> Path:
 
 def zcode_cli_config_path() -> Path:
     """zcode CLI 用户配置文件路径，可用环境变量 A4AGENT_ZCODE_CLI_CONFIG_PATH 覆盖。"""
-    override = env_first(*ZCODE_CLI_CONFIG_ENV)
-    if override:
-        return Path(override)
-    return zcode_home() / ZCODE_CLI_CONFIG_REL
+    return resolve_path(ZCODE_CLI_CONFIG_ENV, lambda: zcode_home() / ZCODE_CLI_CONFIG_REL)
 
 
 def zcode_v2_config_path() -> Path:
     """zcode 桌面端 provider 配置路径，可用环境变量 A4AGENT_ZCODE_V2_CONFIG_PATH 覆盖。"""
-    override = env_first(*ZCODE_V2_CONFIG_ENV)
-    if override:
-        return Path(override)
-    return zcode_home() / ZCODE_V2_CONFIG_REL
-
-
-def _read_json_config(path: Path) -> dict:
-    """读取 JSON 配置；文件不存在或损坏时返回空字典。"""
-    if not path.exists():
-        return {}
-    try:
-        value = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):
-        return {}
-    return value if isinstance(value, dict) else {}
+    return resolve_path(ZCODE_V2_CONFIG_ENV, lambda: zcode_home() / ZCODE_V2_CONFIG_REL)
 
 
 def read_zcode_cli_config() -> dict:
     """读取 zcode cli/config.json。"""
-    return _read_json_config(zcode_cli_config_path())
+    return read_doc(zcode_cli_config_path(), "json_sig")
 
 
 def read_zcode_v2_config() -> dict:
     """读取 zcode v2/config.json。"""
-    return _read_json_config(zcode_v2_config_path())
+    return read_doc(zcode_v2_config_path(), "json_sig")
 
 
 def backup_zcode_configs() -> dict:
-    """修改前备份 zcode 两份配置，返回 {cli, v2} 各自的备份路径（无原文件时为 None）。
-
-    滚动保留最近 DEFAULT_BACKUP_KEEP 份，与其它目标一致。
-    """
-    result: dict = {}
-    for key, path in (
-        ("cli", zcode_cli_config_path()),
-        ("v2", zcode_v2_config_path()),
-    ):
-        if not path.exists():
-            result[key] = None
-            continue
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        dest = backup_dir() / f"zcode.{key}.{ts}.json.bak"
-        shutil.copy2(path, dest)
-        backups = sorted(backup_dir().glob(f"zcode.{key}.*.json.bak"))
-        for old in backups[:-DEFAULT_BACKUP_KEEP]:
-            try:
-                old.unlink()
-            except OSError:
-                pass
-        result[key] = str(dest)
-    return result
-
-
-def _atomic_write_json(path: Path, data: dict, prefix: str = ".zcode.") -> None:
-    """原子写入 JSON：先写临时文件再替换，避免写入中断损坏配置。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=prefix, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    except Exception:
-        if os.path.exists(tmp):
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-        raise
+    """修改前备份 zcode 两份配置，返回 {cli, v2} 各自的备份路径（无原文件时为 None）。"""
+    return backup_many(
+        [
+            ("cli", zcode_cli_config_path(), "zcode.cli.{stamp}.json.bak"),
+            ("v2", zcode_v2_config_path(), "zcode.v2.{stamp}.json.bak"),
+        ]
+    )
 
 
 def atomic_write_zcode_cli_config(data: dict) -> None:
     """原子写入 zcode cli/config.json。"""
-    _atomic_write_json(zcode_cli_config_path(), data)
+    atomic_write_doc(zcode_cli_config_path(), data, "json_sig")
 
 
 def atomic_write_zcode_v2_config(data: dict) -> None:
     """原子写入 zcode v2/config.json。"""
-    _atomic_write_json(zcode_v2_config_path(), data)
+    atomic_write_doc(zcode_v2_config_path(), data, "json_sig")
 
 
 def _zcode_model_entry(v2_existing: dict | None, model: str) -> dict:
@@ -808,77 +658,52 @@ def read_zcode_selection() -> tuple[str | None, str | None]:
 
 def pi_agent_dir() -> Path:
     """pi 的 agent 目录：A4AGENT_PI_AGENT_DIR（兼容 pi 自身的 PI_CODING_AGENT_DIR），否则 ~/.pi/agent。"""
-    override = env_first(*PI_AGENT_DIR_ENV)
-    if override:
-        return Path(override)
-    return Path.home() / ".pi" / "agent"
+    return resolve_path(PI_AGENT_DIR_ENV, lambda: Path.home() / ".pi" / "agent")
 
 
 def pi_skills_root() -> Path:
     """pi 全局 skill 根，可用环境变量 A4AGENT_PI_SKILLS_PATH 覆盖。"""
-    override = env_first("A4AGENT_PI_SKILLS_PATH")
-    if override:
-        return Path(override)
-    return pi_agent_dir() / "skills"
+    return resolve_path(("A4AGENT_PI_SKILLS_PATH",), lambda: pi_agent_dir() / "skills")
 
 
 def pi_models_config_path() -> Path:
     """pi 的 provider / 模型目录配置路径，可用 A4AGENT_PI_MODELS_PATH 覆盖。"""
-    override = env_first(PI_MODELS_CONFIG_ENV)
-    if override:
-        return Path(override)
-    return pi_agent_dir() / PI_MODELS_FILENAME
+    return resolve_path((PI_MODELS_CONFIG_ENV,), lambda: pi_agent_dir() / PI_MODELS_FILENAME)
 
 
 def pi_settings_path() -> Path:
     """pi 的会话默认配置路径，可用 A4AGENT_PI_SETTINGS_PATH 覆盖。"""
-    override = env_first(PI_SETTINGS_CONFIG_ENV)
-    if override:
-        return Path(override)
-    return pi_agent_dir() / PI_SETTINGS_FILENAME
+    return resolve_path((PI_SETTINGS_CONFIG_ENV,), lambda: pi_agent_dir() / PI_SETTINGS_FILENAME)
 
 
 def read_pi_models_config() -> dict:
     """读取 pi models.json。"""
-    return _read_json_config(pi_models_config_path())
+    return read_doc(pi_models_config_path(), "json_sig")
 
 
 def read_pi_settings() -> dict:
     """读取 pi settings.json。"""
-    return _read_json_config(pi_settings_path())
+    return read_doc(pi_settings_path(), "json_sig")
 
 
 def backup_pi_configs() -> dict:
     """修改前备份 pi 两份配置，返回 {models, settings} 各自备份路径（无原文件时 None）。"""
-    result: dict = {}
-    for key, path in (
-        ("models", pi_models_config_path()),
-        ("settings", pi_settings_path()),
-    ):
-        if not path.exists():
-            result[key] = None
-            continue
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        dest = backup_dir() / f"pi.{key}.{ts}.json.bak"
-        shutil.copy2(path, dest)
-        backups = sorted(backup_dir().glob(f"pi.{key}.*.json.bak"))
-        for old in backups[:-DEFAULT_BACKUP_KEEP]:
-            try:
-                old.unlink()
-            except OSError:
-                pass
-        result[key] = str(dest)
-    return result
+    return backup_many(
+        [
+            ("models", pi_models_config_path(), "pi.models.{stamp}.json.bak"),
+            ("settings", pi_settings_path(), "pi.settings.{stamp}.json.bak"),
+        ]
+    )
 
 
 def atomic_write_pi_models_config(data: dict) -> None:
     """原子写入 pi models.json。"""
-    _atomic_write_json(pi_models_config_path(), data, prefix=".pi.")
+    atomic_write_doc(pi_models_config_path(), data, "json_sig")
 
 
 def atomic_write_pi_settings(data: dict) -> None:
     """原子写入 pi settings.json。"""
-    _atomic_write_json(pi_settings_path(), data, prefix=".pi.")
+    atomic_write_doc(pi_settings_path(), data, "json_sig")
 
 
 def pi_api_kind(provider) -> str:
@@ -979,6 +804,8 @@ def qoder_home() -> Path:
     """Qoder 配置目录：优先 A4AGENT_QODER_HOME，其次取实际存在的发行版目录。
 
     目录名随发行版变化（国际版 .qoder / 国内版 .qoder-cn），故按候选名探测。
+    这也是全文件唯一保留手写环境变量解析的地方——候选目录探测无法表达成
+    resolve_path 的「一串环境变量名 + 单个默认值」。
     """
     override = env_first(*QODER_HOME_ENV)
     if override:
@@ -992,7 +819,4 @@ def qoder_home() -> Path:
 
 def qoder_skills_root() -> Path:
     """Qoder 全局 skill 根（~/.qoder/skills），可用 A4AGENT_QODER_SKILLS_PATH 覆盖。"""
-    override = env_first(*QODER_SKILLS_CONFIG_ENV)
-    if override:
-        return Path(override)
-    return qoder_home() / "skills"
+    return resolve_path(QODER_SKILLS_CONFIG_ENV, lambda: qoder_home() / "skills")

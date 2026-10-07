@@ -168,12 +168,8 @@ def ensure_schema() -> None:
                 )
             )
         if "max_tokens" not in cols:
-            conn.execute(
-                text(
-                    "ALTER TABLE configurations "
-                    "ADD COLUMN max_tokens INTEGER"
-                )
-            )
+            conn.execute(text("ALTER TABLE configurations ADD COLUMN max_tokens INTEGER"))
+
         pcols = {row[1] for row in conn.execute(text("PRAGMA table_info(providers)"))}
         if "native_responses" not in pcols:
             conn.execute(
@@ -195,6 +191,35 @@ def ensure_schema() -> None:
                 conn.execute(text("ALTER TABLE feedback ADD COLUMN image_count INTEGER NOT NULL DEFAULT 0"))
             if "emailed" not in fcols:
                 conn.execute(text("ALTER TABLE feedback ADD COLUMN emailed BOOLEAN NOT NULL DEFAULT 0"))
+
+        _migrate_targets_v2(conn, text)
+
+
+def _migrate_targets_v2(conn, text) -> None:
+    """v0.6.0：剔除配置方案里已移交应用的目标值。
+
+    dsh / ZCode / pi 改为在应用内自配后，旧数据里残留的这些值若不清掉，
+    前端下拉已无对应选项，卡片会显示成无法编辑的残留状态。这里在启动迁移里
+    一次性剔除，剔空后回退 claude——保证每个方案始终有至少一个有效目标。
+
+    只改数据库里的记录，不动用户各应用中的配置文件（那部分由
+    removal.cleanup_managed_entries 负责，且必须先备份）。
+    """
+    rows = conn.execute(text("SELECT id, targets FROM configurations")).fetchall()
+    for row_id, raw in rows:
+        kept = [
+            t.strip()
+            for t in (raw or "").split(",")
+            if t.strip() in ("claude", "codex")
+        ]
+        if not kept:
+            kept = ["claude"]
+        new_value = ",".join(kept)
+        if new_value != (raw or ""):
+            conn.execute(
+                text("UPDATE configurations SET targets = :t WHERE id = :i"),
+                {"t": new_value, "i": row_id},
+            )
 
 
 @event.listens_for(engine, "connect")

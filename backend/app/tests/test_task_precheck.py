@@ -130,7 +130,10 @@ def test_proxy_port_reports_proxy_not_running(calls):
     assert bad["ok"] is False and "翻译代理" in bad["detail"]
 
 
-# ---------------- 端配置第二跳 ----------------
+# ---------------- 配置就绪（读用户自己的配置，非托管条目） ----------------
+#
+# v0.6.0 的关键转变：这一跳不再比对 a4a_p* 托管条目，而是读用户自己在应用内
+# 配的内容。因此测试基准也从「托管条目长什么样」变成「用户的任意配置都能认」。
 
 
 @pytest.fixture()
@@ -148,70 +151,171 @@ def _write_pi(agent, models, settings):
     (agent / "settings.json").write_text(json.dumps(settings, ensure_ascii=False), encoding="utf-8")
 
 
+def test_pi_user_config_is_ready_without_managed_prefix(pi_env):
+    """用户自己起的 provider 名（非 a4a_p*）也必须被认——这是解耦的核心。"""
+    _write_pi(
+        pi_env,
+        {"providers": {"strata": {"baseUrl": "http://127.0.0.1:9/v1", "models": [{"id": "qwen3.8"}]}}},
+        {"defaultProvider": "strata", "defaultModel": "qwen3.8"},
+    )
+    ready, detail = task_precheck._read_user_config_signal("pi")
+    assert ready is True
+    assert "strata" in detail
+
+
 def test_pi_missing_selection_blocks_dispatch(pi_env):
     _write_pi(pi_env, {"providers": {}}, {})
-    result = task_precheck.check_engine_config("pi", _provider(api_base="http://127.0.0.1:8080/v1"), "m")
-    assert result["ok"] is False and "尚未指向" in result["detail"]
+    ready, detail = task_precheck._read_user_config_signal("pi")
+    assert ready is False and "models.json" in detail
 
 
-def test_pi_base_mismatch_blocks_dispatch(pi_env):
-    _write_pi(
-        pi_env,
-        {"providers": {"strata": {"baseUrl": "http://127.0.0.1:9/v1", "models": [{"id": "m"}]}}},
-        {"defaultProvider": "strata", "defaultModel": "m"},
+def test_dsh_reads_official_namespace_only(tmp_path, monkeypatch):
+    """dsh 只认界面配置的 llm-pi-ai；旧的 llm-deepseek 侧门不再算就绪。"""
+    settings = tmp_path / "settings.yaml"
+    settings.write_text(
+        json.dumps({"llm-pi-ai": {"providers": {"my-gateway": {"baseUrl": "https://gw/v1"}}}}),
+        encoding="utf-8",
     )
-    result = task_precheck.check_engine_config("pi", _provider("openai", "https://api.example.com"), "m")
-    assert result["ok"] is False and "不一致" in result["detail"]
+    monkeypatch.setenv("A4AGENT_DSH_SETTINGS_PATH", str(settings))
+    ready, detail = task_precheck._read_user_config_signal("dsh")
+    assert ready is True and "1 个供应商" in detail
 
 
-def test_pi_model_absent_blocks_dispatch(pi_env):
-    _write_pi(
-        pi_env,
-        {"providers": {"a4a_p1": {"baseUrl": "https://api.example.com", "models": [{"id": "other"}]}}},
-        {"defaultProvider": "a4a_p1", "defaultModel": "other"},
+def test_dsh_legacy_sidepath_is_not_ready(tmp_path, monkeypatch):
+    """只有 llm-deepseek 段时不算就绪——那是我们旧的侧门写入路径。"""
+    settings = tmp_path / "settings.yaml"
+    settings.write_text(
+        json.dumps({"llm-deepseek": {"baseURL": "http://127.0.0.1:17890"}}), encoding="utf-8"
     )
-    result = task_precheck.check_engine_config("pi", _provider("openai", "https://api.example.com"), "deepseek-chat")
-    assert result["ok"] is False and "没有模型" in result["detail"]
-
-
-def test_pi_aligned_config_passes(pi_env):
-    _write_pi(
-        pi_env,
-        {"providers": {"a4a_p1": {"baseUrl": "https://api.example.com/v1/", "models": [{"id": "deepseek-chat"}]}}},
-        {"defaultProvider": "a4a_p1", "defaultModel": "deepseek-chat"},
-    )
-    ok = task_precheck.check_engine_config("pi", _provider("openai", "https://api.example.com/v1"), "deepseek-chat")
-    assert ok["ok"] is True
+    monkeypatch.setenv("A4AGENT_DSH_SETTINGS_PATH", str(settings))
+    ready, detail = task_precheck._read_user_config_signal("dsh")
+    assert ready is False and "Add a custom provider" in detail
 
 
 def test_dsh_without_config_blocks_dispatch(tmp_path, monkeypatch):
     monkeypatch.setenv("A4AGENT_DSH_SETTINGS_PATH", str(tmp_path / "missing.yaml"))
-    result = task_precheck.check_engine_config("dsh", _provider("openai"), "m")
-    assert result["ok"] is False and "尚未写入" in result["detail"]
+    ready, detail = task_precheck._read_user_config_signal("dsh")
+    assert ready is False and "Add a custom provider" in detail
 
 
-def test_dsh_proxy_down_blocks_dispatch(tmp_path, monkeypatch, calls):
-    settings = tmp_path / "settings.yaml"
-    settings.write_text("llm-deepseek:\n  baseURL: http://127.0.0.1:17890/v1\n", encoding="utf-8")
-    monkeypatch.setenv("A4AGENT_DSH_SETTINGS_PATH", str(settings))
-    calls["proxy"] = False
-    result = task_precheck.check_engine_config("dsh", _provider("openai"), "m")
-    assert result["ok"] is False and "未运行" in result["detail"]
+def test_claude_and_codex_read_user_settings(tmp_path, monkeypatch):
+    settings = tmp_path / "settings.json"
+    settings.write_text(
+        json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://x", "ANTHROPIC_AUTH_TOKEN": "sk-1"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("A4AGENT_SETTINGS_PATH", str(settings))
+    ready, _ = task_precheck._read_user_config_signal("claude")
+    assert ready is True
 
-    calls["proxy"] = True
-    assert task_precheck.check_engine_config("dsh", _provider("openai"), "m")["ok"] is True
+    codex = tmp_path / "config.toml"
+    codex.write_text('model = "m"\nmodel_provider = "p"\n', encoding="utf-8")
+    monkeypatch.setenv("A4AGENT_CODEX_CONFIG_PATH", str(codex))
+    ready, detail = task_precheck._read_user_config_signal("codex")
+    assert ready is True and "m" in detail
+
+
+def test_qoder_config_is_readable_false_but_honest():
+    """Qoder 配置加密读不到：如实说「以实测为准」，不假装校验通过。"""
+    ready, detail = task_precheck._read_user_config_signal("qoder")
+    assert ready is False
+    assert "无法读取" in detail and "实测" in detail
+
+
+def test_zcode_reads_user_provider(tmp_path, monkeypatch):
+    cli = tmp_path / "zc.json"
+    cli.write_text(
+        json.dumps({"provider": {"mine": {"name": "M"}}, "model": "mine/gpt"}), encoding="utf-8"
+    )
+    monkeypatch.setenv("A4AGENT_ZCODE_CLI_CONFIG_PATH", str(cli))
+    ready, detail = task_precheck._read_user_config_signal("zcode")
+    assert ready is True and "mine/gpt" in detail
+
+
+# ---------------- 真实连通（smoke） ----------------
+
+
+def test_smoke_run_passes_when_engine_answers(monkeypatch):
+    """实测成功：真实跑一次拿到产出即算通过。"""
+    monkeypatch.setattr(task_engines, "resolve_command", lambda tool: r"C:\bin\pi.cmd")
+    monkeypatch.setattr(
+        task_precheck.subprocess, "run",
+        lambda argv, **kw: type("R", (), {
+            "returncode": 0,
+            "stdout": '{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"ok"}]}}',
+            "stderr": "",
+        })(),
+    )
+    result = task_precheck.smoke_run("pi")
+    assert result["ok"] is True
+    assert "实测通过" in result["detail"]
+
+
+def test_smoke_run_reports_failure_reason(monkeypatch):
+    """实测失败时要把引擎的错误说清楚，而不是只报「不可用」。"""
+    monkeypatch.setattr(task_engines, "resolve_command", lambda tool: r"C:\bin\pi.cmd")
+    monkeypatch.setattr(
+        task_precheck.subprocess, "run",
+        lambda argv, **kw: type("R", (), {
+            "returncode": 1, "stdout": "", "stderr": "上游 401 unauthorized",
+        })(),
+    )
+    result = task_precheck.smoke_run("pi")
+    assert result["ok"] is False
+    assert "401" in result["detail"]
+
+
+def test_smoke_run_timeout_is_reported(monkeypatch):
+    import subprocess as sp
+
+    monkeypatch.setattr(task_engines, "resolve_command", lambda tool: r"C:\bin\pi.cmd")
+
+    def boom(argv, **kw):
+        raise sp.TimeoutExpired(argv, 90)
+
+    monkeypatch.setattr(task_precheck.subprocess, "run", boom)
+    result = task_precheck.smoke_run("pi")
+    assert result["ok"] is False and "超时" in result["detail"]
+
+
+def test_smoke_run_missing_command_is_reported(monkeypatch):
+    monkeypatch.setattr(task_engines, "resolve_command", lambda tool: None)
+    result = task_precheck.smoke_run("zcode")
+    assert result["ok"] is False and "未探测到" in result["detail"]
 
 
 # ---------------- 三步编排 ----------------
 
 
-def test_run_reports_all_three_steps(calls):
-    # anthropic 型：连通请求体里必须带生效方案的真实模型名（openai 型走 GET /models 无 body）
-    result = task_precheck.run(None, "pi", _provider("anthropic"), "sk-1", "deepseek-chat")
-    assert [s["name"] for s in result["steps"]] == ["engine", "reachability", "config_sync"]
-    assert result["ok"] is False  # 默认没有 pi 端配置文件，第三跳会拦下
-    assert result["reason"] == result["steps"][-1]["detail"]
-    assert calls["http"][0]["body"]["model"] == "deepseek-chat"
+def test_run_reports_all_three_steps(calls, monkeypatch, tmp_path):
+    """三步顺序：引擎可用 → 配置就绪 → 真实连通（不再有服务商连通直连探测）。"""
+    settings = tmp_path / "settings.json"
+    settings.write_text(
+        json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://x", "ANTHROPIC_AUTH_TOKEN": "sk"}}), encoding="utf-8",
+    )
+    monkeypatch.setenv("A4AGENT_SETTINGS_PATH", str(settings))
+    monkeypatch.setattr(task_engines, "resolve_command", lambda tool: r"C:\bin\claude.cmd")
+    monkeypatch.setattr(
+        task_engines, "_probe_cache", {},
+    )
+    monkeypatch.setattr(
+        task_precheck.subprocess, "run",
+        lambda argv, **kw: type("R", (), {"returncode": 0, "stdout": '{"result":"ok"}', "stderr": ""})(),
+    )
+    result = task_precheck.run(None, "claude", _provider("anthropic"), "sk-1", "deepseek-chat")
+    assert [s["name"] for s in result["steps"]] == ["engine", "config_sync", "reachability"]
+    assert result["ok"] is True
+
+
+def test_run_skips_smoke_when_config_not_ready(calls, monkeypatch, tmp_path):
+    """配置都没配好时不再跑实测——跑必然失败，白白增加等待。"""
+    monkeypatch.setenv("A4AGENT_SETTINGS_PATH", str(tmp_path / "missing.json"))
+    monkeypatch.setattr(task_engines, "resolve_command", lambda tool: r"C:\bin\claude.cmd")
+    monkeypatch.setattr(task_engines, "_probe_cache", {})
+    result = task_precheck.run(None, "claude", _provider("anthropic"), "sk-1", "m")
+    assert [s["name"] for s in result["steps"]] == ["engine", "config_sync"]
+    assert result["ok"] is False
+    assert "ANTHROPIC_BASE_URL" in result["reason"]
 
 
 def test_run_short_circuits_after_engine_failure(monkeypatch, calls):
