@@ -274,7 +274,7 @@ def test_healthy_probe_output_is_not_treated_as_crash():
     assert task_engines._failure_summary(["1.0.2"]) == "1.0.2"
 
 
-# ---------------- v0.6.0：六端覆盖 ----------------
+# ---------------- v0.5.2：六端覆盖 ----------------
 
 
 def test_engines_cover_all_six_tools():

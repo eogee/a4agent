@@ -122,7 +122,7 @@ def test_create_task_blocked_by_precheck_records_failed_row(db, monkeypatch):
 
 def test_create_task_rejects_unknown_engine(db):
     _seed_config(db)
-    # v0.6.0 起六端合法（claude/codex/zcode/qoder/dsh/pi），
+    # v0.5.2 起六端合法（claude/codex/zcode/qoder/dsh/pi），
     # 只有名单外的名字该被 pydantic 拒绝
     with pytest.raises(Exception):
         tasks_api.schemas.TaskCreate(prompt="x", tool="not-a-tool")

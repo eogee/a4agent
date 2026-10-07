@@ -60,7 +60,7 @@ class ConfigOut(BaseModel):
     provider_id: int
     model: str
     targets: str = "claude"
-    # max_tokens 原为 dsh 单次输出上限，v0.6.0 移除 dsh 接入后已无用。
+    # max_tokens 原为 dsh 单次输出上限，v0.5.2 移除 dsh 接入后已无用。
     # 保留字段与库中数据（不做破坏性迁移），但不再对外暴露/使用。
     max_tokens: Optional[int] = None
     is_active: bool

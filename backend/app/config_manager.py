@@ -85,7 +85,7 @@ def backup_dir() -> Path:
 def target_list(targets) -> list:
     """规范化配置方案的应用目标列表（仅 claude / codex）。
 
-    v0.6.0 起不再代管dsh / ZCode / pi 的 API 配置：这三端应用自身都自带完整
+    v0.5.2 起不再代管dsh / ZCode / pi 的 API 配置：这三端应用自身都自带完整
     的供应商配置界面，由用户自行配置更可靠（应用界面上的能力开关、上下文
     窗口等状态外部写入时无从得知）。技能与 MCP 托管不受影响。
     旧数据里残留的这三个值在读入时被静默丢弃。

@@ -3,7 +3,7 @@
 预检在 POST /tasks 内同步完成，任一步失败即不入队，并把自然语言
 原因回给前端。
 
-v0.6.0 的关键转变：第二、三步不再比对 a4agent 自己写入的托管配置
+v0.5.2 的关键转变：第二、三步不再比对 a4agent 自己写入的托管配置
 （a4a_p* 条目 / llm-deepseek 段），改为读取**用户自己在应用内配置的内容**，
 并用一次真实的最小无头调用来验证「能不能真跑」。
 
@@ -132,7 +132,7 @@ def _proxy_alive(port: int) -> bool:
 def _read_user_config_signal(tool: str) -> tuple[bool, str]:
     """读用户自己配的配置，判断「是否已配好服务商与模型」。
 
-    与 v0.6.0 之前的关键差异：这里读的是**用户自己在应用内配的配置**，
+    与 v0.5.2 之前的关键差异：这里读的是**用户自己在应用内配的配置**，
     而不是 a4agent 写入的托管条目（a4a_p* / llm-deepseek 段）。因此本步骤
     只做粗粒度的就绪判断，不比对任何具体服务商或模型名——那是用户自己的
     自由度，本工具无权也不必去评判。
@@ -171,7 +171,7 @@ def _read_user_config_signal(tool: str) -> tuple[bool, str]:
             )
         if tool == "dsh":
             # 只看 dsh 自己界面配的正规命名空间 llm-pi-ai；
-            # llm-deepseek 是旧版 a4agent 写入的侧门路径，已在v0.6.0 移除
+            # llm-deepseek 是旧版 a4agent 写入的侧门路径，已在v0.5.2 移除
             settings = config_manager.read_dsh_settings()
             ns = settings.get("llm-pi-ai") if isinstance(settings, dict) else None
             providers = ns.get("providers") if isinstance(ns, dict) else None
@@ -244,7 +244,7 @@ def _no_window() -> int:
 def run(db, tool: str, provider, api_key: str, model: str) -> dict:
     """执行预检，返回 {ok, reason, steps}；steps 明细入库供详情展示。
 
-    v0.6.0 后的三步：引擎可用 → 配置就绪（读用户自己的配置）→ 真实连通
+    v0.5.2 后的三步：引擎可用 → 配置就绪（读用户自己的配置）→ 真实连通
     （跑一次最小无头调用）。第三步是关键：它验证的是「能不能真跑」，而
     不是「配置字段是否等于我们写的值」，因此用户在自己应用里配的任意组合
     都能被支持，也不依赖 a4agent 的托管配置。
