@@ -344,7 +344,7 @@ layui.use(['layer', 'form', 'element'], function () {
   });
 
   /* ---------- 卡片 ---------- */
-  // v0.5.2 起只代管 Claude Code 与 Codex。三端（dsh/ZCode/pi）自 v0.5.2
+  // v0.5.1 起只代管 Claude Code 与 Codex。三端（dsh/ZCode/pi）自 v0.5.1
   // 起改由用户在应用内自配，旧数据里残留的值以灰色「已移交」样式呈现，
   // 告诉用户曾经配过、现在归谁管——而不是静默消失让人以为没配过。
   var TARGET_HANDED_OVER = { dsh: 'dsh', zcode: 'ZCode', pi: 'pi' };
@@ -626,16 +626,16 @@ layui.use(['layer', 'form', 'element'], function () {
     });
   }
 
-  // v0.5.2 起 API 切换不再代管 dsh/ZCode/pi——这是破坏性变更，必须在更新弹窗里
+  // v0.5.1 起 API 切换不再代管 dsh/ZCode/pi——这是破坏性变更，必须在更新弹窗里
   // 明确告知，不能埋在更新说明的正文里（用户多半不会点开「查看完整发布说明」）。
   // 这里按「受影响版本区间」判断是否命中，命中就把横幅提到最前面。
   //   affectedBelow：变更影响的最高版本（含）。用 <= 而非 <——紧邻上一版的用户
   //     正是最需要看到这条提示的人，不能因版本号恰好相等而漏掉
   //   landedIn：变更在哪个版本引入（目标版本达到它才需要提示）
   var BREAKING_CHANGES = [{
-    affectedBelow: '0.5.1',
-    landedIn: '0.5.2',
-    title: 'dsh / ZCode / pi 不再由 a4agent 代管API 配置',
+    affectedBelow: '0.5.0',
+    landedIn: '0.5.1',
+    title: 'dsh / ZCode / pi 不再由 a4agent 代管 API 配置',
     detail: '这三端应用自带完整的供应商配置界面，由你在应用内自行配置更可靠。' +
       '你原先用 a4agent 配的条目已自动清理（清理前已做永久快照），你自己配的 provider 与 Key 一概未动。' +
       '如需继续使用，请到各应用设置里重新配置一次。'

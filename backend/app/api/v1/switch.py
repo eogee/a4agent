@@ -1,6 +1,6 @@
 """切换与状态接口。
 
-v0.5.2 起只代管 Claude Code 与 Codex 两个 CLI——这两个没有图形界面，
+v0.5.1 起只代管 Claude Code 与 Codex 两个 CLI——这两个没有图形界面，
 配置只能落到文件里。dsh / ZCode / pi / Qoder / WorkBuddy 都自带完整的
 供应商配置界面（见 docs/迁移对照表-三端API配置.md），由用户自己配置，
 本工具不再写入它们的配置文件。

@@ -1,6 +1,6 @@
 # a4agent
 
-**六端 AI 编程工具管理台 + 本地大模型推理控制台**：为 **Claude Code、Codex、dsh（DeepSeek Harness）、ZCode（智谱 Agentic 开发环境）、pi（本地 pi coding agent）与 Qoder（AI IDE）** 提供统一的**技能管理（Skill）**与**MCP 管理**（六端全覆盖），并为**没有图形配置界面的 CLI 工具**（Claude Code、Codex）提供 **API 服务商切换**——其余四端应用自带完整的供应商配置界面，由用户自行配置，理由见「API 服务商切换」，并内置 **llama.cpp 本地模型推理**（原 a4agent 能力完整合并）。所有操作通过可视化界面完成，无需手动编辑配置文件。
+**六端 AI 编程工具管理台 + 本地大模型推理控制台**：为 **Claude Code、Codex、dsh（DeepSeek Harness）、ZCode（智谱 Agentic 开发环境）、pi（本地 pi coding agent）与 Qoder（AI IDE）** 提供统一的技能管理与 MCP 管理（六端全覆盖），并为其中没有图形配置界面的两个 CLI 工具（Claude Code、Codex）提供 API 服务商切换，同时内置 llama.cpp 本地模型推理。所有操作通过可视化界面完成，无需手动编辑配置文件。
 
 | 能力 | 说明 |
 |---|---|
@@ -14,7 +14,7 @@
 
 ## 技能管理
 
-四个工具均使用同一套技能格式（`<skill-name>/SKILL.md` 目录 + frontmatter `name`/`description`），因此 a4agent 可以把它们当作一种资源统一管理。
+六个目标使用同一套技能格式（`<skill-name>/SKILL.md` 目录 + frontmatter 的 `name` 与 `description`），因此 a4agent 可以把它们当作一种资源统一管理。
 
 ### 发现与聚合
 
@@ -46,11 +46,11 @@
 | pi | `~/.pi/agent/skills/`（`$PI_CODING_AGENT_DIR` 可覆盖） | `<项目>/.pi/skills/` |
 | Qoder | `~/.qoder/skills/`（`$A4AGENT_QODER_HOME` 可覆盖） | `<项目>/.qoder/skills/` |
 
-> ZCode 官方还识别跨工具兼容目录 `~/.agents/skills` 与 `<项目>/.agents/skills`；a4agent 统一托管到 `.zcode` 前缀，与其它端保持一致。迁移到 ZCode 的 skill 会被 ZCode 客户端真实读取。
+**ZCode**：官方还识别跨工具兼容目录 `~/.agents/skills` 与 `<项目>/.agents/skills`；a4agent 统一托管到 `.zcode` 前缀，与其它端保持一致。迁移到 ZCode 的 skill 会被 ZCode 客户端真实读取。
 >
-> pi 的全局技能在 **agent 子目录**下（`~/.pi/agent/skills`，不是 `~/.pi/skills`）。pi 对 skill 的校验比其它端严格：`name` 只能是小写字母、数字与连字符（≤64 字符，不得以连字符首尾或含连续连字符），`description` 必填（≤1024 字符），不合规的 skill **pi 会直接不加载**。迁移到 pi 时 a4agent 会按 pi 的规则复查一次，不合规则在迁移结果里明确警告，而不是留下「迁成功却找不到」的状态。
+**pi**：全局技能在 **agent 子目录**下（`~/.pi/agent/skills`，不是 `~/.pi/skills`）。pi 对 skill 的校验比其它端严格：`name` 只能是小写字母、数字与连字符（≤64 字符，不得以连字符首尾或含连续连字符），`description` 必填（≤1024 字符），不合规的 skill **pi 会直接不加载**。迁移到 pi 时 a4agent 会按 pi 的规则复查一次，不合规则在迁移结果里明确警告，而不是留下「迁成功却找不到」的状态。
 >
-> Qoder 的细节：Qoder 除 `~/.qoder/skills` 外还识别跨工具目录 `~/.agents/skills` 与 `<项目>/.agents/skills`（优先级低于前者），a4agent 统一托管到 `.qoder/skills` 前缀，与其它端一致，项目级因此无需特判。配置目录名随发行版而变（国际版 `.qoder`、国内版 `.qoder-cn`），默认探测实际存在的那个，也可用 `A4AGENT_QODER_HOME` 直接指定。
+**Qoder**：除 `~/.qoder/skills` 外还识别跨工具目录 `~/.agents/skills` 与 `<项目>/.agents/skills`（优先级低于前者），a4agent 统一托管到 `.qoder/skills` 前缀，与其它端一致，项目级因此无需特判。配置目录名随发行版而变（国际版 `.qoder`、国内版 `.qoder-cn`），默认探测实际存在的那个，也可用 `A4AGENT_QODER_HOME` 直接指定。
 
 ---
 
@@ -85,13 +85,15 @@
 | pi | stdio / streamable-http | `~/.pi/agent/mcp.json`（全局）、`<项目>/.pi/mcp.json`（项目，需该项目被 pi 信任） |
 | Qoder | stdio / sse / http | `~/.qoder/mcp.json`（全局；项目级复用 Claude Code 的 `<项目>/.mcp.json`） |
 
-> dsh 与 ZCode 的细节：dsh 的 MCP server 挂在 `@deepseek-ai/dsh-mcp-client` 插件条目下，重写时保留其它非管理条目；dsh 无项目级 MCP。ZCode 配置 schema 严格（未知键会被丢弃），a4agent 只写其规范字段（`type`/`command`/`args`/`cwd`/`env`/`url`/`headers`/`enabled`/`timeoutMs`），迁移到 ZCode 的 server 会被客户端自动连接。
+**dsh**：MCP server 挂在 `@deepseek-ai/dsh-mcp-client` 插件条目下，重写时保留其它非管理条目；无项目级 MCP。
+
+**ZCode**：配置 schema 严格（未知键会被丢弃），a4agent 只写其规范字段（`type`/`command`/`args`/`cwd`/`env`/`url`/`headers`/`enabled`/`timeoutMs`），迁移到 ZCode 的 server 会被客户端自动连接。
 >
-> pi 的细节：pi 的 `mcp.json` 与 Claude Code 同构（顶层 `mcpServers`），但**明确拒绝 legacy SSE**（`type: "sse"` 会被判废），迁移到 pi 的 sse 条目会整对失败并留日志。pi 另有自有键 `exposure` / `toolExposure` / `enabled` / `timeout` / `auth` / `oauth` 决定工具如何暴露给模型，a4agent 读写时**无损保留**这些键与顶层 `autoEnableCodemode`。pi 的 server 名只接受字母、数字、`_`、`-`，含中文或点号的名字会在迁移/安装时被明确拒绝（写出即废条目）；项目级文件不接受 `auth` 键，写入时自动剔除并记录日志。
+**pi**：`mcp.json` 与 Claude Code 同构（顶层 `mcpServers`），但**明确拒绝 legacy SSE**（`type: "sse"` 会被判废），迁移到 pi 的 sse 条目会整对失败并留日志。pi 另有自有键 `exposure` / `toolExposure` / `enabled` / `timeout` / `auth` / `oauth` 决定工具如何暴露给模型，a4agent 读写时**无损保留**这些键与顶层 `autoEnableCodemode`。pi 的 server 名只接受字母、数字、`_`、`-`，含中文或点号的名字会在迁移/安装时被明确拒绝（写出即废条目）；项目级文件不接受 `auth` 键，写入时自动剔除并记录日志。
 >
-> Qoder 的细节：Qoder 的 `~/.qoder/mcp.json` 同样与 Claude Code 同构（顶层 `mcpServers`，`type` 认 stdio / sse / http / streamable-http），自有键是 `disabled`（在 Qoder 界面里关掉某个 server 的开关，注意**不是** `enabled`）、`timeout`、`authType`，a4agent 读写时一并**无损保留**。Qoder 的**项目级 MCP 与 Claude Code 共用同一个 `<项目>/.mcp.json`**（它按 `.mcp.json` → `mcp.json` 的顺序查找），所以 a4agent 不让 Qoder 端再接管项目级文件——同一文件被两端各写一次只会互相踩；迁到 Claude 项目级即 Qoder 项目级同时生效。Qoder 的运行时镜像 `%APPDATA%\Qoder\SharedClientCache\extension\local\mcp.json` 与 `~/.qoder/mcp-router.json` 是进程内状态，a4agent 既不读也不写、不纳入备份。
+**Qoder**：`~/.qoder/mcp.json` 与 Claude Code 同构（顶层 `mcpServers`，`type` 认 stdio / sse / http / streamable-http），自有键是 `disabled`（在 Qoder 界面里关掉某个 server 的开关，注意**不是** `enabled`）、`timeout`、`authType`，a4agent 读写时一并**无损保留**。Qoder 的**项目级 MCP 与 Claude Code 共用同一个 `<项目>/.mcp.json`**（它按 `.mcp.json` → `mcp.json` 的顺序查找），所以 a4agent 不让 Qoder 端再接管项目级文件——同一文件被两端各写一次只会互相踩；迁到 Claude 项目级即 Qoder 项目级同时生效。运行时镜像 `%APPDATA%\Qoder\SharedClientCache\extension\local\mcp.json` 与 `~/.qoder/mcp-router.json` 是进程内状态，a4agent 既不读也不写、不纳入备份。
 >
-> **Qoder 视图「看不到已连接 MCP」是正常的**：a4agent 管理的是**用户自定义**那一份 `~/.qoder/mcp.json`；而 Qoder 会话里实际连着的多数连接器并不来自这个文件——内置连接器（浏览器控制、node REPL 等）随 Qoder 安装包分发，插件自带的连接器写在 `~/.qoder/plugins/cache/<来源>/<插件>/mcp.json` 里，两者都不属于用户配置文件，因此不会出现在 a4agent 的 Qoder 卡片上。判断依据很简单：`~/.qoder/mcp.json` 为空、而 Qoder 里已连着若干 MCP，二者并不矛盾。想让某个 server 出现在 Qoder 端视图，就用「安装 MCP」或跨端迁移把它写进这个文件。
+**Qoder 视图「看不到已连接 MCP」是正常的**——a4agent 管理的是**用户自定义**那一份 `~/.qoder/mcp.json`；而 Qoder 会话里实际连着的多数连接器并不来自这个文件：内置连接器（浏览器控制、node REPL 等）随 Qoder 安装包分发，插件自带的连接器写在 `~/.qoder/plugins/cache/<来源>/<插件>/mcp.json` 里，两者都不属于用户配置文件，因此不会出现在 a4agent 的 Qoder 卡片上。判断依据很简单：`~/.qoder/mcp.json` 为空、而 Qoder 里已连着若干 MCP，二者并不矛盾。想让某个 server 出现在 Qoder 端视图，就用「安装 MCP」或跨端迁移把它写进这个文件。
 
 ### 回收站与安全
 
@@ -107,11 +109,24 @@ a4agent 为**没有图形配置界面的 CLI 工具**提供一键切换：目前
 - **Claude Code**：Anthropic 协议直连，或经内置**本地翻译代理**把请求实时翻译为 OpenAI Chat Completions 转发给 OpenAI 兼容服务商（代理仅监听 `127.0.0.1`、随机 token 鉴权，工具退出后仍存活）。
 - **Codex**：OpenAI Responses 协议写入 `~/.codex/config.toml`；上游原生支持 Responses（如 DeepSeek）时直连，否则经本地代理翻译转发。
 
-> **为什么只有这两端**：判定标准是「目标应用是否自带完整的供应商配置界面」。dsh、ZCode、pi、Qoder 这类应用都在自己的界面里提供了 BYOK——dsh 可选三种 API 协议并自动拉取模型清单，ZCode 可填双接口地址并按模型声明能力，pi 在 `/model` 里直接切换，Qoder 更有 9 个预置供应商加自定义端点。对这些应用，外部代管配置文件既不省事（用户点几下更快），又有额外风险（界面上的能力开关、上下文窗口、启用状态外部写入时无从得知，只能填保守默认值）。
->
-> 判定依据是「用户自己能配」，不是「我们读不懂它的配置」——例如 Qoder 的模型目录虽经专有加密，但用户自己在界面里配得好好的。
->
-> 换服务商请直接在对应应用的设置里操作，各端的入口位置见 [迁移对照表](docs/迁移对照表-三端API配置.md)。
+### 为什么只代管这两端
+
+判定标准只有一条：**目标应用是否自带完整的供应商配置界面**。
+
+| 端 | 应用内能做什么 | a4agent 的做法 |
+|---|---|---|
+| Claude Code | 无，纯 CLI | 代管（唯一可行路径） |
+| Codex CLI | 无，纯 CLI | 代管（唯一可行路径） |
+| dsh | Settings → Models，可选三种 API 协议 + 自动拉取模型清单 | 移交用户自配 |
+| ZCode | 设置 → 模型供应商，双接口地址 + 按模型声明能力 | 移交用户自配 |
+| pi | `/model` 里直接切换 | 移交用户自配 |
+| Qoder | 9 个预置供应商 + 自定义端点 + 连通性校验 | 移交用户自配 |
+
+对这些应用，外部代管配置文件既不省事（用户点几下更快），又有额外风险：界面上的能力开关、上下文窗口、启用状态外部写入时无从得知，只能填保守默认值。
+
+需要注意，判定依据是「**用户自己能配**」，不是「我们读不懂它的配置」——Qoder 的模型目录虽经专有加密、外部无法写明文，但用户自己在界面里配得好好的，技术障碍不构成产品理由。
+
+换服务商请直接在对应应用的设置里操作，各端的字段对照与界面入口见 [迁移对照表](docs/迁移对照表-三端API配置.md)。
 
 切换前自动备份目标配置文件（滚动保留最近 5 份）并原子写入；API Key 使用 Windows DPAPI 加密存储，接口永不回显明文。
 
@@ -141,31 +156,46 @@ a4agent 为**没有图形配置界面的 CLI 工具**提供一键切换：目前
 | OpenCodeGo-openai | `https://opencode.ai/zen/go/v1` | OpenAI | — |
 | 本地llmstudio-openai | `http://127.0.0.1:1234/v1` | OpenAI | — |
 
-> 模板命名遵循「服务商-协议」约定：同一服务商可能同时提供 Anthropic 与 OpenAI 兼容两套接口，因此预置两条记录（如 `DeepSeek-anthropic` / `DeepSeek-openai`）。**原生 Responses**：勾选后 Codex 直接连接上游 `/responses` 接口，无需本地翻译代理；DeepSeek 官方原生支持 OpenAI Responses（仅 `deepseek-v4-flash` 模型）。内置模板在升级时会按模板定义自动同步，自定义服务商不受影响。
+模板命名遵循「服务商-协议」约定：同一服务商可能同时提供 Anthropic 与 OpenAI 兼容两套接口，因此预置两条记录（如 `DeepSeek-anthropic` / `DeepSeek-openai`）。**原生 Responses**：勾选后 Codex 直接连接上游 `/responses` 接口，无需本地翻译代理；DeepSeek 官方原生支持 OpenAI Responses（仅 `deepseek-v4-flash` 模型）。内置模板在升级时会按模板定义自动同步，自定义服务商不受影响。
 
 ---
 
 ## 本地模型（llama.cpp 推理控制台）
 
-「本地模型」页签把 [llama.cpp](https://github.com/ggml-org/llama.cpp) 的 `llama-server` 封装为一键启动的 **OpenAI 兼容 API 服务**，负责引擎本体不擅长的部分——装哪个引擎、选哪个模型、给什么参数，全程可视化操作（原 a4agent 项目能力完整合并于此）。
+「本地模型」页签把 llama.cpp 的 `llama-server` 封装为一键启动的 **OpenAI 兼容 API 服务**：装哪个引擎、选哪个模型、给什么参数，全程可视化操作。
+
+**引擎版本**：llama.cpp **b11370**（2026-10-03 发布，钉死在 `backend/app/llama/catalog.py`，为单一事实来源）。该版本的 `llama-server` 包含决策模型端点，因此下面这项能力可用。
+
+### 决策模型（System One）
+
+除常规的 `/v1/chat/completions` 与 `/v1/models` 外，该版本引擎还提供 **`/v1/systemone` 决策模型端点**——接入卡片里会直接给出它的完整地址，附带 curl / OpenAI SDK 调用示例，可用于把「该用哪个模型、怎么拆解任务」这类调度决策交给本地引擎，同时主模型交给云上服务，形成云边协同。
 
 ### 首次配置向导
 
 按「获取引擎 → 检测硬件 → 选择模型目录 → 选择默认模型 → 服务端口」五步完成全部配置：
 
 - **硬件检测与预设推荐**：通过 `nvidia-smi` 与注册表枚举显卡，列出厂商、显存、驱动版本；依据显存档位推荐推理预设（上下文长度、KV 缓存量化、MTP 投机解码），并在选择模型时给出显存溢出风险提示
-- **引擎自动获取**：按显卡自动下载 llama.cpp **官方预编译引擎**（Vulkan / CUDA 12.4 / CUDA 13.3 / CPU，钉定固定版本、二进制可复现），也支持**离线安装**（指定含 `llama-server.exe` 的目录）或暂时跳过；CUDA 引擎 = 主包 + cudart 运行库包，下载后自动解压合并
+- **引擎自动获取**：按显卡自动下载 llama.cpp **官方预编译引擎**，四套可选：
+  | 引擎包 | 适用显卡 | 体积 | 最低驱动 |
+  |---|---|---|---|
+  | CUDA 13.4 | NVIDIA（性能优先） | 525 MB | 580 |
+  | CUDA 12.4 | NVIDIA（兼容旧驱动） | 597 MB | 550 |
+  | Vulkan | NVIDIA / AMD / Intel 独显与核显 | 32 MB | 无 |
+  | CPU | 无可用显卡时的兜底 | 18 MB | 无 |
+
+  下载的是钉定版本的官方预编译二进制（可复现），也支持**离线安装**（指定含 `llama-server.exe` 的目录）或暂时跳过；CUDA 引擎 = 主包 + cudart 运行库包，下载后自动解压合并
 - 已装有旧版 a4agent 时自动**接管其引擎目录**，无需重复下载
 
 ### 模型库与服务运行
 
 - 添加多个模型目录，自动扫描 `.gguf` 并解析元数据：**大小、量化级别、原生上下文、是否含 MTP 层**（支持投机解码）；一键「设为默认模型」
 - 「启动服务」实时显示运行状态（启动中 / 运行中 / 失败 / 已停止）与引擎日志；健康检查就绪后通知；端口占用、引擎缺失、进程崩溃均有明确日志提示；支持定时内存裁剪
-- 推理参数可视化调整：上下文长度、KV 缓存级别（f16/q8_0/q4_0）、Flash Attention、GPU 层数、MTP 步数、API Key 鉴权、附加参数逃生舱
+- 推理参数可视化调整：上下文长度、KV 缓存级别（f16/q8_0/q4_0）、Flash Attention、GPU 层数、API Key 鉴权、附加参数逃生舱
+- **MTP 投机解码步数**： llama.cpp 的 MTP（Multi-Token Prediction）写法随版本变化——旧版用 `--mtp N`，b105xx 起改为 `--spec-type draft-mtp --spec-draft-n-max N`。a4agent 通过跑一次 `llama-server --help` **自动探测**当前后端支持哪种写法再下发参数，跨版本升级不会因此启动失败
 
 ### 局域网开放与一键接入
 
-- 「接入」卡片直接给出 Base URL、Chat Completions 地址、模型名（`model` 字段）与可直接复制的 **curl / openai SDK** 示例；推理设置切换为 `0.0.0.0` 监听后显示实际局域网调用地址
+- 「接入」卡片直接给出 Base URL、Chat Completions 地址、决策端点（System One）、模型名（`model` 字段）与可直接复制的 **curl / OpenAI SDK** 示例；推理设置切换为 `0.0.0.0` 监听后显示实际局域网调用地址
 - **「接入配置方案」**一键创建指向本地服务的配置方案，弹窗里勾选要写入的应用（Claude Code / Codex），到「配置方案」页切换即可让对应应用使用本地模型，与云上 API 无缝互切
 
 ---
@@ -186,8 +216,8 @@ a4agent 为**没有图形配置界面的 CLI 工具**提供一键切换：目前
 | **pi** | `pi -p "<任务>" --mode json --no-session` | JSONL 事件流，按 `stopReason` 定成败、按事件取文本 |
 
 - 引擎自动探测（安装状态 / 版本 / 可执行路径），**未安装的在界面置灰**并给出原因
-- 所有命令都先把命令名解析成绝对路径：Windows 上这些 CLI 都是 npm 的 `.cmd` 壳，直接把命令名交给 `subprocess` 会启动失败
-- 无头模式下没有人能点审批，因此每条命令都带权限预授权参数（`--permission-mode bypassPermissions` / `--sandbox danger-full-access` / `--mode yolo` / `--yolo`），否则会卡在审批或被直接拒绝
+- 所有命令都先把命令名解析成绝对路径：Windows 上这些 CLI 都是 npm 的 `.cmd` 壳，直接把命令名交给 `subprocess` 会启动失败。Qoder 的命令名官方文档写 `qodercli`、博客写 `qoder`，两个名字都探测
+- 无头模式下没有人能点审批，因此每条命令都带权限预授权参数，否则会卡在审批或被直接拒绝：Claude Code 用 `--permission-mode bypassPermissions`、Codex 用 `--sandbox danger-full-access`、ZCode 用 `--mode yolo`、Qoder 与 pi 用 `--yolo`（dsh 不需要，其 headless profile 本身即无头入口）
 - dsh 额外需要屏蔽 profile 里的外部插件：headless profile 缺少它们依赖的 host 服务，不屏蔽会在启动阶段直接失败。a4agent 生成 `--patch` 覆盖层只禁用那批相对路径插入的外部插件，不改 profile 本身
 
 ### 下发前自动预检（不通就不入队）
@@ -268,7 +298,7 @@ Issue 已配置结构化模板（**Bug 报告 / 功能需求**），按表单填
 6. **隐私红线**：**切勿在 Issue 中粘贴 API Key、模型密钥等敏感信息**；如日志可能含敏感内容，请先脱敏
 7. **排查先行**：提交前先自查——重启应用、确认 API Key 有效、确认本机能访问上游服务、确认无代理/杀软干扰
 
-> 提交前请先搜索是否已有相同 Issue，避免重复提交。
+提交前请先搜索是否已有相同 Issue，避免重复提交。
 
 ---
 

@@ -1,6 +1,6 @@
 """切换接口的目标应用与协议约束测试。
 
-v0.5.2 起只覆盖 Claude Code 与 Codex 两个目标——dsh / ZCode / pi 已改为
+v0.5.1 起只覆盖 Claude Code 与 Codex 两个目标——dsh / ZCode / pi 已改为
 在应用内自配，不再由本工具写入，它们的残留清理由 test_removal.py 覆盖。
 """
 import json

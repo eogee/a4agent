@@ -1,4 +1,4 @@
-# a4agent v0.5.2
+# a4agent v0.5.1
 
 ## ⚠️ 破坏性变更：dsh / ZCode / pi 不再由 a4agent 代管 API 配置
 

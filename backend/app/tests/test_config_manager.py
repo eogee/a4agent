@@ -87,7 +87,7 @@ def test_atomic_write_settings(tmp_path, monkeypatch):
 
 
 def test_target_list_only_claude_and_codex():
-    """v0.5.2 起只代管 claude / codex；旧数据里的三端值被静默丢弃。"""
+    """v0.5.1 起只代管 claude / codex；旧数据里的三端值被静默丢弃。"""
     assert config_manager.target_list("claude,codex") == ["claude", "codex"]
     # 旧库里的 dsh/zcode/pi 不再是合法目标，全部剔除后回退 claude
     assert config_manager.target_list("claude,dsh,codex") == ["claude", "codex"]
@@ -349,7 +349,7 @@ def test_qoder_is_not_an_api_target():
     """Qoder 自带完整供应商配置界面，无需 a4agent 代管。
 
     注意判定依据不是「配置读不到」（那是技术障碍，不是产品理由），
-    而是「用户自己能配」——这是 v0.5.2 收敛判定标准的基准用例。
+    而是「用户自己能配」——这是 v0.5.1 收敛判定标准的基准用例。
     """
     assert config_manager.target_list("claude,qoder") == ["claude"]
     assert "qoder" not in config_manager.target_list("qoder")
