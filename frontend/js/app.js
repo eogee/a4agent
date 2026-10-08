@@ -2345,6 +2345,111 @@ layui.use(['layer', 'form', 'element'], function () {
     });
   });
 
+  /* ---------- 页面级悬浮滚动条 ---------- */
+  /* 原生根滚动条已通过 CSS 隐藏（不再向左挤占页面宽度），这里自绘一条
+   * 悬浮在内容上方的细滑块：滚动页面或鼠标靠近右缘时浮现，停止操作约
+   * 1 秒后淡出，支持按住拖动。只处理页面级滚动，卡片内部滚动条不受影响。 */
+  (function () {
+    var bar = document.createElement('div');
+    bar.className = 'page-scrollbar';
+    var thumb = document.createElement('div');
+    thumb.className = 'page-scrollbar-thumb';
+    bar.appendChild(thumb);
+    document.body.appendChild(bar);
+
+    var hideTimer = null;
+    var dragging = false;
+
+    function metrics() {
+      var doc = document.documentElement;
+      return {
+        scrollH: doc.scrollHeight,
+        viewH: window.innerHeight,
+        top: window.scrollY || doc.scrollTop || 0
+      };
+    }
+
+    function show() {
+      if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+      bar.classList.add('visible');
+    }
+
+    function scheduleHide() {
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = setTimeout(function () {
+        hideTimer = null;
+        if (!dragging) bar.classList.remove('visible');
+      }, 1000);
+    }
+
+    /* 仅重新计算滑块位置与尺寸；appear=false 时不主动浮现（如内容高度变化） */
+    function position(appear) {
+      var m = metrics();
+      if (m.scrollH <= m.viewH + 1) {
+        bar.classList.remove('visible');
+        thumb.style.height = '0px';
+        return;
+      }
+      var trackH = m.viewH - 8; // 上下各留 4px
+      var h = Math.max(36, Math.round(trackH * m.viewH / m.scrollH));
+      var maxTop = trackH - h;
+      var y = Math.round(maxTop * m.top / (m.scrollH - m.viewH));
+      thumb.style.height = h + 'px';
+      thumb.style.top = (4 + y) + 'px';
+      if (appear) {
+        show();
+        scheduleHide();
+      }
+    }
+
+    window.addEventListener('scroll', function () { position(true); }, { passive: true });
+    window.addEventListener('resize', function () { position(false); });
+    if (window.ResizeObserver) {
+      new ResizeObserver(function () { position(false); }).observe(document.documentElement);
+    }
+
+    /* 鼠标靠近右缘时浮现 */
+    document.addEventListener('mousemove', function (e) {
+      if (e.clientX > window.innerWidth - 28) {
+        show();
+        scheduleHide();
+      }
+    });
+
+    /* 按住滑块拖动 */
+    thumb.addEventListener('pointerdown', function (e) {
+      var m = metrics();
+      var trackH = m.viewH - 8;
+      var h = thumb.getBoundingClientRect().height;
+      var range = m.scrollH - m.viewH;
+      var trackRange = trackH - h;
+      if (range <= 0 || trackRange <= 0) return;
+      dragging = true;
+      bar.classList.add('dragging');
+      thumb.setPointerCapture(e.pointerId);
+      var startY = e.clientY;
+      var startTop = m.top;
+      function onMove(ev) {
+        var dy = ev.clientY - startY;
+        window.scrollTo(0, startTop + dy * range / trackRange);
+      }
+      function onUp() {
+        dragging = false;
+        bar.classList.remove('dragging');
+        thumb.removeEventListener('pointermove', onMove);
+        thumb.removeEventListener('pointerup', onUp);
+        thumb.removeEventListener('pointercancel', onUp);
+        scheduleHide();
+      }
+      thumb.addEventListener('pointermove', onMove);
+      thumb.addEventListener('pointerup', onUp);
+      thumb.addEventListener('pointercancel', onUp);
+      e.preventDefault();
+    });
+
+    position(false);
+  })();
+
   /* ---------- 初始化 ---------- */
   loadConfigs();
   loadStatus();

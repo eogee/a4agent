@@ -83,13 +83,16 @@ layui.use(['layer', 'form', 'element'], function () {
     var box = document.getElementById('tasks-content');
     if (!box) return;
     box.innerHTML =
-      '<div class="task-form card">' +
-        '<div class="task-form-head">下发任务' +
-          '<span class="task-active-config" id="task-active-config"></span></div>' +
+      '<div class="task-form-head">下发任务' +
+        '<span class="task-active-config" id="task-active-config"></span></div>' +
+      '<div class="task-form">' +
         '<textarea id="task-prompt" class="layui-input task-prompt" rows="4" ' +
           'placeholder="要交给 Agent 的任务描述，例如：审查当前项目的错误处理，列出最值得修的三处"></textarea>' +
         '<div class="task-form-row">' +
           '<label>引擎</label><div id="task-engines" class="task-engine-radios"></div>' +
+        '</div>' +
+        '<div class="task-form-row">' +
+          '<label>使用模型</label><span id="task-current-model" class="task-current-model">以实测为准</span>' +
         '</div>' +
         '<div class="task-form-row">' +
           '<label>工作目录</label>' +
@@ -115,7 +118,22 @@ layui.use(['layer', 'form', 'element'], function () {
     document.getElementById('task-submit').onclick = submitTask;
     document.getElementById('task-refresh').onclick = loadTasks;
     document.getElementById('task-pick-dir').onclick = openDirPicker;
+    var engineBox = document.getElementById('task-engines');
+    if (engineBox) engineBox.addEventListener('change', updateCurrentModel);
     renderWorkdir();
+  }
+
+  function updateCurrentModel() {
+    var el = document.getElementById('task-current-model');
+    if (!el) return;
+    var tool = selectedTool();
+    var hit = null;
+    for (var i = 0; i < (engines || []).length; i++) {
+      if (engines[i].tool === tool) { hit = engines[i]; break; }
+    }
+    var model = hit && hit.current_model ? hit.current_model : '';
+    el.textContent = model || '以实测为准';
+    el.classList.toggle('is-empty', !model);
   }
 
   function renderWorkdir() {
@@ -245,6 +263,7 @@ layui.use(['layer', 'form', 'element'], function () {
           '<span>' + escapeHtml(e.label) + '</span>' +
           '<em>' + escapeHtml(tip) + '</em></label>';
       }).join('');
+      updateCurrentModel();
       renderTasks(lastTaskList || []);
     }).catch(function (e) {
       layer.msg('引擎探测失败：' + e.message, { icon: 2 });
@@ -277,8 +296,8 @@ layui.use(['layer', 'form', 'element'], function () {
       loadTasks();
     }).catch(function (e) {
       btn.disabled = false;
+      // 预检失败后端不入队、不落列表行，弹窗即全部信息
       layer.alert(e.message, { title: '预检未通过', icon: 2 });
-      loadTasks();   // 预检失败也会留一条 precheck_failed 记录，刷新可见
     });
   }
 

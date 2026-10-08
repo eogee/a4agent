@@ -1,5 +1,50 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* ---------- 全局原生单选 + 多选 ----------
+   单选（方案 E）：绿环 · 白隔 · 绿芯 · 柔光晕；
+   多选（方案 B）：绿底白勾 · 柔光晕，方角 4px。
+   自绘替代 accent-color 原生控件：任务下发引擎、技能/MCP 迁移弹窗、
+   本地模型监听与下载向导、反馈弹窗等全应用 radio/checkbox 统一走这一套。
+   layui 渲染的控件（form 内 input 均 display:none）不受影响，单独在下方对齐 */
+input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1.5px solid #ccd4d4;
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+
+input[type="radio"]:checked {
+  border-color: #16baaa;
+  background: radial-gradient(circle, #16baaa 0 4px, #fff 4px 6.5px);
+  box-shadow: 0 0 0 3px rgba(22, 186, 170, .16);
+}
+
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: #fff center/10px no-repeat;
+  border: 1.5px solid #ccd4d4;
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s, background-color .15s;
+}
+
+input[type="checkbox"]:checked {
+  border-color: #16baaa;
+  background-color: #16baaa;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.2 8.6l3.2 3.2 6.4-7.6' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  box-shadow: 0 0 0 3px rgba(22, 186, 170, .16);
+}
+
 /* =============================================================
    旗舰店柜台（Flagship Store Counter）
    薄荷画布 · 无瑕白卡 · 发丝分隔线 · 深墨字 · 状态绿独点
@@ -617,9 +662,17 @@ body {
 }
 
 /* 复选框（primary 皮肤） */
+/* layui primary 复选框：与全局原生多选（方案 B）像素对齐——
+   layui 自带 ✔ 字形用 font-size:0 隐藏，勾改画同一枚 SVG */
 .layui-form-checkbox[lay-skin=primary] > i {
-  border-radius: 5px;
-  border-color: #d3d9d9;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid #ccd4d4;
+  border-radius: 4px;
+  background: #fff center/10px no-repeat;
+  font-size: 0;
+  line-height: normal;
 }
 
 .layui-form-checkbox[lay-skin=primary]:hover > i { border-color: #16baaa; }
@@ -630,7 +683,8 @@ body {
 .layui-form-checked[lay-skin=primary]:hover > i {
   border-color: #16baaa !important;
   background-color: #16baaa;
-  color: #fff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.2 8.6l3.2 3.2 6.4-7.6' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  box-shadow: 0 0 0 3px rgba(22, 186, 170, .16);
 }
 
 /* 开关（代理服务） */
@@ -767,30 +821,86 @@ body {
   margin-top: 10px;
 }
 
-/* ---------- 滚动条（弱化） ---------- */
+/* ---------- 滚动条（全局弱化：细 + 低对比，悬停所在区域加深） ---------- */
+/* 旧内核回退（新版 Chromium/WebView2 会因下方标准属性存在而忽略这段） */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
-::-webkit-scrollbar-track {
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
   background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #d3d9d9;
-  border: 2px solid transparent;
+  background: rgba(100, 116, 139, 0.25);
   border-radius: 100px;
-  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #a7aaae;
-  background-clip: content-box;
+  background: rgba(100, 116, 139, 0.5);
 }
 
-::-webkit-scrollbar-corner {
-  background: transparent;
+/* 标准属性：新版 Chromium / WebView2 / Firefox 走这里；
+   普通属性可可靠重绘，悬停所在可滚动区域时滑块加深 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.25) transparent;
+  transition: scrollbar-color 0.15s ease;
+}
+
+*:not(html):not(body):hover {
+  scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
+}
+
+/* 深色容器（运行日志 / 代码示例）内改用浅色滑块 */
+.llama-code:hover,
+.llama-logs:hover {
+  scrollbar-color: rgba(203, 213, 225, 0.45) transparent;
+}
+
+/* ---------- 页面级悬浮滚动条（自绘，不占布局空间） ---------- */
+/* 隐藏原生根滚动条（内容不再被挤占一条竖向通道），由 app.js 自绘悬浮滑块 */
+html {
+  scrollbar-width: none;
+}
+
+html::-webkit-scrollbar {
+  display: none;
+}
+
+.page-scrollbar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 10px;
+  height: 100vh;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+.page-scrollbar-thumb {
+  position: absolute;
+  top: 4px;
+  right: 2px;
+  width: 6px;
+  border-radius: 100px;
+  background: rgba(100, 116, 139, 0.45);
+  opacity: 0;
+  transition: opacity 0.25s ease, background-color 0.15s ease;
+  pointer-events: auto;
+  cursor: default;
+  touch-action: none;
+}
+
+.page-scrollbar.visible .page-scrollbar-thumb {
+  opacity: 1;
+}
+
+.page-scrollbar.dragging .page-scrollbar-thumb,
+.page-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.7);
 }
 
 /* ---------- 更新弹窗 ---------- */
@@ -1407,9 +1517,9 @@ body {
 .llama-progress-indet { animation: llama-indet 1.2s ease-in-out infinite; width: 40%; }
 @keyframes llama-indet { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 
-.llama-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-@media (max-width: 960px) { .llama-grid { grid-template-columns: 1fr; } }
-.llama-card { display: flex; flex-direction: column; background: #fff; border: 1px solid rgba(0, 0, 0, 0.06); border-radius: 10px; padding: 14px 16px; }
+.llama-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 960px) { .llama-grid { grid-template-columns: minmax(0, 1fr); } }
+.llama-card { min-width: 0; display: flex; flex-direction: column; background: #fff; border: 1px solid rgba(0, 0, 0, 0.06); border-radius: 10px; padding: 14px 16px; }
 .llama-card-head { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 14px; color: #1f2329; margin-bottom: 10px; }
 
 .llama-dir-row { display: flex; gap: 8px; margin-bottom: 8px; }
@@ -1467,12 +1577,10 @@ body {
 .llama-wizard-risk { color: #b45309; margin-top: 6px; }
 .llama-wizard-ok { color: #15803d; margin-top: 6px; }
 
-/* llama 页原生单选着色（对齐 .mig-item 的 accent-color 先例） */
+/* llama 页单选排版（选中视觉走文件头部全局自绘规则，这里只管内联间距） */
 .llama-check input[type="radio"],
 .llama-wizard-pack input[type="radio"] {
-  accent-color: #16baaa;
-  cursor: pointer;
-  vertical-align: -2px;
+  vertical-align: -3px;
   margin: 0 6px 0 0;
 }
 
@@ -1486,8 +1594,11 @@ body {
 
 /* ---------------- 任务下发（无头 Agent） ---------------- */
 .task-form {
-  padding: 16px 18px 6px;
+  padding: 14px 18px;
   margin-bottom: 18px;
+  background: #fff;
+  border: 1px solid #eceff3;
+  border-radius: 10px;
 }
 
 .task-form-head {
@@ -1546,6 +1657,9 @@ body {
 .task-engine.is-off { opacity: .55; cursor: not-allowed; }
 
 .task-hint { font-size: 12px; color: #8a8e94; }
+
+.task-current-model { font-size: 12px; color: #374151; }
+.task-current-model.is-empty { color: #a4aab1; }
 
 /* 工作目录：按钮 + 已选路径展示。路径自己截断，「清除」固定在右侧，
    否则长路径会把按钮挤出可视区（容器 flex + 子项 min-width:0） */
