@@ -12,6 +12,17 @@ from backend.app.database import Base
 from backend.app.models import AgentTask
 
 
+@pytest.fixture(autouse=True)
+def _reset_runner_globals():
+    """任务 id 在各测试的独立库里都从 1 重新计数，而 _cancelled / _shutdown_reason
+    是模块级单例——前一个文件的取消测试留下的残留会把这里同 id 的任务误判为取消。"""
+    task_runner._cancelled.clear()
+    task_runner._shutdown_reason.clear()
+    yield
+    task_runner._cancelled.clear()
+    task_runner._shutdown_reason.clear()
+
+
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
     monkeypatch.setenv("A4AGENT_DATA_DIR", str(tmp_path / "data"))

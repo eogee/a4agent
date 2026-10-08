@@ -182,20 +182,21 @@ def test_dsh_reads_official_namespace_only(tmp_path, monkeypatch):
 
 
 def test_dsh_legacy_sidepath_is_not_ready(tmp_path, monkeypatch):
-    """只有 llm-deepseek 段时不算就绪——那是我们旧的侧门写入路径。"""
+    """只有 llm-deepseek 段时不算就绪——但也不再判死，交由实测兜底。"""
     settings = tmp_path / "settings.yaml"
     settings.write_text(
         json.dumps({"llm-deepseek": {"baseURL": "http://127.0.0.1:17890"}}), encoding="utf-8"
     )
     monkeypatch.setenv("A4AGENT_DSH_SETTINGS_PATH", str(settings))
     ready, detail = task_precheck._read_user_config_signal("dsh")
-    assert ready is False and "Add a custom provider" in detail
+    assert ready is True and "以实测结果为准" in detail
 
 
 def test_dsh_without_config_blocks_dispatch(tmp_path, monkeypatch):
+    """settings.yaml 缺失不代表不可用：跳过就绪判断，让实测给出真实原因。"""
     monkeypatch.setenv("A4AGENT_DSH_SETTINGS_PATH", str(tmp_path / "missing.yaml"))
     ready, detail = task_precheck._read_user_config_signal("dsh")
-    assert ready is False and "Add a custom provider" in detail
+    assert ready is True and "以实测结果为准" in detail
 
 
 def test_claude_and_codex_read_user_settings(tmp_path, monkeypatch):
@@ -216,9 +217,10 @@ def test_claude_and_codex_read_user_settings(tmp_path, monkeypatch):
 
 
 def test_qoder_config_is_readable_false_but_honest():
-    """Qoder 配置加密读不到：如实说「以实测为准」，不假装校验通过。"""
+    """Qoder 配置加密读不到：跳过就绪判断（判 False 会短路实测），
+    如实说明并以实测为准，不假装校验通过。"""
     ready, detail = task_precheck._read_user_config_signal("qoder")
-    assert ready is False
+    assert ready is True
     assert "无法读取" in detail and "实测" in detail
 
 
@@ -279,7 +281,9 @@ def test_smoke_run_timeout_is_reported(monkeypatch):
 
 
 def test_smoke_run_missing_command_is_reported(monkeypatch):
-    monkeypatch.setattr(task_engines, "resolve_command", lambda tool: None)
+    # 桩要打在 resolve_runtime 上：zcode 有桌面端内置内核回退，只把
+    # resolve_command 桩成 None 挡不住（真机上会找到并真的执行引擎）
+    monkeypatch.setattr(task_engines, "resolve_runtime", lambda tool: None)
     result = task_precheck.smoke_run("zcode")
     assert result["ok"] is False and "未探测到" in result["detail"]
 

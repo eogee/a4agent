@@ -363,3 +363,35 @@ def test_qoder_skills_root_follows_home_env(tmp_path, monkeypatch):
     assert config_manager.qoder_skills_root() == tmp_path / "qoder" / "skills"
     monkeypatch.setenv("A4AGENT_QODER_SKILLS_PATH", str(tmp_path / "elsewhere"))
     assert config_manager.qoder_skills_root() == tmp_path / "elsewhere"
+
+
+# ---------------- 下发前展示：各引擎当前默认模型 ----------------
+
+
+def test_read_current_model_zcode_formats_provider_name(monkeypatch):
+    """zcode 的 "providerId/modelName" 展示为 "providerName/modelName"。"""
+    monkeypatch.setattr(config_manager, "read_zcode_cli_config", lambda: {
+        "model": "abc12345/deepseek-v4-flash",
+        "provider": {"abc12345": {"name": "opencodego"}},
+    })
+    assert config_manager.read_current_model("zcode") == "opencodego/deepseek-v4-flash"
+
+
+def test_read_current_model_pi_joins_provider_and_model(monkeypatch):
+    monkeypatch.setattr(config_manager, "read_pi_settings", lambda: {
+        "defaultProvider": "strata", "defaultModel": "qwen3.8-flash-next-q2_0",
+    })
+    assert config_manager.read_current_model("pi") == "strata/qwen3.8-flash-next-q2_0"
+
+
+def test_read_current_model_claude_and_codex_read_model_field(monkeypatch):
+    monkeypatch.setattr(config_manager, "read_settings", lambda: {"model": "dots3-note-prev"})
+    monkeypatch.setattr(config_manager, "read_codex_settings", lambda: {"model": "dots3-note-prev"})
+    assert config_manager.read_current_model("claude") == "dots3-note-prev"
+    assert config_manager.read_current_model("codex") == "dots3-note-prev"
+
+
+def test_read_current_model_unreadable_tools_return_empty():
+    """dsh 自管 / qoder 加密读不到 → 空串，前端显示「以实测为准」。"""
+    assert config_manager.read_current_model("dsh") == ""
+    assert config_manager.read_current_model("qoder") == ""

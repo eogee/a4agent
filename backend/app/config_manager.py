@@ -686,6 +686,39 @@ def read_pi_settings() -> dict:
     return read_doc(pi_settings_path(), "json_sig")
 
 
+def read_current_model(tool: str) -> str:
+    """各引擎当前默认模型（无头任务将实际使用的），读不到返回空串。
+
+    仅用于下发前的展示——让「实际用的模型」对用户可见，不参与任何判定；
+    dsh 的模型由 dsh 自管、qoder 的配置加密，均读不到 → 空串，前端显示
+    「以实测为准」。
+    """
+    try:
+        if tool == "claude":
+            return str(read_settings().get("model") or "")
+        if tool == "codex":
+            return str(read_codex_settings().get("model") or "")
+        if tool == "zcode":
+            cfg = read_zcode_cli_config()
+            model = str(cfg.get("model") or "")
+            # "providerId/modelName" 转成 "providerName/modelName"，与 ZCode 界面一致
+            providers = cfg.get("provider") if isinstance(cfg.get("provider"), dict) else {}
+            if "/" in model:
+                pid, _, name = model.partition("/")
+                entry = providers.get(pid) if isinstance(providers.get(pid), dict) else {}
+                pname = str(entry.get("name") or pid[:8])
+                return f"{pname}/{name}"
+            return model
+        if tool == "pi":
+            settings = read_pi_settings()
+            provider = str(settings.get("defaultProvider") or "")
+            model = str(settings.get("defaultModel") or "")
+            return f"{provider}/{model}" if provider and model else model
+    except Exception:  # 读配置失败只影响展示，不抛
+        return ""
+    return ""
+
+
 def backup_pi_configs() -> dict:
     """修改前备份 pi 两份配置，返回 {models, settings} 各自备份路径（无原文件时 None）。"""
     return backup_many(

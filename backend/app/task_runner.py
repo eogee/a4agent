@@ -151,18 +151,25 @@ def _execute(task_id: int) -> None:
 
 
 def _child_env(tool: str):
-    """引擎子进程的环境变量；非 pi 返回 None（沿用继承的环境）。
+    """引擎子进程的环境变量；无特殊需求返回 None（沿用继承的环境）。
 
     pi 读自己的 `PI_CODING_AGENT_DIR`：显式指向 a4agent 刚写过配置的目录，
     否则两边可能落在不同位置（`A4AGENT_PI_AGENT_DIR` 只影响 a4agent 这一侧），
     任务就会用旧配置跑——端到端实测正是这样先失败的。
+    qoder 复用桌面端内置内核时必须以 ELECTRON_RUN_AS_NODE=1 跑 Qoder.exe，
+    否则拉起的是整个 IDE 而不是无头引擎。
     """
-    if tool != "pi":
-        return None
-    from . import config_manager
+    if tool == "pi":
+        from . import config_manager
 
+        env = dict(os.environ)
+        env["PI_CODING_AGENT_DIR"] = str(config_manager.pi_agent_dir())
+        return env
+    extra = task_engines.runtime_extra_env(tool)
+    if not extra:
+        return None
     env = dict(os.environ)
-    env["PI_CODING_AGENT_DIR"] = str(config_manager.pi_agent_dir())
+    env.update(extra)
     return env
 
 

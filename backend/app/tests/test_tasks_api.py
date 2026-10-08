@@ -99,7 +99,8 @@ def test_create_task_returns_immediately_and_queues(db, monkeypatch):
     assert out["timeout_seconds"] == task_runner.DEFAULT_TIMEOUT_SECONDS
 
 
-def test_create_task_blocked_by_precheck_records_failed_row(db, monkeypatch):
+def test_create_task_blocked_by_precheck_returns_422_without_row(db, monkeypatch):
+    """预检失败：422 弹窗前置提示，不入队也不落列表行。"""
     _seed_config(db)
     failed = {
         "ok": False,
@@ -114,10 +115,7 @@ def test_create_task_blocked_by_precheck_records_failed_row(db, monkeypatch):
     assert exc.value.status_code == 422
     assert "本地推理服务未启动" in exc.value.detail
 
-    row = db.query(AgentTask).one()
-    assert row.status == task_runner.PRECHECK_FAILED
-    assert row.finished_at is not None
-    assert json.loads(row.precheck_result)["ok"] is False
+    assert db.query(AgentTask).count() == 0
 
 
 def test_create_task_rejects_unknown_engine(db):

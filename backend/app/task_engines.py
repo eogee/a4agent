@@ -96,6 +96,83 @@ def resolve_command(tool: str) -> str | None:
     return None
 
 
+def runtime_extra_env(tool: str) -> dict:
+    """引擎子进程需要注入的附加环境变量；大多数端为空。
+
+    qoder 复用桌面端内置内核时，Qoder.exe 要以 ELECTRON_RUN_AS_NODE=1
+    跑才是纯 node（否则会拉起整个 IDE）。
+    """
+    if tool == "qoder":
+        return {"ELECTRON_RUN_AS_NODE": "1"}
+    return {}
+
+
+def _localappdata() -> Path | None:
+    raw = os.environ.get("LOCALAPPDATA", "").strip()
+    return Path(raw) if raw else None
+
+
+def _zcode_ide_runtime() -> dict | None:
+    """ZCode 桌面端自带的无头内核：resources/glm/zcode.cjs（随 IDE 更新）。"""
+    base = _localappdata()
+    node = shutil.which("node")
+    if base is None or node is None:
+        return None
+    cjs = base / "Programs" / "ZCode" / "resources" / "glm" / "zcode.cjs"
+    if not cjs.is_file():
+        return None
+    return {"display": str(cjs), "argv_prefix": [node, str(cjs)], "env": {}}
+
+
+def _qoder_ide_runtime() -> dict | None:
+    """Qoder 桌面端自带的 agent 内核（与官方 qodercli 同源，随 IDE 更新）。
+
+    调用形态来自 IDE 自身运行日志：Qoder.exe <worker.mjs> <参数>，
+    必须带 ELECTRON_RUN_AS_NODE=1，否则拉起的是整个 IDE。
+    """
+    base = _localappdata()
+    if base is None:
+        return None
+    ide = base / "Programs" / "Qoder" / "Qoder.exe"
+    worker = (base / "Programs" / "Qoder" / "resources" / "app.asar.unpacked" /
+              "node_modules" / "@qoder-ai" / "qoder-agent-sdk" / "dist" /
+              "_worker" / "qoder-worker-runtime.obf.mjs")
+    if not (ide.is_file() and worker.is_file()):
+        return None
+    return {
+        "display": str(worker),
+        "argv_prefix": [str(ide), str(worker)],
+        "env": runtime_extra_env("qoder"),
+    }
+
+
+def resolve_runtime(tool: str) -> dict | None:
+    """引擎运行时规格：{display, argv_prefix, env}；确认不可用返回 None。
+
+    PATH 上有命令就沿用它（claude/codex/dsh/pi 与历史行为一致）；
+    zcode / qoder 追加桌面端内置内核回退——官方 CLI 不要求单独安装，
+    装了 IDE 即具备无头能力（内核随 IDE 更新，登录态共享）。
+    qoder 的优先级单独处理：官方 qodercli > 桌面端内置内核 > entry 分发器
+    （分发器只是转发壳，背后没有 qodercli 时只会报「CLI 未安装」）。
+    """
+    command = resolve_command(tool)  # 未知的 tool 在这里抛 ValueError
+    if tool == "qoder":
+        cli = shutil.which("qodercli")
+        if cli:
+            return {"display": cli, "argv_prefix": [cli], "env": {}}
+        ide = _qoder_ide_runtime()
+        if ide:
+            return ide
+        if command:
+            return {"display": command, "argv_prefix": [command], "env": {}}
+        return None
+    if command:
+        return {"display": command, "argv_prefix": [command], "env": {}}
+    if tool == "zcode":
+        return _zcode_ide_runtime()
+    return None
+
+
 _probe_cache: dict = {}
 
 
@@ -163,26 +240,38 @@ def probe(tool: str, refresh: bool = False) -> dict:
     if cached and not refresh and now - cached[0] < _PROBE_CACHE_SECONDS:
         return cached[1]
 
-    command = resolve_command(tool)
+    runtime = resolve_runtime(tool)
     info = {
         "tool": tool,
         "label": ENGINE_LABELS[tool],
-        "installed": command is not None,
-        "command": command,
+        "installed": runtime is not None,
+        "command": runtime["display"] if runtime else None,
         "version": "",
         "error": "",
     }
-    if command is None:
-        info["error"] = f"未探测到 {ENGINE_LABELS[tool]} 命令，请确认已安装并在 PATH 中"
+    if runtime is None:
+        if tool in ("zcode", "qoder"):
+            info["error"] = (
+                f"未探测到 {ENGINE_LABELS[tool]} 无头内核（PATH 命令与"
+                "桌面端自带内核均未找到，确认桌面端已安装或单独安装其 CLI）"
+            )
+        else:
+            info["error"] = f"未探测到 {ENGINE_LABELS[tool]} 命令，请确认已安装并在 PATH 中"
     else:
+        env = None
+        extra = runtime.get("env") or {}
+        if extra:
+            env = dict(os.environ)
+            env.update(extra)
         try:
             done = subprocess.run(
-                [command, *_VERSION_ARGS[tool]],
+                [*runtime["argv_prefix"], *_VERSION_ARGS[tool]],
                 capture_output=True,
                 text=True,
                 timeout=20,
                 encoding="utf-8",
                 errors="replace",
+                env=env,
                 creationflags=_no_window_flags(),
             )
             lines = (done.stdout or "").strip().splitlines()
@@ -191,8 +280,16 @@ def probe(tool: str, refresh: bool = False) -> dict:
             if done.returncode != 0 or crash:
                 info["installed"] = False
                 # npm 壳可能指向不存在的文件而仍以 0 退出并打印 node 崩溃栈
-                # （本机 pi.cmd 就是这种坏状态），只报退出码会让人无从下手
-                detail = crash or (lines[0].strip() if lines else f"退出码 {done.returncode}")
+                # （本机 pi.cmd 就是这种坏状态），只报退出码会让人无从下手；
+                # stderr 首行也要兜底——qoder 的 dispatcher 把「CLI 未安装，
+                # 请到官网安装」写在 stderr，丢了就只剩退出码 127
+                err_lines = [t.strip() for t in (done.stderr or "").splitlines() if t.strip()]
+                detail = (
+                    crash
+                    or (lines[0].strip() if lines else "")
+                    or (err_lines[0] if err_lines else "")
+                    or f"退出码 {done.returncode}"
+                )
                 info["error"] = f"{ENGINE_LABELS[tool]} 无法执行：{detail[:160]}"
         except (OSError, subprocess.SubprocessError) as e:
             info["installed"] = False
@@ -284,14 +381,14 @@ def build_argv(tool: str, prompt: str, working_dir: str | None = None) -> list:
     每条命令都满足三个硬性要求：结构化输出（便于解析产出）、一次性会话
     （不留状态）、权限预授权（无人在场审批，不预授权会卡死或被拒）。
     """
-    command = resolve_command(tool)
-    if command is None:
+    runtime = resolve_runtime(tool)
+    if runtime is None:
         names = "/".join(_SHIM.get(tool, (tool,)))
         raise ValueError(
             f"未探测到 {ENGINE_LABELS.get(tool, tool)} 命令（试过 {names}），"
             "请确认已安装并在 PATH 中"
         )
-    argv = [command]
+    argv = [*runtime["argv_prefix"]]
 
     if tool == "claude":
         # --output-format json 返回单个 JSON 对象，产出在 result 字段；
@@ -308,8 +405,10 @@ def build_argv(tool: str, prompt: str, working_dir: str | None = None) -> list:
         return argv
     elif tool == "zcode":
         # -p 一次性调用，--json 给结构化输出（text / toolCalls / usage / stopReason）；
-        # --mode yolo 免审批（无头模式下的默认要求）
+        # --mode yolo 免审批（无头模式下的默认要求）；--cwd 指定工作目录
         argv += ["-p", prompt, "--json"]
+        if working_dir:
+            argv += ["--cwd", working_dir]
     elif tool == "qoder":
         # qodercli -p 打印即退出，-o json 给结构化输出
         argv += ["-p", prompt, "-o", "json"]

@@ -170,20 +170,30 @@ def _read_user_config_signal(tool: str) -> tuple[bool, str]:
                 if ok else f"请先在 {hint}"
             )
         if tool == "dsh":
-            # 只看 dsh 自己界面配的正规命名空间 llm-pi-ai；
-            # llm-deepseek 是旧版 a4agent 写入的侧门路径，已在v0.5.1 移除
+            # dsh 的供应商/凭据存全局文档，settings.yaml 缺失不代表不可用
+            # （实测可能照样能跑）——读不到就不判死，交由实测给出真实原因
             settings = config_manager.read_dsh_settings()
             ns = settings.get("llm-pi-ai") if isinstance(settings, dict) else None
             providers = ns.get("providers") if isinstance(ns, dict) else None
-            ok = isinstance(providers, dict) and bool(providers)
-            return ok, (f"已配 {len(providers)} 个供应商" if ok else f"请先在 {hint}")
+            if isinstance(providers, dict) and providers:
+                return True, f"已配 {len(providers)} 个供应商"
+            return True, "全局设置未读取到，跳过就绪判断，以实测结果为准"
         if tool == "qoder":
             # Qoder 的模型配置在 ~/.qoder/.models/<uid>/ 下经 WASM 按机器码
-            # 加密，本工具读不到内容，因此不做就绪判断，交由第三步实测兜底
-            return False, "Qoder 模型配置经专有加密，无法读取，请以实测结果为准"
+            # 加密，本工具读不到内容：不能据此判「未就绪」（那会短路第三步
+            # 实测，qoder 任务将永远无法下发），就绪与否交由实测给出真实答案
+            return True, "配置经专有加密无法读取，跳过就绪判断，以实测结果为准"
     except Exception as e:  # 读配置失败不应让整个预检崩掉
         return False, f"读取 {tool} 配置失败（{e}），请以实测结果为准"
     return False, f"请先在 {hint}"
+
+
+def smoke_env(tool: str) -> dict:
+    """实测子进程的环境：继承 + 该引擎运行时需要的附加变量
+    （qoder 的桌面端内核要 ELECTRON_RUN_AS_NODE=1，与 task_runner._child_env 同源）。"""
+    env = dict(os.environ)
+    env.update(task_engines.runtime_extra_env(tool))
+    return env
 
 
 def smoke_run(tool: str, timeout: int = 90) -> dict:
@@ -214,7 +224,7 @@ def smoke_run(tool: str, timeout: int = 90) -> dict:
             errors="replace",
             input="",
             cwd=str(Path.home()),
-            env=dict(os.environ),
+            env=smoke_env(tool),
             creationflags=_no_window(),
         )
     except subprocess.TimeoutExpired:

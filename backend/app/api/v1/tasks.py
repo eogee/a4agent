@@ -1,7 +1,7 @@
 """无头任务接口：引擎探测 / 下发 / 列表 / 详情 / 取消 / 删除。
 
-下发（POST）在返回前同步做完预检：通过则建 pending 行并交后台线程执行，
-不通过则建 precheck_failed 行留痕并回 422 + 自然语言原因。
+下发（POST）在返回前同步做完预检：通过则建 pending 行并交后台线程执行；
+不通过不入队也不落列表行，直接回 422 + 自然语言原因，由前端弹窗前置提示。
 """
 import json
 from datetime import datetime
@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from ... import crud, schemas, task_engines, task_precheck, task_runner
+from ... import config_manager, crud, schemas, task_engines, task_precheck, task_runner
 from ...crypto import decrypt_text
 from ...database import get_db
 from ...models import AgentTask
@@ -21,8 +21,13 @@ router = APIRouter(prefix="/tasks")
 @router.get("/engines")
 def engines(refresh: bool = False, db: Session = Depends(get_db)):
     active = crud.get_active_config(db)
+    engines = task_engines.probe_all(refresh)
+    for item in engines:
+        # 下发前展示「本次将使用的模型」，让工具自身的配置分叉（如 ZCode 的
+        # IDE 与 CLI 不同步）对用户可见；读不到的端（dsh/qoder）为空串
+        item["current_model"] = config_manager.read_current_model(item["tool"])
     return {
-        "engines": task_engines.probe_all(refresh),
+        "engines": engines,
         "concurrency": task_runner.max_workers(),
         "default_timeout": task_runner.DEFAULT_TIMEOUT_SECONDS,
         "running": task_runner.running_count(),
@@ -57,28 +62,26 @@ def create_task(body: schemas.TaskCreate, db: Session = Depends(get_db)):
         # 与切换接口同一道闸：空 Key 会让连通预检得到误导性的「密钥无效」
         raise HTTPException(409, "该配置方案的 API Key 解密失败或为空，请到「配置方案」页重新保存一次 Key")
     result = task_precheck.run(db, body.tool, active.provider, api_key, active.model)
+    if not result["ok"]:
+        # 预检失败不入队也不落列表行：422 的 detail 由前端弹窗原样展示，
+        # 保持一句话可执行的原因
+        raise HTTPException(422, f"预检未通过：{result['reason']}")
 
     task = AgentTask(
         prompt=prompt,
         tool=body.tool,
         working_dir=working_dir,
         timeout_seconds=body.timeout_seconds or task_runner.DEFAULT_TIMEOUT_SECONDS,
-        status=task_runner.PENDING if result["ok"] else task_runner.PRECHECK_FAILED,
+        status=task_runner.PENDING,
         config_id=active.id,
         model=active.model or "",
         precheck_result=json.dumps(result, ensure_ascii=False),
         precheck_ms=result["ms"],
-        error_summary="" if result["ok"] else result["reason"],
+        error_summary="",
     )
-    if not result["ok"]:
-        task.finished_at = datetime.now()
     db.add(task)
     db.commit()
     db.refresh(task)
-
-    if not result["ok"]:
-        # 422 的 detail 会被前端原样展示，保持一句话可执行的原因
-        raise HTTPException(422, f"预检未通过：{result['reason']}")
 
     task_runner.submit(task.id)
     return task_runner.task_payload(task)
