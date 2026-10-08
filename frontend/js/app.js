@@ -686,7 +686,7 @@ layui.use(['layer', 'form', 'element'], function () {
     layer.open({
       type: 1,
       title: '发现新版本 v' + escapeHtml(r.latest_version),
-      area: ['460px', 'auto'],
+      area: ['720px', 'auto'],
       content: '<div class="update-panel">' +
         '<p class="update-versions">当前 <b>v' + escapeHtml(r.current_version) + '</b> → 最新 <b>v' + escapeHtml(r.latest_version) + '</b></p>' +
         breaking + notesHtml + '</div>',

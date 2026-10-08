@@ -954,7 +954,7 @@ html::-webkit-scrollbar {
   line-height: 1.7;
   white-space: normal;
   word-break: break-word;
-  max-height: 220px;
+  max-height: 52vh;
   overflow-y: auto;
 }
 /* 渲染后的 Markdown 内容样式 */
