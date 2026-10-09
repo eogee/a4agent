@@ -7,10 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import models  # noqa: F401  # 注册模型建表
-from .api.v1 import (configs, desktop, feedback, fs, llama, mcp, providers,
-                     removal, skills, switch, tasks, update)
+from .api.v1 import (configs, desktop, feedback, fs, llama, mcp, phone,
+                     providers, removal, skills, switch, tasks, update)
 from .database import Base, engine, ensure_schema
 from .logging_config import setup_logging
+from .phone import notifier
 from .seed import seed_providers
 from .version import current_version
 
@@ -62,6 +63,11 @@ def create_app() -> FastAPI:
     app.include_router(removal.router, prefix="/api/v1", tags=["removal"])
     app.include_router(fs.router, prefix="/api/v1", tags=["fs"])
     app.include_router(desktop.router, prefix="/api/v1", tags=["desktop"])
+    app.include_router(phone.router, prefix="/api/v1", tags=["phone"])
+
+    # 任务终态 → 手机推送（enabled 关闭时监听器内部直接跳过）
+    notifier.register()
+    _start_notify_queue_consumer()
 
     # 前端静态资源：开发/桌面运行时由后端统一托管
     frontend_dir = _frontend_dir()
@@ -69,6 +75,27 @@ def create_app() -> FastAPI:
         app.mount("/", _FrontendStatic(directory=str(frontend_dir), html=True), name="frontend")
 
     return app
+
+
+def _start_notify_queue_consumer() -> None:
+    """桌面弹窗请求队列消费：会话 hook 只写请求文件（ZCode 会在 hook 退出时
+    杀进程树，hook 内弹窗来不及渲染），由本常驻进程周期代发。"""
+    import logging
+    import threading
+    import time
+
+    from .hooks import deskqueue
+    from .win_toast import show as toast_show
+
+    def _loop() -> None:
+        while True:
+            try:
+                deskqueue.process_queue(toast_show)
+            except Exception:  # noqa: BLE001 - 队列消费失败不影响主服务
+                logging.getLogger(__name__).exception("桌面通知队列消费异常")
+            time.sleep(2)
+
+    threading.Thread(target=_loop, daemon=True, name="a4agent-notify-queue").start()
 
 
 app = create_app()

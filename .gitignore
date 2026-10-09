@@ -12,6 +12,9 @@ build/
 dist/
 *.spec
 
+# 调试过程产物（界面探针截图与抓取数据）
+.run/
+
 # 编辑器
 .idea/
 .vscode/

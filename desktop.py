@@ -68,6 +68,14 @@ if "--apply-update" in sys.argv:
     time.sleep(1)
     os._exit(0)
 
+if len(sys.argv) >= 2 and sys.argv[1] == "hook":
+    # Hook 子命令：终端宿主（Claude Code / ZCode 等）以管道重定向调用本进程，
+    # 读 stdin 载荷、stdout 回写决策。必须短路在重型 import 之前——hook 是
+    # AI 每次事件都调用的热路径，启动延迟直接挂在用户每次工具调用上。
+    from backend.app.hooks.dispatch import run_hook_cli
+
+    sys.exit(run_hook_cli(sys.argv[2:]))
+
 import webview  # noqa: E402
 
 from backend.app.main import app  # noqa: E402
@@ -313,34 +321,40 @@ def main() -> None:
     os._exit(0)
 
 
+def _wake(win) -> None:
+    """显示并置前主窗口；唤回接口与系统通知横幅点击共用。"""
+    try:
+        win.show()
+    except Exception:  # noqa: BLE001 - show 不可用时退回 restore
+        pass
+    try:
+        win.restore()
+    except Exception:
+        pass
+    _STATE["visible"] = True
+    _bring_to_front(win)
+
+
 def _register_desktop_hooks(win) -> None:
     """把「唤回窗口」交给 /api/v1/desktop/wake（二次启动时调用）。"""
     from backend.app.api.v1 import desktop as desktop_api
 
-    def wake() -> None:
-        try:
-            win.show()
-        except Exception:  # noqa: BLE001 - show 不可用时退回 restore
-            pass
-        try:
-            win.restore()
-        except Exception:
-            pass
-        _STATE["visible"] = True
-        _bring_to_front(win)
-
-    desktop_api.set_wake_hook(wake)
+    desktop_api.set_wake_hook(lambda: _wake(win))
 
 
 def _subscribe_task_notifications(win) -> None:
-    """任务到终态时：窗口隐藏则闪任务栏，用户看得见时交给页面自己提示。"""
-    from backend.app import task_notify
+    """任务到终态时：窗口隐藏则闪任务栏 + 弹系统通知横幅（点击唤回窗口），
+    窗口可见时不弹系统横幅——页面自己有应用内提示，避免双重打扰。"""
+    from backend.app import task_notify, win_toast
+    from backend.app.phone.notifier import compose
 
     def on_event(event: dict) -> None:
         if _STATE["visible"]:
             return
         # Window 没有 visible 属性，可见性由 on_closing / wake 自己记
         task_notify.flash_taskbar(_hwnd_of(win))
+        title, message = compose(event)
+        win_toast.show(title, message, on_click=lambda: _wake(win))
 
     task_notify.subscribe(on_event)
 

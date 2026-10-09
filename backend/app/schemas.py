@@ -229,3 +229,65 @@ class FeedbackSubmitted(BaseModel):
 
     id: int
     emailed: bool
+
+
+# ---------------- 手机通知 ----------------
+
+class PhoneEventsIn(BaseModel):
+    success: Optional[bool] = None
+    failed: Optional[bool] = None
+    timeout: Optional[bool] = None
+    cancelled: Optional[bool] = None
+
+
+class PhoneConfigIn(BaseModel):
+    """部分更新：未传字段保持原值；token 传空串即清除。"""
+
+    enabled: Optional[bool] = None
+    server: Optional[str] = Field(default=None, max_length=300)
+    topic: Optional[str] = Field(default=None, max_length=64)
+    token: Optional[str] = Field(default=None, max_length=256)
+    events: Optional[PhoneEventsIn] = None
+    desktop: Optional[bool] = None
+
+
+class PhoneConfigOut(BaseModel):
+    enabled: bool
+    server: str
+    topic: str
+    token_set: bool
+    events: dict
+    subscribe_url: str
+    qr_payload: str
+    desktop: bool
+
+
+class PhoneTestOut(BaseModel):
+    """测试推送结果：失败原因原样回给前端前置弹窗，不静默。"""
+
+    sent: bool
+    detail: str = ""
+
+
+# ---------------- 会话交互（hook） ----------------
+
+class PhoneHookIn(BaseModel):
+    """部分更新：未传字段保持原值。"""
+
+    mode: Optional[str] = Field(default=None, pattern="^(out|home)$")
+    timeout: Optional[int] = Field(default=None, ge=15, le=600)
+    plan_timeout: Optional[int] = Field(default=None, ge=30, le=1800)
+
+
+class PhoneHookStatusOut(BaseModel):
+    mode: str
+    timeout: int
+    plan_timeout: int
+    topic_ready: bool
+    hook_command: str
+    engines: dict
+    desktop: bool
+
+
+class HookEngineIn(BaseModel):
+    engine: str

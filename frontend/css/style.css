@@ -1044,10 +1044,14 @@ html::-webkit-scrollbar {
 }
 
 /* ---------- 技能管理 ---------- */
+/* 工具栏三段式：seg 控件 | 搜索框 | 动作区。
+   搜索框必须锚定在 seg 右侧固定位置——两个 tab 的动作区按钮数量/宽度不同
+   （技能 4个 vs MCP 4个但「安装 MCP」是主按钮更宽），若让搜索框参与
+   space-between 均分，切tab 时它会横向滑动。改为给搜索框固定左边距、
+   动作区 margin-left:auto 靠右，位置就不再随动作区宽度变化。 */
 .skills-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   margin-bottom: 18px;
 }
@@ -1056,13 +1060,14 @@ html::-webkit-scrollbar {
   display: flex;
   align-items: center;
   gap: 14px;
+  margin-left: auto;
 }
 
-/* 头部搜索框 */
+/* 头部搜索框：固定基准宽高，两个 tab 完全一致 */
 .list-search {
   position: relative;
-  flex: 1 1 180px;
-  max-width: 260px;
+  flex: 0 0 260px;
+  width: 260px;
 }
 
 .list-search .layui-input {
@@ -1475,7 +1480,7 @@ html::-webkit-scrollbar {
   .config-form,
   .provider-form { padding: 16px 18px; }
   .skills-header { flex-wrap: wrap; }
-  .list-search { order: -1; flex: 1 1 100%; max-width: none; }
+  .list-search { order: -1; flex: 1 1 100%; width: auto; }
   .proj-grid { grid-template-columns: repeat(auto-fill, minmax(100%, 1fr)); }
 }
 
@@ -1612,6 +1617,21 @@ html::-webkit-scrollbar {
 
 .task-active-config { font-size: 12px; font-weight: 400; color: #1f7a63; }
 .task-active-config.is-empty { color: #b0563a; }
+
+.beta-badge {
+  align-self: center;
+  display: inline-block;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  color: #1f7a63;
+  background: #e8f4f0;
+  border: 1px solid #a8d5c8;
+  border-radius: 999px;
+  cursor: default;
+  user-select: none;
+}
 
 .task-prompt {
   /* layui reset 里有 textarea{padding:0}，不显式给就会顶着左上角写 */
@@ -1880,3 +1900,185 @@ html::-webkit-scrollbar {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ================== 通知提醒（手机推送 + 桌面横幅） ================== */
+
+/* 卡片宽度跟随所在栏，不再各自限宽（布局约束统一交给 .phone-layout） */
+.phone-main-card, .phone-sub-card, .phone-hook-card { max-width: none; }
+
+/* 提示文字：行高放宽便于阅读，长句可换行而不挤成一团 */
+.phone-hint { font-size: 12px; color: #9ca3af; line-height: 1.7; }
+
+/* 独占一行的提示（控件与说明分行，避免窄容器里把 select 挤扁） */
+.phone-hint-block {
+  display: block;
+  margin: -6px 0 12px;
+  padding-left: 78px;
+}
+
+.phone-input { flex: 1; min-width: 0; max-width: 420px; }
+
+.phone-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #3d4044;
+  cursor: pointer;
+  margin-right: 18px;
+}
+
+.phone-actions { gap: 8px; margin-top: 16px; }
+
+.phone-qr-area {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 12px;
+}
+
+#phone-qrcode {
+  flex: none;
+  width: 148px;
+  height: 148px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #eceff3;
+  border-radius: 8px;
+}
+#phone-qrcode img, #phone-qrcode canvas { display: block; }
+
+.phone-qr-steps { font-size: 13px; color: #4b5563; line-height: 2; }
+.phone-qr-steps p { margin: 0; }
+
+.phone-sub-url { margin-top: 6px !important; font-size: 12px !important; color: #6b7280 !important; }
+.phone-sub-url span { color: #16baaa; user-select: all; }
+
+/* 提示条：深薄荷绿底（主色 #16baaa 的浅色化），与整体 UI 的绿系呼应。
+   四边同色描边——不能用 border-left 配圆角，左边框会跟着圆角弯成半弧形。 */
+.phone-sec-tip {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #e4f6f4;
+  border: 1px solid #a5e0d8;
+  font-size: 12px;
+  color: #0f5f57;
+  line-height: 1.7;
+}
+
+/* 通道总览：手机推送 / 桌面横幅双通道状态并排 */
+.phone-chan-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  max-width: 1160px;
+  padding: 10px 14px;
+  border: 1px solid #e8ebf0;
+  border-radius: 12px;
+  background: #fff;
+  margin-bottom: 10px;
+}
+
+.phone-chan-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1f2329;
+  padding-right: 4px;
+  border-right: 1px solid #e8ebf0;
+}
+
+.phone-chan-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #4b5563;
+}
+
+.phone-chan-item b { font-weight: 500; color: #1f2329; }
+
+.phone-chan-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c9ced6;
+  flex: none;
+}
+
+.phone-chan-dot.is-on { background: #16baaa; }
+
+/* 常驻进程依赖：属于整个页面的约束，用浅色底强调层级 */
+.phone-dep-tip { max-width: 1160px; margin-bottom: 14px; }
+
+/* 两栏布局：左手机推送与订阅，右会话交互。
+   gap 20px 与上面通道条的宽度上限 1160px 对齐，右侧卡片不超出。 */
+.phone-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 460px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  max-width: 1160px;
+}
+
+.phone-col-left, .phone-col-right { min-width: 0; }
+
+/* 宿主注册表格：四列定宽对齐，配置路径可省略不换行 */
+.phone-engine-table {
+  margin: 4px 0 12px;
+  border: 1px solid #e8ebf0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.phone-engine-thead, .phone-engine-tr {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) 76px 64px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+
+.phone-engine-thead {
+  background: #f5f7f8;
+  border-bottom: 1px solid #e8ebf0;
+  font-size: 12px;
+  color: #8a8e94;
+}
+
+.phone-engine-tr { border-bottom: 1px solid #f2f4f5; }
+.phone-engine-tr:last-child { border-bottom: none; }
+.phone-engine-tr:hover { background: #fafbfc; }
+
+.phone-engine-col-name { font-size: 13px; color: #1f2329; font-weight: 500; }
+
+.phone-engine-col-cfg {
+  font-size: 12px;
+  color: #8a8e94;
+  font-family: Consolas, Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.phone-engine-col-act { text-align: right; }
+.phone-engine-col-act .layui-btn-xs { margin: 0; }
+
+@media (max-width: 1080px) {
+  .phone-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 会话交互（hook）卡片 */
+.phone-input-sm { width: 130px; }
+/* 必须同等特异性+.task-form-row .layui-input（那条是 flex:1，优先级 0,2,0），
+   否则单class 的 .phone-input-sm 会被它压过，flex:none 失效、下拉框被长提示挤成窄缝 */
+.task-form-row .phone-input-sm {
+  flex: none;
+  width: 130px;
+}
+
+.phone-engine-state {
+  font-size: 12px; color: #9ca3af; padding: 1px 8px;
+  border-radius: 100px; background: #f3f4f6;
+}
+.phone-engine-state.is-on { color: #1f7a63; background: #e6f4f0; }
