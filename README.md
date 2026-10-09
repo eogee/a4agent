@@ -11,6 +11,7 @@ English | [简体中文](README.zh-CN.md)
 | **API Switching** | One-click provider / model / API-key switching for the two CLI tools without a graphical UI (Claude Code, Codex), with automatic backup, atomic writes, and DPAPI-encrypted key storage; the other four tools have their own provider UIs and are configured by the user in-app |
 | **Local Models** | Turn any `.gguf` model into an OpenAI-compatible local/LAN API service in one click: engine auto-download by GPU, model library scanning, VRAM risk assessment, one-click profile creation for Claude Code / Codex |
 | **Task Dispatch** | Run any of the six CLIs in **headless mode** as background tasks: dispatch-and-return, automatic pre-flight checks (engine ready / config ready / real connectivity), queue polling, output archiving, cancel & timeout, and tasks survive closing the window. Uses the config you already set up in each app |
+| **Notifications** | Two independent channels so you are not tied to the desk: **phone push** (ntfy) for task completion/failure/timeout with the agent's last output, and **desktop toasts** that wake the window on click. Session hooks for **Claude Code / Codex / ZCode / Qoder / WorkBuddy** let you answer the agent's questions and approve permissions from your phone |
 
 ---
 
@@ -251,7 +252,7 @@ The installer is **per-user (no UAC)**: double-click and follow the wizard into 
 
 1. After installation, start a4agent from the **Start menu** or the **desktop shortcut**
 2. If **Windows SmartScreen** appears on first run, click "More info → Run anyway" (the app has no commercial code signing — normal, doesn't affect functionality)
-3. The UI has six tabs: Profiles (API switching, Claude Code & Codex only), Providers, **Skills**, **MCP**, **Local Models** (llama.cpp inference console), and **Task Dispatch** (headless agent tasks)
+3. The UI has seven tabs: Profiles (API switching, Claude Code & Codex only), Providers, **Skills**, **MCP**, **Local Models** (llama.cpp inference console), **Task Dispatch** (headless agent tasks), and **Notifications** (phone push + desktop toasts)
 
 ### Data & Privacy
 
@@ -365,16 +366,22 @@ a4agent/
 │   ├── task_precheck.py      # three-step pre-flight checks (engine / config / real connectivity)
 │   ├── task_runner.py        # task runner (thread pool, process trees, timeout)
 │   ├── task_notify.py        # task completion notice (in-page hint / taskbar flash)
+│   ├── phone/                # notifications: config (topic / token / event switches) / ntfy (push client) /
+│   │                         #   notifier (dispatch of task terminal states to the two channels)
+│   ├── hooks/                # session hooks: dispatch (event routing) / handlers (ask / permission /
+│   │                         #   completion) / register (mounting to each tool) / deskqueue (deferred toasts)
+│   ├── win_toast.py          # Win32 desktop notification banner
 │   ├── updater.py            # self-update (manifest verification, dual-source racing download)
 │   ├── llama/                # local model inference console: catalog (engine catalog) / gguf (model parsing) /
 │   │                         #   gpu (hardware detection) / downloader (engine download) / runtime & server
 │   │                         #   (service lifecycle) / presets (inference presets) / config / lan (LAN)
-│   └── tests/                # pytest suite (22 modules)
+│   └── tests/                # pytest suite (24 modules)
 ├── frontend/
-│   ├── index.html            # six-tab main UI
+│   ├── index.html            # seven-tab main UI
 │   ├── js/app.js             # profiles / providers / skills / MCP page logic
 │   ├── js/llama.js           # local models page logic
 │   ├── js/tasks.js           # task dispatch page logic
+│   ├── js/phone.js           # notifications page logic (phone push / desktop toasts / hook binding)
 │   ├── js/markdown.js        # markdown rendering for release notes
 │   ├── css/ · layui/         # styles and the LayUI component library
 │   └── changelog.md          # release notes shown in the in-app update dialog
