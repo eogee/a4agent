@@ -43,6 +43,7 @@ def _warn_if_desktop_running() -> None:
         out = subprocess.run(
             ["tasklist"],
             capture_output=True, text=True, timeout=10,
+            encoding="utf-8", errors="replace",
         ).stdout
         running = [name for name in ("a4agent.exe", "a4api.exe") if name in out]
         if running:

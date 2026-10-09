@@ -84,6 +84,7 @@ layui.use(['layer', 'form', 'element'], function () {
     if (!box) return;
     box.innerHTML =
       '<div class="task-form-head">下发任务' +
+        '<span class="beta-badge" title="当前为测试版本，功能仍在调整">Beta</span>' +
         '<span class="task-active-config" id="task-active-config"></span></div>' +
       '<div class="task-form">' +
         '<textarea id="task-prompt" class="layui-input task-prompt" rows="4" ' +

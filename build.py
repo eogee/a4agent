@@ -122,6 +122,54 @@ def _write_version_json(version: str) -> Path:
     return p
 
 
+def _write_version_file(version: str) -> Path:
+    """生成 exe 版本信息资源（--version-file）。
+
+    任务管理器、系统通知横幅等界面按 FileDescription 显示应用身份——没有这个
+    资源时回退为可执行文件名，桌面通知横幅头部就无法稳定显示「a4agent」。
+    """
+    build_dir = ROOT / "build"
+    build_dir.mkdir(parents=True, exist_ok=True)
+    import re
+
+    m = re.match(r"(\d+)\.(\d+)\.(\d+)", version)
+    triple = m.groups() if m else ("0", "0", "0")
+    p = build_dir / "version_info.txt"
+    p.write_text(
+        f"""# UTF-8
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=({triple[0]}, {triple[1]}, {triple[2]}, 0),
+    prodvers=({triple[0]}, {triple[1]}, {triple[2]}, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0),
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable('080404b0', [
+        StringStruct('CompanyName', 'eogee'),
+        StringStruct('FileDescription', 'a4agent'),
+        StringStruct('FileVersion', '{version}'),
+        StringStruct('InternalName', 'a4agent'),
+        StringStruct('LegalCopyright', 'MIT License'),
+        StringStruct('OriginalFilename', 'a4agent.exe'),
+        StringStruct('ProductName', 'a4agent'),
+        StringStruct('ProductVersion', '{version}'),
+      ]),
+    ]),
+    VarFileInfo([VarStruct('Translation', [2052, 1200])]),
+  ],
+)
+""",
+        encoding="utf-8",
+    )
+    return p
+
+
 def _sync_changelog() -> None:
     """把 release_body.md 同步为 frontend/changelog.md，随包内嵌供「版本与更新」弹窗展示。
 
@@ -152,6 +200,7 @@ def _run_pyinstaller(onefile: bool, version: str) -> None:
     _sync_changelog()
     sep = os.pathsep
     version_json = _write_version_json(version)
+    version_file = _write_version_file(version)
 
     cmd = [
         sys.executable, "-m", "PyInstaller",
@@ -160,6 +209,7 @@ def _run_pyinstaller(onefile: bool, version: str) -> None:
         "--name", "a4agent",
         "--add-data", f"{frontend}{sep}frontend",
         "--add-data", f"{version_json}{sep}.",
+        "--version-file", str(version_file),
     ]
     if onefile:
         cmd.append("--onefile")
