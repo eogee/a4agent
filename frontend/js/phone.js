@@ -4,6 +4,7 @@
  */
 layui.use(['layer', 'form', 'element'], function () {
   var layer = layui.layer;
+  var form = layui.form;
   var API = '/api/v1/phone';
 
   var loaded = false;
@@ -129,10 +130,12 @@ layui.use(['layer', 'form', 'element'], function () {
         '</div>' +
         '<div class="task-form-row">' +
           '<label>作答等待</label>' +
-          '<select id="phone-hook-timeout" class="layui-input phone-input-sm">' +
-            '<option value="30">30 秒</option><option value="60">60 秒</option>' +
-            '<option value="120">2 分钟</option><option value="300">5 分钟</option>' +
-          '</select>' +
+          '<div class="layui-form phone-hook-timeout-wrap" lay-filter="phone-hook-form">' +
+            '<select id="phone-hook-timeout" lay-filter="phone-hook-timeout">' +
+              '<option value="30">30 秒</option><option value="60">60 秒</option>' +
+              '<option value="120">2 分钟</option><option value="300">5 分钟</option>' +
+            '</select>' +
+          '</div>' +
         '</div>' +
         '<div class="phone-hint phone-hint-block">' +
           '外出· 手机优先模式下，手机超过这个时间没回复，就自动切回终端继续等。' +
@@ -147,10 +150,12 @@ layui.use(['layer', 'form', 'element'], function () {
           '<div id="phone-hook-engines"><span class="phone-hint">加载中…</span></div>' +
         '</div>' +
         '<div class="phone-sec-tip">宿主注册只决定 AI 的提问 / 权限请求是否转推手机；' +
-          '桌面横幅由左侧「桌面横幅」开关统一控制。DSH 需进程内插件，后续版本提供。</div>' +
+          '桌面横幅由左侧「桌面横幅」开关统一控制。DSH 注册会把内置 Cordis 插件挂进 ' +
+          '~/.dsh/profiles 各 profile，重启 dsh 后生效。</div>' +
       '</div>' +
       '</div>' +
       '</div>';
+    form.render('select', 'phone-hook-form');
   }
 
   function fillForm(cfg) {
@@ -210,7 +215,7 @@ layui.use(['layer', 'form', 'element'], function () {
 
   /* ---------- 会话交互（hook） ---------- */
   var ENGINE_LABELS = { claude: 'Claude Code', codex: 'Codex', zcode: 'ZCode',
-    qoder: 'Qoder', workbuddy: 'WorkBuddy' };
+    qoder: 'Qoder', workbuddy: 'WorkBuddy', dsh: 'DeepSeek Harness' };
 
   function loadHookStatus() {
     return apiGet('/hook/status').then(function (s) {
@@ -218,6 +223,7 @@ layui.use(['layer', 'form', 'element'], function () {
         btn.classList.toggle('seg-active', btn.getAttribute('data-mode') === s.mode);
       });
       document.getElementById('phone-hook-timeout').value = String(s.timeout);
+      form.render('select', 'phone-hook-form'); // 程序化赋值后同步 layui 标题与选中态
       // hook 状态接口带回桌面开关，以它为准刷新通道总览
       var box = document.getElementById('phone-desktop');
       if (box && typeof s.desktop === 'boolean') box.checked = s.desktop;
@@ -280,8 +286,10 @@ layui.use(['layer', 'form', 'element'], function () {
           .catch(function (e) { layer.msg(e.message, { icon: 2 }); });
       });
     });
-    document.getElementById('phone-hook-timeout').addEventListener('change', function (e) {
-      apiSend('/hook/config', 'PUT', { timeout: Number(e.target.value) })
+    // layui 渲染的 select 不派发原生 change，走 form.on 过滤器事件；
+    // bindHookActions 仅在 boot 时调用一次，不会重复注册
+    form.on('select(phone-hook-timeout)', function (data) {
+      apiSend('/hook/config', 'PUT', { timeout: Number(data.value) })
         .catch(function (err) { layer.msg(err.message, { icon: 2 }); });
     });
   }

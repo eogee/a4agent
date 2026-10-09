@@ -13,6 +13,7 @@
     uv run python dev_server.py             # http://127.0.0.1:18900
     uv run python dev_server.py 18901       # 自定义端口
 """
+import json
 import os
 import subprocess
 import sys
@@ -32,6 +33,33 @@ os.environ.setdefault(
 )
 
 DEFAULT_PORT = 18900
+
+
+def _write_instance(port: int) -> None:
+    """记录运行端口，供进程内插件发现本服务。
+
+    dsh 的 a4agent-dsh-hook 靠这个文件找到回调地址（它跑在 dsh 进程内，
+    无法像外部 hook 那样直接调 a4agent hook 子命令）。桌面版由 desktop.py
+    的 write_instance 负责；开发版不写的话，插件会判定「a4agent 未运行」
+    而静默跳过通知——测试全绿、真机不响的典型来源。
+    """
+    try:
+        from backend.app.database import get_data_dir
+
+        path = get_data_dir() / "desktop.json"
+        path.write_text(json.dumps({"port": port, "pid": os.getpid()}),
+                        encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001 - 写不进去不该拦住服务启动
+        print(f"⚠ 无法写入 desktop.json（dsh hook 将无法回调本服务）：{exc}")
+
+
+def _clear_instance() -> None:
+    try:
+        from backend.app.database import get_data_dir
+
+        (get_data_dir() / "desktop.json").unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _warn_if_desktop_running() -> None:
@@ -83,8 +111,13 @@ def main() -> None:
         target=_open_browser_when_ready, args=(port,), daemon=True
     ).start()
 
-    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
-    uvicorn.Server(config).run()
+    _write_instance(port)
+    try:
+        config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+        uvicorn.Server(config).run()
+    finally:
+        # 端口失效后必须清掉，否则插件会连到一个已不存在的服务并静默等待
+        _clear_instance()
 
 
 if __name__ == "__main__":

@@ -440,7 +440,7 @@ layui.use(['layer', 'form', 'element'], function () {
         row('投影模型 mmproj', '<input class="layui-input llama-input" id="llm_mmproj" placeholder="多模态投影模型路径，纯文本留空" value="' + escapeHtml(st.mmproj_path || '') + '">' +
           '<button class="layui-btn layui-btn-sm" id="llm-mmproj-browse">浏览</button>') +
         row('上下文长度', '<input class="layui-input llama-input-sm" id="llm_ctx" type="number" min="512" step="512" value="' + i.context_tokens + '">') +
-        row('KV 缓存', '<select class="llama-select" id="llm_kv">' + kvOptions + '</select>') +
+        row('KV 缓存', '<div class="layui-form llama-kv-wrap" lay-filter="llm-kv-form"><select id="llm_kv">' + kvOptions + '</select></div>') +
         row('Flash Attention', '<div class="layui-form"><input type="checkbox" id="llm_fa" lay-skin="primary" title="开启"' + (i.flash_attention ? ' checked' : '') + '></div>') +
         row('GPU 层数 -ngl', '<input class="layui-input llama-input-sm" id="llm_ngl" type="number" min="0" max="99" value="' + i.ngl + '"> <span class="llama-form-hint">99 = 全部 offload</span>') +
         row('线程数', '<input class="layui-input llama-input-sm" id="llm_threads" type="number" min="0" value="' + i.threads + '"> <span class="llama-form-hint">0 = 自动</span>') +
@@ -451,6 +451,7 @@ layui.use(['layer', 'form', 'element'], function () {
         row('附加参数', '<input class="layui-input llama-input" id="llm_extra" placeholder="原样追加的 llama-server 参数" value="' + escapeHtml(i.extra_args || '') + '">');
       document.getElementById('llama-btn-save-settings').onclick = saveSettings;
       form.render('checkbox');
+      form.render('select', 'llm-kv-form');
       var mmprojBrowse = document.getElementById('llm-mmproj-browse');
       if (mmprojBrowse) {
         mmprojBrowse.onclick = function () {
@@ -739,14 +740,20 @@ layui.use(['layer', 'form', 'element'], function () {
     }).join('');
     body.innerHTML =
       '<div class="llama-wizard-intro">默认启动的模型：</div>' +
-      '<select class="llama-select llama-select-wide" id="wiz-model-select">' + options + '</select>' +
+      '<div class="layui-form llama-wizard-model-wrap" lay-filter="wiz-model-form">' +
+        '<select id="wiz-model-select" lay-filter="wiz-model">' + options + '</select>' +
+      '</div>' +
       '<div class="llama-wizard-panel" id="wiz-model-info" style="margin-top:12px"></div>';
-    document.getElementById('wiz-model-select').onchange = function (e) {
-      wiz.defaultModel = e.target.value;
-      wizModelInfo();
-    };
+    form.render('select', 'wiz-model-form');
     wizModelInfo();
   }
+
+  // layui 渲染的 select 不派发原生 change，走 form.on 过滤器事件；
+  // 此处模块级注册一次，向导步骤重渲染不影响监听
+  form.on('select(wiz-model)', function (data) {
+    wiz.defaultModel = data.value;
+    wizModelInfo();
+  });
 
   function wizModelInfo() {
     var info = document.getElementById('wiz-model-info');

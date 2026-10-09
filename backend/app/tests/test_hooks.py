@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.app.hooks import deskqueue, dispatch, handlers, register, response
+from backend.app.hooks import deskqueue, dispatch, dsh_register, handlers, register, response
 from backend.app.hooks.transcript import (clamp_output, extract_last_output,
                                           resolve_last_output)
 
@@ -318,11 +318,73 @@ def test_run_hook_cli_bad_payload_exits_silently(hook_cfg, monkeypatch, capsys):
     assert capsys.readouterr().out == ""
 
 
+class _HookBuffer:
+    """模拟真实 stdin/stdout 的二进制缓冲（StringIO 没有 buffer 分支）。"""
+
+    def __init__(self, data: bytes = b""):
+        self.data = data
+        self.out = bytearray()
+
+    def read(self) -> bytes:
+        return self.data
+
+    def write(self, b: bytes) -> int:
+        self.out += b
+        return len(b)
+
+    def flush(self) -> None:
+        pass
+
+
+class _HookStream:
+    def __init__(self, data: bytes = b""):
+        self.buffer = _HookBuffer(data)
+
+    def read(self) -> str:  # 不应被走到：buffer 存在时必须走二进制路径
+        raise AssertionError("有 buffer 时不应回退到文本读取")
+
+
+def test_run_hook_cli_decodes_utf8_stdin_payload(hook_cfg, monkeypatch):
+    """宿主按 UTF-8 写载荷，Windows 上 sys.stdin 默认是 GBK(ACP=936)，
+    直接 read() 会把中文误解码成「绾煎」并推送到手机（实测坑）。"""
+    monkeypatch.setattr(dispatch.handlers, "handle_permission_request",
+                        lambda inp, name, wait, cfg: {"reason": inp["cwd"]})
+    payload = {"hook_event_name": "PermissionRequest", "tool_name": "Bash",
+               "cwd": "C:\\目录\\中文项目"}
+    stdin, stdout = _HookStream(json.dumps(payload, ensure_ascii=False).encode("utf-8")), _HookStream()
+    monkeypatch.setattr("sys.stdin", stdin)
+    monkeypatch.setattr("sys.stdout", stdout)
+
+    assert dispatch.run_hook_cli("claude") == 0
+
+    # 载荷里的中文路径原样透传 → 说明确实按 UTF-8 解码
+    assert json.loads(stdout.buffer.out.decode("utf-8")) == {"reason": "C:\\目录\\中文项目"}
+
+
+def test_run_hook_cli_writes_utf8_stdout(hook_cfg, monkeypatch):
+    """回写的决策同样按 UTF-8 落盘，否则中文决策到宿主手里也是乱码。"""
+    monkeypatch.setattr(dispatch.handlers, "handle_ask_user_question",
+                        lambda inp, name, agent, wait, cfg: {"answer": "确认发布"})
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion"}
+    stdin, stdout = _HookStream(json.dumps(payload, ensure_ascii=False).encode("utf-8")), _HookStream()
+    monkeypatch.setattr("sys.stdin", stdin)
+    monkeypatch.setattr("sys.stdout", stdout)
+
+    assert dispatch.run_hook_cli("claude") == 0
+
+    assert json.loads(stdout.buffer.out.decode("utf-8")) == {"answer": "确认发布"}
+
+
 # ---------------- 注册 ----------------
 
 @pytest.fixture
 def fake_home(tmp_path, monkeypatch):
     monkeypatch.setattr(register, "_settings_home", lambda: tmp_path)
+    # DSH 的 profile 目录也一并隔离：否则测试会读到开发机上真实的 ~/.dsh，
+    # 状态断言随环境漂移。
+    monkeypatch.setattr(dsh_register, "dsh_home", lambda: tmp_path / ".dsh")
+    monkeypatch.setattr(dsh_register, "profiles_dir",
+                        lambda: tmp_path / ".dsh" / "profiles")
     return tmp_path
 
 
@@ -476,7 +538,7 @@ def test_codex_marker_block_refreshes_stale_command(fake_home):
 
 def test_status_reports_all_engines(fake_home):
     status = register.registration_status()
-    assert set(status) == {"claude", "codex", "zcode", "qoder", "workbuddy"}
+    assert set(status) == {"claude", "codex", "zcode", "qoder", "workbuddy", "dsh"}
     assert all(not v["registered"] for v in status.values())
 
 
@@ -566,3 +628,177 @@ def test_process_queue_survives_show_error(data_dir, monkeypatch):
         lambda t, m: (shown.append(t), None)[1] if t == "B" else flaky_show(t, m)) == 1
     assert shown == ["B"]
     assert list(deskqueue.queue_dir().glob("*.json")) == []
+
+
+# ---------------- DSH Cordis 插件注册 ----------------
+# DSH 无外部 hook 协议：注册 = 把内置插件复制到 ~/.dsh/a4agent-hook/ +
+# 往每个 profile 的 cordis.patch.yml 追加 marker 包裹的 insert 块。
+
+def _make_dsh_home(tmp_path, monkeypatch, profiles=("tui", "web"), patch_body=None):
+    """搭一个假的 ~/.dsh：含指定 profile（每个带 cordis.yml 身份文件）。"""
+    from backend.app.hooks import dsh_register
+
+    home = tmp_path / ".dsh"
+    (home / "profiles").mkdir(parents=True)
+    for name in profiles:
+        d = home / "profiles" / name
+        d.mkdir()
+        (d / "cordis.yml").write_text("[]\n", encoding="utf-8")
+        (d / "cordis.patch.yml").write_text(
+            patch_body if patch_body is not None else "# patch layer\n", encoding="utf-8")
+    monkeypatch.setattr(dsh_register, "dsh_home", lambda: home)
+    monkeypatch.setattr(dsh_register, "profiles_dir", lambda: home / "profiles")
+    monkeypatch.setattr(dsh_register, "installed_plugin_dir",
+                        lambda: home / dsh_register.PLUGIN_DIR_NAME)
+    src = tmp_path / "src-plugin"
+    src.mkdir()
+    (src / "index.js").write_text("export {}\n", encoding="utf-8")
+    monkeypatch.setattr(dsh_register, "plugin_source_dir", lambda: src)
+    return home
+
+
+def test_dsh_discover_profiles_skips_non_profile(tmp_path, monkeypatch):
+    """只有含 cordis.yml 的子目录算 profile；node_modules 要排除。"""
+    from backend.app.hooks import dsh_register
+
+    home = _make_dsh_home(tmp_path, monkeypatch, profiles=("tui", "web"))
+    (home / "profiles" / "node_modules").mkdir()
+    (home / "profiles" / "node_modules" / "cordis.yml").write_text("[]", encoding="utf-8")
+    (home / "profiles" / "random-dir").mkdir()  # 无 cordis.yml，不是 profile
+    found = [p.name for p in dsh_register.discover_profiles()]
+    assert found == ["tui", "web"]
+
+
+def test_dsh_discover_profiles_absent_returns_empty(tmp_path, monkeypatch):
+    """DSH 未安装（无 ~/.dsh/profiles）时返回空列表，不抛异常。"""
+    from backend.app.hooks import dsh_register
+
+    monkeypatch.setattr(dsh_register, "profiles_dir", lambda: tmp_path / "nope")
+    assert dsh_register.discover_profiles() == []
+
+
+def test_dsh_register_writes_mount_block(tmp_path, monkeypatch):
+    """注册后：插件已部署，且每个 profile 的 patch 写入挂载块。"""
+    from backend.app.hooks import dsh_register
+
+    home = _make_dsh_home(tmp_path, monkeypatch)
+    result = dsh_register.register_dsh()
+    assert result["registered"] is True
+    assert result["changed"] is True
+    assert (home / "a4agent-hook" / "index.js").is_file()
+    for name in ("tui", "web"):
+        content = (home / "profiles" / name / "cordis.patch.yml").read_text(encoding="utf-8")
+        assert dsh_register.DSH_MARKER_START in content
+        assert "id: a4agent-dsh-hook" in content
+        # 相对路径，profile 搬移后仍有效
+        assert 'name: "../../a4agent-hook/index.js"' in content
+
+
+def test_dsh_register_is_idempotent(tmp_path, monkeypatch):
+    """重复注册收敛而非叠加：changed 转 False，内容不变。"""
+    from backend.app.hooks import dsh_register
+
+    _make_dsh_home(tmp_path, monkeypatch)
+    assert dsh_register.register_dsh()["changed"] is True
+    patch = tmp_path / ".dsh" / "profiles" / "tui" / "cordis.patch.yml"
+    first = patch.read_text(encoding="utf-8")
+    second = dsh_register.register_dsh()
+    assert second["changed"] is False
+    assert patch.read_text(encoding="utf-8") == first
+    assert first.count(dsh_register.DSH_MARKER_START) == 1
+
+
+def test_dsh_register_replaces_stale_path(tmp_path, monkeypatch):
+    """插件路径变化后重注册要改写，不能因 marker 存在就跳过。"""
+    from backend.app.hooks import dsh_register
+
+    home = _make_dsh_home(tmp_path, monkeypatch)
+    dsh_register.register_dsh()
+    patch = home / "profiles" / "tui" / "cordis.patch.yml"
+    patch.write_text(patch.read_text(encoding="utf-8").replace(
+        "../../a4agent-hook/index.js", "../../old-path/index.js"), encoding="utf-8")
+    assert dsh_register.register_dsh()["changed"] is True
+    content = patch.read_text(encoding="utf-8")
+    assert 'name: "../../a4agent-hook/index.js"' in content
+    assert "old-path" not in content
+
+
+def test_dsh_register_strips_placeholder_brackets(tmp_path, monkeypatch):
+    """默认模板的 `[]` 占位符必须移除：留着会变成两个 YAML 文档，dsh 启动即报错。
+
+    真实场景：新建 profile 的 cordis.patch.yml 内容就是一个 `[]`。
+    """
+    from backend.app.hooks import dsh_register
+
+    home = _make_dsh_home(tmp_path, monkeypatch, patch_body="[]\n")
+    dsh_register.register_dsh()
+    content = (home / "profiles" / "tui" / "cordis.patch.yml").read_text(encoding="utf-8")
+    assert "[]" not in content
+    # 移除占位符后只应剩下本工具的挂载块，且块前不留空行
+    assert content.lstrip().startswith(dsh_register.DSH_MARKER_START)
+
+
+def test_dsh_register_keeps_user_blocks(tmp_path, monkeypatch):
+    """用户自己的 patch 条目不能被本工具的清理逻辑删掉。"""
+    from backend.app.hooks import dsh_register
+
+    user_block = "- insert:/n    - id: user-plugin\n      name: \"../mine\"\n"
+    home = _make_dsh_home(tmp_path, monkeypatch,
+                          patch_body="# patch layer\n\n" + user_block)
+    dsh_register.register_dsh()
+    content = (home / "profiles" / "tui" / "cordis.patch.yml").read_text(encoding="utf-8")
+    assert "id: user-plugin" in content
+    dsh_register.unregister_dsh()
+    after = (home / "profiles" / "tui" / "cordis.patch.yml").read_text(encoding="utf-8")
+    assert "id: user-plugin" in after
+    assert "a4agent-dsh-hook" not in after
+
+
+def test_dsh_unregister_cleans_all_and_removes_plugin(tmp_path, monkeypatch):
+    """卸载：清掉所有 profile 的挂载并删除插件目录。"""
+    from backend.app.hooks import dsh_register
+
+    home = _make_dsh_home(tmp_path, monkeypatch)
+    dsh_register.register_dsh()
+    result = dsh_register.unregister_dsh()
+    assert result["unregistered"] is True
+    assert not (home / "a4agent-hook").exists()
+    for name in ("tui", "web"):
+        content = (home / "profiles" / name / "cordis.patch.yml").read_text(encoding="utf-8")
+        assert "a4agent-dsh-hook" not in content
+    assert dsh_register.unregister_dsh()["unregistered"] is False  # 幂等
+
+
+def test_dsh_register_without_dsh_installed(tmp_path, monkeypatch):
+    """DSH 未安装时给出可读原因，不抛异常、不谎报成功。"""
+    from backend.app.hooks import dsh_register
+
+    monkeypatch.setattr(dsh_register, "profiles_dir", lambda: tmp_path / "missing")
+    monkeypatch.setattr(dsh_register, "dsh_home", lambda: tmp_path / "missing")
+    result = dsh_register.register_dsh()
+    assert result["registered"] is False
+    assert "DSH" in result["detail"]
+
+
+def test_dsh_registered_status_reflects_mount(tmp_path, monkeypatch):
+    from backend.app.hooks import dsh_register
+
+    home = _make_dsh_home(tmp_path, monkeypatch)
+    assert dsh_register.registered()[0] is False
+    dsh_register.register_dsh()
+    ok, path = dsh_register.registered()
+    assert ok is True
+    assert "2/2" in path
+
+
+def test_dsh_engine_in_register_table(tmp_path, monkeypatch):
+    """dsh 要出现在引擎注册表里，且走插件分支而非写命令分支。"""
+    from backend.app.hooks import dsh_register
+
+    assert "dsh" in register.ENGINES
+    home = _make_dsh_home(tmp_path, monkeypatch)
+    result = register.register_engine("dsh")
+    assert result["registered"] is True
+    assert (home / "a4agent-hook" / "index.js").is_file()
+    assert register.registration_status()["dsh"]["registered"] is True
+    assert register.unregister_engine("dsh")["unregistered"] is True

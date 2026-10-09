@@ -11,7 +11,7 @@ English | [简体中文](README.zh-CN.md)
 | **API Switching** | One-click provider / model / API-key switching for the two CLI tools without a graphical UI (Claude Code, Codex), with automatic backup, atomic writes, and DPAPI-encrypted key storage; the other four tools have their own provider UIs and are configured by the user in-app |
 | **Local Models** | Turn any `.gguf` model into an OpenAI-compatible local/LAN API service in one click: engine auto-download by GPU, model library scanning, VRAM risk assessment, one-click profile creation for Claude Code / Codex |
 | **Task Dispatch** | Run any of the six CLIs in **headless mode** as background tasks: dispatch-and-return, automatic pre-flight checks (engine ready / config ready / real connectivity), queue polling, output archiving, cancel & timeout, and tasks survive closing the window. Uses the config you already set up in each app |
-| **Notifications** | Two independent channels so you are not tied to the desk: **phone push** (ntfy) for task completion/failure/timeout with the agent's last output, and **desktop toasts** that wake the window on click. Session hooks for **Claude Code / Codex / ZCode / Qoder / WorkBuddy** let you answer the agent's questions and approve permissions from your phone |
+| **Notifications** | Two independent channels so you are not tied to the desk: **phone push** (ntfy) for task completion/failure/timeout with the agent's last output, and **desktop toasts** that wake the window on click. Session hooks for **Claude Code / Codex / ZCode / Qoder / WorkBuddy / dsh** let you answer the agent's questions and approve permissions from your phone |
 
 ---
 
@@ -370,6 +370,7 @@ a4agent/
 │   │                         #   notifier (dispatch of task terminal states to the two channels)
 │   ├── hooks/                # session hooks: dispatch (event routing) / handlers (ask / permission /
 │   │                         #   completion) / register (mounting to each tool) / deskqueue (deferred toasts)
+│   │                         #   dsh (dsh event handling) / dsh_register (Cordis plugin mounting)
 │   ├── win_toast.py          # Win32 desktop notification banner
 │   ├── updater.py            # self-update (manifest verification, dual-source racing download)
 │   ├── llama/                # local model inference console: catalog (engine catalog) / gguf (model parsing) /
@@ -386,7 +387,7 @@ a4agent/
 │   ├── css/ · layui/         # styles and the LayUI component library
 │   └── changelog.md          # release notes shown in the in-app update dialog
 ├── docs/                     # design docs, migration reference tables, implementation plans
-├── resources/                # logo and installer icons
+├── resources/                # logo and installer icons / dsh-hook (Cordis plugin deployed to ~/.dsh)
 └── tools/                    # end-to-end smoke test (e2e_task_smoke.py)
 ```
 

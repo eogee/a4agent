@@ -68,13 +68,42 @@ def dispatch(input: dict, agent: str, cfg: dict | None = None) -> dict | None:
     return None
 
 
+def _read_stdin_utf8() -> str:
+    """读 stdin 载荷并按 UTF-8 解码。
+
+    宿主（WorkBuddy / Claude Code / Codex 等）一律以 UTF-8 写载荷，而 Windows 上
+    打包态 Python 的 sys.stdin 默认跟随系统 ANSI 代码页（本机 ACP=936/GBK），
+    直接 sys.stdin.read() 会把中文按 GBK 误解码 → 推送正文全是「绾煎」这类乱码，
+    且 transcript 路径里的非 ASCII 字符也会被改写导致解析失败。
+    统一走 buffer + 显式 UTF-8 解码，与写入端对齐。
+    """
+    import sys
+
+    buf = getattr(sys.stdin, "buffer", None)
+    if buf is not None:
+        return buf.read().decode("utf-8", errors="replace")
+    return sys.stdin.read()  # 测试注入 StringIO 等无 buffer 的对象
+
+
+def _write_stdout_utf8(text: str) -> None:
+    """按 UTF-8 写回 hook 决策；同样绕开 GBK 的 stdout 编码。"""
+    import sys
+
+    buf = getattr(sys.stdout, "buffer", None)
+    if buf is not None:
+        buf.write(text.encode("utf-8", errors="replace"))
+        buf.flush()
+        return
+    sys.stdout.write(text)
+    sys.stdout.flush()
+
+
 def run_hook_cli(args: list) -> int:
     """`a4agent.exe hook [agent]` 入口：stdin 读载荷，stdout 写决策。"""
     import json
-    import sys
 
     try:
-        raw = sys.stdin.read()
+        raw = _read_stdin_utf8()
         input_payload = json.loads(raw) if raw.strip() else {}
     except (OSError, ValueError):
         return 0  # 载荷不可解析 = 不干预
@@ -87,6 +116,5 @@ def run_hook_cli(args: list) -> int:
         logger.exception("hook 处理异常")
         return 0
     if result:
-        sys.stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
-        sys.stdout.flush()
+        _write_stdout_utf8(json.dumps(result, ensure_ascii=False) + "\n")
     return 0

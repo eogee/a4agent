@@ -1,11 +1,14 @@
 """会话 Hook 注册/卸载：把 a4agent 的 hook 命令写进各宿主配置文件。
 
-覆盖五端（DSH 走进程内插件，殿后）：
+覆盖六端：
   Claude Code  ~/.claude/settings.json      hooks.{Stop,PreToolUse,PermissionRequest}
   Qoder        ~/.qoder/settings.json       同构 Claude，命令带 qoder 标识
   WorkBuddy    ~/.workbuddy/settings.json   同构 Claude，命令带 workbuddy 标识
   ZCode        ~/.zcode/cli/config.json     事件挂在 hooks.events 下，需 hooks.enabled=true
   Codex        ~/.codex/config.toml         文本追加（marker 块；TOML 重写会毁用户注释）
+  DSH          ~/.dsh/profiles/*/cordis.patch.yml
+               DSH 无外部 hook 协议，改为挂载内置 Cordis 插件（进程内加载），
+               实现见 dsh_register.py—— 与上面五端的「写命令」语义不同。
 
 幂等：已注册时不重复写。归属判定用「命令含 a4agent 且含 ' hook'」，
 不会误删用户自己的 a4p（a4phone）或其它 hook 命令。
@@ -16,6 +19,8 @@ import re
 import sys
 from pathlib import Path
 
+from . import dsh_register
+
 logger = logging.getLogger(__name__)
 
 # 命令归属标识：a4agent 的 hook 命令形如 "C:\...\a4agent.exe" hook [agent]
@@ -24,7 +29,7 @@ OWN_COMMAND_PATTERN = re.compile(r"a4agent[^\"']*\s+hook\b|\ba4agent\b.*\bhook\b
 CODEX_MARKER_START = "# >>> a4agent hooks >>>"
 CODEX_MARKER_END = "# <<< a4agent hooks <<<"
 
-ENGINES = ("claude", "codex", "zcode", "qoder", "workbuddy")
+ENGINES = ("claude", "codex", "zcode", "qoder", "workbuddy", "dsh")
 
 
 def default_hook_command(agent: str | None = None) -> str:
@@ -395,9 +400,12 @@ def _engine_paths() -> dict:
 
 
 def register_engine(engine: str, hook_command: str | None = None) -> dict:
-    """注册单引擎 hook；返回 {registered, detail}。"""
+    """注册单引擎 hook；返回 {registered, changed, detail}。"""
     if engine not in ENGINES:
         return {"registered": False, "detail": f"未知引擎：{engine}"}
+    if engine == "dsh":
+        # DSH 无外部 hook 协议：改为部署 + 挂载内置 Cordis 插件（进程内加载）
+        return dsh_register.register_dsh()
     if engine == "codex":
         changed = register_codex(hook_command or default_hook_command("codex"))
         return {"registered": True, "changed": changed,
@@ -416,6 +424,8 @@ def register_engine(engine: str, hook_command: str | None = None) -> dict:
 def unregister_engine(engine: str) -> dict:
     if engine not in ENGINES:
         return {"unregistered": False, "detail": f"未知引擎：{engine}"}
+    if engine == "dsh":
+        return dsh_register.unregister_dsh()
     if engine == "codex":
         return {"unregistered": unregister_codex()}
     if engine == "zcode":
@@ -424,8 +434,9 @@ def unregister_engine(engine: str) -> dict:
 
 
 def registration_status() -> dict:
-    """五端注册状态 + 配置文件路径，供 GUI 展示。"""
+    """六端注册状态 + 配置文件路径，供 GUI 展示。"""
     paths = _engine_paths()
+    dsh_registered, dsh_path = dsh_register.registered()
     return {
         "claude": {"registered": _json_hooks_registered(paths["claude"]),
                    "path": str(paths["claude"])},
@@ -435,4 +446,5 @@ def registration_status() -> dict:
                       "path": str(paths["workbuddy"])},
         "zcode": {"registered": _zcode_registered(), "path": str(_zcode_config_path())},
         "codex": {"registered": _codex_registered(), "path": str(_codex_config_path())},
+        "dsh": {"registered": dsh_registered, "path": dsh_path},
     }

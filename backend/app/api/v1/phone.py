@@ -5,9 +5,10 @@
 """
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from ... import schemas
+from ...hooks import dsh as dsh_hook
 from ...hooks import register as hook_register
 from ...phone import config as phone_config
 from ...phone import ntfy
@@ -134,3 +135,79 @@ def hook_unregister(body: schemas.HookEngineIn):
     result = hook_register.unregister_engine(body.engine)
     result["engines"] = hook_register.registration_status()
     return result
+
+
+# ---------------- DSH 事件（进程内插件回调） ----------------
+# DSH 没有外部 hook 命令协议：插件跑在 dsh 进程内，只能反向 HTTP 回调本机
+# 常驻服务。请求会挂住直到手机作答或超时（长轮询），因此耗时可达 timeout 秒
+# ——插件侧读超时要大于此值，否则插件先断、服务端还在等，白等一轮。
+#
+# 这些端点只监听回环（服务本身绑 127.0.0.1），且不接受跨站调用：DSH 插件以
+# 本机进程身份直连，故不引入鉴权；CSRF 侧由「非简单表单 + 仅回环可达」兜住。
+
+async def _dsh_payload(request: Request) -> dict:
+    try:
+        data = await request.json()
+    except ValueError:
+        raise HTTPException(400, "载荷不是合法 JSON")
+    return data if isinstance(data, dict) else {}
+
+
+@router.post("/dsh/task-complete")
+async def dsh_task_complete(request: Request):
+    """任务完成：桌面弹窗 + 手机推送，无需响应体（插件不等待）。"""
+    payload = await _dsh_payload(request)
+    try:
+        dsh_hook.handle_task_complete(payload)
+    except Exception:  # noqa: BLE001 - 通知失败绝不能影响 DSH 会话
+        logger.exception("DSH 任务完成处理异常")
+    return {"ok": True}
+
+
+@router.post("/dsh/question")
+async def dsh_question(request: Request):
+    """提问作答：长轮询至手机作答或超时。
+
+    返回 {answers: [...]} 表示手机已作答，插件用它替换原生提问；
+    返回 {} 表示放行（终端优先 / 推送失败 / 超时），由 DSH 走原生交互。
+    """
+    payload = await _dsh_payload(request)
+    cfg = phone_config.load()
+    try:
+        result = await _run_with_timeout(
+            dsh_hook.handle_ask_user_question, payload,
+            dsh_hook.http_timeout(cfg))
+    except Exception:  # noqa: BLE001 - 回退原生，不能把异常抛给插件
+        logger.exception("DSH 提问处理异常")
+        return {}
+    return result or {}
+
+
+@router.post("/dsh/permission")
+async def dsh_permission(request: Request):
+    """权限审批：长轮询至手机点选或超时。
+
+    返回 {outcome: 'allowed-once'|'rejected'} 表示手机已决策；
+    返回 {} 表示放行原生审批链。
+    """
+    payload = await _dsh_payload(request)
+    cfg = phone_config.load()
+    try:
+        outcome = await _run_with_timeout(
+            dsh_hook.handle_permission_request, payload,
+            dsh_hook.http_timeout(cfg))
+    except Exception:  # noqa: BLE001 - 回退原生
+        logger.exception("DSH 审批处理异常")
+        return {}
+    return {"outcome": outcome} if outcome else {}
+
+
+async def _run_with_timeout(func, payload: dict, timeout: int):
+    """在线程池里跑同步阻塞的等待逻辑（response.wait_for_response 是阻塞轮询，
+    直接在事件循环里调会卡住整个服务）。线程超时后不强制中断——放弃等待并
+    放行原生交互即可，后台线程自然到期退出。"""
+    import asyncio
+
+    loop = asyncio.get_running_loop()
+    return await asyncio.wait_for(
+        loop.run_in_executor(None, func, payload), timeout=timeout)

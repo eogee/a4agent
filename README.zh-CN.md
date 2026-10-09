@@ -11,7 +11,7 @@
 | **API 切换** | 为无图形界面的 CLI（Claude Code、Codex）一键切换服务商、模型、API Key，配置自动备份、原子写入，密钥 DPAPI 加密存储；其余四端应用自带供应商配置界面，由用户自行配置 |
 | **本地模型** | 把任意 `.gguf` 模型一键变成 OpenAI 兼容的本地/局域网 API 服务：引擎按显卡自动获取、模型库扫描、显存风险评估，一键接入配置方案（Claude Code / Codex） |
 | **任务下发** | 六端 CLI 以**无头模式**后台执行任务：下发即返回、下发前自动预检（引擎可用 / 配置就绪 / 真实连通）、队列轮询、产出留档、取消与超时、关窗不杀任务。直接使用你在各应用内配好的配置 |
-| **通知提醒** | 两条独立通道让你不必守在电脑前：**手机推送**（ntfy）在任务成功 / 失败 / 超时时送达，含 Agent 最后一段输出；**桌面横幅**点击即唤回窗口。会话 hook 覆盖 **Claude Code / Codex / ZCode / Qoder / WorkBuddy**，可在手机上直接回答提问、审批权限 |
+| **通知提醒** | 两条独立通道让你不必守在电脑前：**手机推送**（ntfy）在任务成功 / 失败 / 超时时送达，含 Agent 最后一段输出；**桌面横幅**点击即唤回窗口。会话 hook 覆盖 **Claude Code / Codex / ZCode / Qoder / WorkBuddy / dsh**，可在手机上直接回答提问、审批权限 |
 
 ---
 
@@ -370,6 +370,7 @@ a4agent/
 │   │                         #   notifier（任务终态分发到两条通道）
 │   ├── hooks/                # 会话 hook：dispatch（事件路由）/ handlers（提问 / 审批 / 完成）/
 │   │                         #   register（挂载到各工具）/ deskqueue（桌面弹窗延迟代发）
+│   │                         #   dsh（dsh 事件处理）/ dsh_register（Cordis 插件挂载）
 │   ├── win_toast.py          # Win32 桌面通知横幅
 │   ├── updater.py            # 应用自更新（清单验签、双源竞速下载）
 │   ├── llama/                # 本地模型推理控制台：catalog（引擎目录）/ gguf（模型解析）/
@@ -386,7 +387,7 @@ a4agent/
 │   ├── css/ · layui/         # 样式与 LayUI 组件库
 │   └── changelog.md          # 应用内更新弹窗展示的更新说明
 ├── docs/                     # 设计文档、迁移对照表、实施计划
-├── resources/                # logo 与安装包图标
+├── resources/                # logo 与安装包图标 / dsh-hook（挂到 ~/.dsh 的 Cordis 插件源码）
 └── tools/                    # 端到端烟测脚本（e2e_task_smoke.py）
 ```
 

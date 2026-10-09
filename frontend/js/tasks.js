@@ -102,12 +102,14 @@ layui.use(['layer', 'form', 'element'], function () {
         '</div>' +
         '<div class="task-form-row">' +
           '<label>超时</label>' +
-          '<select id="task-timeout" class="layui-input">' +
-            '<option value="300">5 分钟</option>' +
-            '<option value="600" selected>10 分钟</option>' +
-            '<option value="1800">30 分钟</option>' +
-            '<option value="3600">60 分钟</option>' +
-          '</select>' +
+          '<div class="layui-form task-timeout-wrap" lay-filter="task-timeout-form">' +
+            '<select id="task-timeout">' +
+              '<option value="300">5 分钟</option>' +
+              '<option value="600" selected>10 分钟</option>' +
+              '<option value="1800">30 分钟</option>' +
+              '<option value="3600">60 分钟</option>' +
+            '</select>' +
+          '</div>' +
           '<button class="layui-btn layui-btn-normal" id="task-submit">下发任务</button>' +
           '<span class="task-hint">下发前自动检测引擎、服务商连通与端配置一致性</span>' +
         '</div>' +
@@ -122,6 +124,7 @@ layui.use(['layer', 'form', 'element'], function () {
     var engineBox = document.getElementById('task-engines');
     if (engineBox) engineBox.addEventListener('change', updateCurrentModel);
     renderWorkdir();
+    form.render('select', 'task-timeout-form');
   }
 
   function updateCurrentModel() {

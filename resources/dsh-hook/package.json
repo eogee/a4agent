@@ -1,0 +1,17 @@
+{
+  "name": "a4agent-dsh-hook",
+  "description": "a4agent DSH plugin: task-complete, question-asked and permission-request hooks backed by a4agent local HTTP bridge",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": {
+      "default": "./index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  }
+}

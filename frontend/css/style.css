@@ -661,6 +661,21 @@ body {
   font-weight: 600;
 }
 
+/* 下拉选择（layui 渲染）。
+   全部下拉统一走 form.render('select')：展开面板由上方 .layui-form-select dl
+   全局样式负责（圆角/阴影/薄荷绿悬停，与配置方案页完全同源），标题框由
+   .layui-form-select .layui-input 负责。以下仅补各页面原生时代的紧凑尺寸，
+   避免渲染后撑大行高。 */
+.llama-kv-wrap { width: 90px; }
+.llama-kv-wrap .layui-form-select .layui-input {
+  height: 30px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+.llama-wizard-model-wrap .layui-form-select .layui-input { height: 34px; }
+.task-timeout-wrap { flex: none; width: 120px; }
+.phone-hook-timeout-wrap { flex: none; width: 130px; }
+
 /* 复选框（primary 皮肤） */
 /* layui primary 复选框：与全局原生多选（方案 B）像素对齐——
    layui 自带 ✔ 字形用 font-size:0 隐藏，勾改画同一枚 SVG */
@@ -1530,8 +1545,6 @@ html::-webkit-scrollbar {
 .llama-dir-row { display: flex; gap: 8px; margin-bottom: 8px; }
 .llama-input { flex: 1; height: 32px; font-size: 12px; }
 .llama-input-sm { width: 140px; height: 30px; font-size: 12px; display: inline-block; }
-.llama-select { height: 30px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 12px; padding: 0 8px; background: #fff; }
-.llama-select-wide { width: 100%; height: 34px; }
 .llama-check { margin-right: 14px; font-size: 13px; color: #374151; cursor: pointer; font-weight: normal; }
 
 .llama-dirs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
@@ -1658,7 +1671,6 @@ html::-webkit-scrollbar {
 }
 
 .task-form-row .layui-input { flex: 1; min-width: 0; }
-#task-timeout { flex: none; width: 120px; }
 
 .task-engine-radios { display: flex; flex-wrap: wrap; gap: 8px; }
 
@@ -2069,13 +2081,6 @@ html::-webkit-scrollbar {
 }
 
 /* 会话交互（hook）卡片 */
-.phone-input-sm { width: 130px; }
-/* 必须同等特异性+.task-form-row .layui-input（那条是 flex:1，优先级 0,2,0），
-   否则单class 的 .phone-input-sm 会被它压过，flex:none 失效、下拉框被长提示挤成窄缝 */
-.task-form-row .phone-input-sm {
-  flex: none;
-  width: 130px;
-}
 
 .phone-engine-state {
   font-size: 12px; color: #9ca3af; padding: 1px 8px;
