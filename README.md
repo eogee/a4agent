@@ -11,7 +11,7 @@ English | [简体中文](README.zh-CN.md)
 | **API Switching** | One-click provider / model / API-key switching for the two CLI tools without a graphical UI (Claude Code, Codex), with automatic backup, atomic writes, and DPAPI-encrypted key storage; the other four tools have their own provider UIs and are configured by the user in-app |
 | **Local Models** | Turn any `.gguf` model into an OpenAI-compatible local/LAN API service in one click: engine auto-download by GPU, model library scanning, VRAM risk assessment, one-click profile creation for Claude Code / Codex |
 | **Task Dispatch** | Run any of the seven tools in **headless mode** as background tasks: dispatch-and-return, automatic pre-flight checks (engine ready / config ready / real connectivity), queue polling, output archiving, cancel & timeout, and tasks survive closing the window. Uses the config you already set up in each app |
-| **Notifications** | Two independent channels so you are not tied to the desk: **phone push** (ntfy) for task completion/failure/timeout with the agent's last output, and **desktop toasts** that wake the window on click. Session hooks for **Claude Code / Codex / ZCode / Qoder / WorkBuddy / dsh** let you answer the agent's questions and approve permissions from your phone |
+| **Notifications** | Two independent channels so you are not tied to the desk, in **one unified format** across every channel — topic name / notification type / app name, plain text without emoji: **phone push** (ntfy) delivers task and session outcomes (completion / failure / timeout) always carrying the **agent's last output**; **desktop toasts** (source badge: logo + a4agent) cover completions, failures, permission requests and questions, and wake the window on click. Session hooks for **Claude Code / Codex / ZCode / Qoder / WorkBuddy / dsh** let you answer the agent's questions and approve permissions from your phone |
 
 ---
 
@@ -21,7 +21,7 @@ OpenCode gets exactly the same treatment as the other six tools — no dedicated
 
 - **Skills / MCP**: managed as the seventh tool like any other (works out of the box — the service password and default port `49374` are discovered automatically).
 - **Task dispatch**: an OpenCode engine that runs tasks as sessions against the live service instead of spawning a fresh CLI process each time. Approval-free execution uses **session-scoped permission rules**, so your global config is left untouched; cost, usage, and outcome come back structured; deprecated models are automatically retried with a working one.
-- **Session interaction**: the host table on the Notifications page gains an OpenCode row. "Register" turns on the service event listener — sessions you start in OpenCode's web UI reach you through the same desktop toast and phone push when they finish, fail, or get interrupted, and in "phone-first" mode permission requests are pushed to your phone for remote approval (Approve / Always / Deny) via OpenCode's permission API. OpenCode has no hook protocol, so registering **writes nothing into its files**.
+- **Session interaction**: the host table on the Notifications page gains an OpenCode row. "Register" turns on the service event listener — sessions you start in OpenCode's web UI reach you through the same desktop toast (fired even when the window is open) and phone push when they finish, fail, or get interrupted, and in "phone-first" mode permission requests are pushed to your phone for remote approval (Approve / Always / Deny) via OpenCode's permission API. OpenCode has no hook protocol, so registering **writes nothing into its files**.
 
 ---
 
@@ -264,7 +264,7 @@ A blocked task still leaves a `precheck_failed` record, visible in the queue wit
 
 - **Closing the main window = moving to the background**: tasks keep running; starting a4agent again reactivates the original instance's window instead of spawning a new process
 - The real exit is the "**Exit**" button in the top bar, which tells you how many tasks are running and asks twice; on exit, running tasks are honestly marked "app exited" and their process trees terminated
-- When a task reaches a final state: an in-page notice if the window is open; a flashing taskbar icon if the window is hidden (zero new dependencies; system notifications and a tray icon are left for later versions)
+- When a task reaches a final state: an in-page notice if the window is open; otherwise a **native system toast** (with sound; the source badge shows the a4agent logo and name; clicking it wakes the window) plus a flashing taskbar icon
 
 ---
 
@@ -397,13 +397,14 @@ a4agent/
 │   ├── task_engines.py       # headless task engine adapters (commands & output parsing)
 │   ├── task_precheck.py      # three-step pre-flight checks (engine / config / real connectivity)
 │   ├── task_runner.py        # task runner (thread pool, process trees, timeout)
-│   ├── task_notify.py        # task completion notice (in-page hint / taskbar flash)
+│   ├── task_notify.py        # task terminal-state broadcast (common source of toasts & phone pushes)
 │   ├── phone/                # notifications: config (topic / token / event switches) / ntfy (push client) /
-│   │                         #   notifier (dispatch of task terminal states to the two channels)
+│   │                         #   notifier (unified format: topic / type / app name + agent's last output)
 │   ├── hooks/                # session hooks: dispatch (event routing) / handlers (ask / permission /
 │   │                         #   completion) / register (mounting to each tool) / deskqueue (deferred toasts)
-│   │                         #   dsh (dsh event handling) / dsh_register (Cordis plugin mounting)
-│   ├── win_toast.py          # Win32 desktop notification banner
+│   │                         #   transcript (last output & topic extraction) / dsh / dsh_register (Cordis)
+│   ├── win_toast.py          # desktop notification facade (native WinRT toast first, legacy balloon fallback)
+│   ├── win_toast_native.py   # native WinRT toast (ctypes COM calls, zero third-party dependencies)
 │   ├── updater.py            # self-update (manifest verification, dual-source racing download)
 │   ├── llama/                # local model inference console: catalog (engine catalog) / gguf (model parsing) /
 │   │                         #   gpu (hardware detection) / downloader (engine download) / runtime & server
