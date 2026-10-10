@@ -15,7 +15,7 @@ from backend.app import proxy_standalone as ps
 def sandbox(tmp_path, monkeypatch):
     status = tmp_path / "proxy.json"
     monkeypatch.setattr(ps, "_status_file", lambda: status)
-    monkeypatch.setattr(ps, "_refresh_upstream", lambda port: None)
+    monkeypatch.setattr(ps, "_refresh_upstream", lambda port, token="": None)
     killed = []
     monkeypatch.setattr(ps, "_kill_owner", lambda port: killed.append(port))
     return {"status": status, "killed": killed}

@@ -94,7 +94,10 @@ def read_doc(path: Path, fmt: str = "json") -> dict:
     _, loader = SERIALIZERS[fmt]
     try:
         return loader(path.read_bytes())
-    except (OSError, ValueError, TypeError):
+    except Exception:
+        # 兜底必须从宽：yaml.YAMLError 直接继承 Exception 而非 ValueError，
+        # 只列 (OSError, ValueError, TypeError) 时损坏的 yaml 会穿透出去
+        # （如 /removal/status 直接 500）。读失败按空文档处理是本函数的契约。
         return {}
 
 
@@ -113,8 +116,12 @@ def backup_doc(path: Path, name_template: str, keep: int = DEFAULT_BACKUP_KEEP) 
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     dest = backup_dir() / name_template.format(stamp=stamp, ext=path.suffix or "")
+    n = 1
+    while dest.exists():  # 秒级时间戳同秒互写会静默覆盖，加后缀去重
+        dest = backup_dir() / name_template.format(stamp=f"{stamp}_{n}", ext=path.suffix or "")
+        n += 1
     shutil.copy2(path, dest)
-    for old in _prune(dest.parent, dest.name, keep):
+    for old in _prune(dest.parent, name_template, keep):
         try:
             old.unlink()
         except OSError:
@@ -129,9 +136,15 @@ def backup_many(
     return {label: _as_str(backup_doc(path, tpl, keep)) for label, path, tpl in items}
 
 
-def _prune(parent: Path, newest_name: str, keep: int) -> list[Path]:
-    """同名前缀下超出 keep 的旧备份（不含 newest），返回待删列表。"""
-    prefix = newest_name.split(".{stamp}")[0] + "."
+def _prune(parent: Path, name_template: str, keep: int) -> list[Path]:
+    """同一模板前缀下超出 keep 的旧备份（newest 时间戳最大、排序居末，不会被删）。
+
+    前缀必须从**模板**取：传入已 format 的文件名时 split("{stamp}") 得到的
+    前缀恒等于完整文件名，glob 永不命中，keep 等于没设（备份无界增长）。
+    """
+    prefix = name_template.split("{stamp}")[0]
+    if not prefix:
+        return []
     same = sorted(p for p in parent.glob(f"{prefix}*") if p.is_file())
     return same[:-keep] if len(same) > keep else []
 

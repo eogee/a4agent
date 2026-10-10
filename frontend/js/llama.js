@@ -374,13 +374,11 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   /* 接入配置方案：勾选要写入的应用（本地服务讲 OpenAI Chat Completions，
-   * Claude Code / Codex / dsh 经本地翻译代理，ZCode 与 pi 直连） */
+   * Claude Code / Codex 经本地翻译代理）。v0.5.1 起不再代管 dsh / ZCode / pi
+   * 的 API 配置，后端会丢弃这三个目标，勾选项同步收窄 */
   var INTEGRATE_TARGETS = [
     { key: 'claude', label: 'Claude Code', on: true },
-    { key: 'codex', label: 'Codex', on: false },
-    { key: 'dsh', label: 'dsh', on: false },
-    { key: 'zcode', label: 'ZCode', on: false },
-    { key: 'pi', label: 'pi', on: false }
+    { key: 'codex', label: 'Codex', on: false }
   ];
 
   function integrateToConfig() {
@@ -402,7 +400,7 @@ layui.use(['layer', 'form', 'element'], function () {
         '模型为当前默认模型，并写入勾选的应用：</p>' +
         '<div class="target-checkboxes">' + boxes + '</div>' +
         '<p style="font-size:12px;color:#8a8e94;margin-top:12px;">' +
-        '本地服务讲 OpenAI Chat Completions：Claude Code / Codex / dsh 经本地翻译代理，ZCode 与 pi 直连。</p>' +
+        '本地服务讲 OpenAI Chat Completions：Claude Code / Codex 经本地翻译代理接入。</p>' +
         '</div>',
       btn: ['接入', '取消'],
       success: function () { form.render('checkbox', 'llama-integrate'); },

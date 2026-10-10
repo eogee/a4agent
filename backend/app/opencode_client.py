@@ -464,6 +464,7 @@ class EventStream:
         self.password = password
         self.on_event = on_event
         self._stop = threading.Event()
+        self._resp = None  # 当前 SSE 连接；stop() 借它关 socket 唤醒阻塞中的 read1
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
@@ -473,7 +474,22 @@ class EventStream:
         self._thread.start()
 
     def stop(self) -> None:
+        """置停并关闭底层连接，随后短暂等线程收尾。
+
+        SSE 的 urlopen 是 timeout=None、read1 常年阻塞在无数据的连接上，只置位
+        不关 socket 的话线程会一直挂着（半开连接下永不返回），stop 后重建的
+        新流还会与之叠加成线程/连接泄漏。
+        """
         self._stop.set()
+        resp = self._resp
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:  # noqa: BLE001 - 尽力唤醒，关不掉靠线程自愈
+                pass
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
 
     def _run(self) -> None:
         backoff = 1.0
@@ -497,15 +513,25 @@ class EventStream:
                      **({"Authorization": _auth_header(self.password)} if self.password else {})},
         )
         with urllib.request.urlopen(req, timeout=None) as resp:
-            buf = ""
-            while not self._stop.is_set():
-                chunk = resp.read1(8192) if hasattr(resp, "read1") else resp.read(8192)
-                if not chunk:
-                    raise OpenCodeError("事件流已关闭")
-                buf += chunk.decode("utf-8", "replace")
-                while "\n\n" in buf:
-                    block, buf = buf.split("\n\n", 1)
-                    self._handle_block(block)
+            self._resp = resp
+            try:
+                buf = ""
+                while not self._stop.is_set():
+                    chunk = resp.read1(8192) if hasattr(resp, "read1") else resp.read(8192)
+                    if not chunk:
+                        raise OpenCodeError("事件流已关闭")
+                    buf += chunk.decode("utf-8", "replace")
+                    while "\n\n" in buf:
+                        block, buf = buf.split("\n\n", 1)
+                        self._handle_block(block)
+            except (OSError, ValueError):
+                # 跨线程 close 唤醒阻塞中的 read1 会抛 OSError/ValueError：
+                # stop() 引发的属正常收尾，不必惊动日志
+                if self._stop.is_set():
+                    return
+                raise
+            finally:
+                self._resp = None
 
     def _handle_block(self, block: str) -> None:
         data = ""

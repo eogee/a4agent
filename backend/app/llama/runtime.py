@@ -149,7 +149,12 @@ class LlamaRuntime:
             mmproj = cfg.mmproj_path.strip()
 
         args = self._build_args(model, include_mtp, caps, mmproj)
-        self.engine.start(self.engine_dir(), args, cfg.host, cfg.port)
+        self.engine.start(
+            self.engine_dir(), args, cfg.host, cfg.port,
+            trim_enabled=cfg.run.auto_trim_ram,
+            trim_delay_seconds=cfg.run.trim_delay_seconds,
+            restart_on_crash=cfg.run.auto_restart_on_crash,
+        )
         return {"ok": True}
 
     def _build_args(self, model: str, include_mtp: bool, caps, mmproj: str) -> list:

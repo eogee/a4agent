@@ -7,6 +7,8 @@ import logging
 import os
 import shutil
 import subprocess
+import threading
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,14 @@ except ImportError:  # pragma: no cover
     winreg = None  # type: ignore[assignment]
 
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+# 检测结果缓存：/status 每 1.5s 轮询一次并走 detect()，无缓存时每次都 spawn
+# nvidia-smi（驱动异常时各阻塞至多 8 秒，线程池被无谓占满）。显卡是硬件事实，
+# 变更频率以重启计，60s TTL 足够新鲜。
+_CACHE_TTL_SECONDS = 60.0
+_cache_lock = threading.Lock()
+_cache: list | None = None
+_cache_at = 0.0
 
 
 class GpuInfo:
@@ -44,7 +54,12 @@ class GpuInfo:
 
 
 def detect() -> list:
-    """检测全部显卡：nvidia-smi 结果在前，注册表去重补齐在后。"""
+    """检测全部显卡：nvidia-smi 结果在前，注册表去重补齐在后（带 TTL 缓存）。"""
+    global _cache, _cache_at
+    with _cache_lock:
+        if _cache is not None and time.monotonic() - _cache_at < _CACHE_TTL_SECONDS:
+            return _cache
+
     result: list = []
     seen = set()
 
@@ -57,6 +72,9 @@ def detect() -> list:
         if g.name.lower() not in seen and not (g.vendor == "Unknown" and g.vram_bytes <= 0):
             seen.add(g.name.lower())
             result.append(g)
+
+    with _cache_lock:
+        _cache, _cache_at = result, time.monotonic()
     return result
 
 

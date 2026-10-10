@@ -243,7 +243,11 @@ def _legacy_show(title: str, message: str, on_click=None) -> bool:
         global _pump_thread, _wndproc_ref
         with _lock:
             if _pump_thread is None:
-                _wndproc_ref = _make_wndproc()
+                if _wndproc_ref is None:
+                    # 回调只建一次并常驻：窗口类注册时绑定的是它的地址，重复创建
+                    # 会让旧回调被 GC、系统消息回调进野指针（泵线程重启后的
+                    # 第二条 legacy 横幅必崩整个进程）
+                    _wndproc_ref = _make_wndproc()
                 _pump_ready.clear()
                 _pump_thread = threading.Thread(
                     target=_pump, daemon=True, name="a4agent-toast")

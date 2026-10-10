@@ -804,6 +804,11 @@ def apply() -> dict:
     installer = Path(installer_path)
     if not installer.is_file():
         raise ValueError("安装包文件不存在，请重新下载")
+    update_root = (get_data_dir() / "updates").resolve()
+    if not installer.resolve().is_relative_to(update_root):
+        # path 与校验值同在用户可写的 state 文件里，没有目录约束时，
+        # 被改写的 path 就是「下载完成」外衣下的任意程序执行
+        raise ValueError("安装包位置异常，请重新下载")
 
     # 1) 本地复核：以持久化校验值为准（下载时已与签名清单比对，离线可信）
     if expected_sha and _sha256_of(installer).lower() != str(expected_sha).lower():
@@ -811,7 +816,8 @@ def apply() -> dict:
     if expected_size and installer.stat().st_size != int(expected_size):
         raise ValueError("安装包大小不符，请重新下载")
 
-    # 2) 可选交叉核对：能拉到签名清单就再核一次；拉不到不阻断（离线可更新）
+    # 2) 可选交叉核对：能拉到签名清单就再核一次；拉不到不阻断（离线可更新），
+    #    但前提是有下载时与签名清单比对过的持久化校验值——两者皆无就无从验证
     try:
         manifest = fetch_manifest()
         asset = _asset_for_version(manifest, version)
@@ -822,6 +828,8 @@ def apply() -> dict:
     except ValueError:
         raise
     except Exception as e:
+        if not expected_sha:
+            raise ValueError("离线且缺少已持久化的校验值，无法验证安装包，请联网后重试") from e
         logger.warning("应用更新时拉取清单失败，按已持久化的校验值继续：%s", e)
 
     # 停后台翻译代理，避免其持有 _internal 的 DLL 句柄阻塞覆盖安装

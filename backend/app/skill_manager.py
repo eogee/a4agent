@@ -808,6 +808,34 @@ def _find_source(descriptor: dict) -> tuple[Path, dict]:
     raise ValueError(f"在{where}{TOOL_LABELS.get(tool, tool)}端未找到 skill：{name}")
 
 
+def _ignore_links(directory, names):
+    """copytree 的 ignore 回调：跳过符号链接与 Windows junction（reparse point）。
+
+    copytree 默认整树解引用：环状链接会递归到爆栈，junction 会被展开成实体
+    副本（可能巨大且重复）。技能包不应含跨目录引用，跳过比展开安全。
+    """
+    skip = set()
+    for n in names:
+        p = os.path.join(directory, n)
+        if os.path.islink(p):
+            skip.add(n)
+        elif os.name == "nt" and _is_reparse_point(p):
+            skip.add(n)
+    return skip
+
+
+def _is_reparse_point(path) -> bool:
+    """Windows junction / 挂载点检测（os.path.islink 不认 junction）。"""
+    try:
+        import ctypes
+
+        FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+        attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))
+        return attrs != -1 and bool(attrs & FILE_ATTRIBUTE_REPARSE_POINT)
+    except Exception:  # noqa: BLE001 - 探测失败按普通条目处理
+        return False
+
+
 def _trash_existing_conflicts(
     db,
     dest_root: Path,
@@ -828,7 +856,9 @@ def _trash_existing_conflicts(
     if not dest_root.is_dir():
         return 0
     for child in sorted(dest_root.iterdir(), key=lambda p: p.name.lower()):
-        if not _safe_is_dir(child):
+        if not _safe_is_dir(child) or child.name.startswith("."):
+            # 点开头目录与发现层（_scan_root 等）同口径不可见：迁移暂存目录
+            # （.<name>.staging）内含同名 SKILL.md，不跳过会被当成冲突回收掉
             continue
         meta = read_skill(child)
         same_dir = child.name.lower() == lowered_dir
@@ -962,11 +992,23 @@ def migrate(db, sources: list[dict], targets: list[dict]) -> dict:
                     dest_root = _root_for(t_scope, t_tool, t_project)
                 dest_root.mkdir(parents=True, exist_ok=True)
                 dest = dest_root / src.name
-                trashed = _trash_existing_conflicts(
-                    db, dest_root, entry["name"], src.name, tool=t_tool
-                )
+                # 先复制到暂存目录、回收冲突后再换入：直接 copytree 到 dest 的
+                # 顺序下，复制一旦失败旧版已进回收站而新版只有半截，两头落空
+                staging = dest_root / f".{src.name}.staging"
+                if staging.exists():
+                    shutil.rmtree(staging, ignore_errors=True)
+                shutil.copytree(src, staging, ignore=_ignore_links)
+                try:
+                    trashed = _trash_existing_conflicts(
+                        db, dest_root, entry["name"], src.name, tool=t_tool
+                    )
+                    if dest.exists():
+                        raise IOError(f"目标位置仍被占用：{dest}")
+                    staging.rename(dest)
+                except Exception:
+                    shutil.rmtree(staging, ignore_errors=True)
+                    raise
                 conflicts += trashed
-                shutil.copytree(src, dest)
                 migrated += 1
                 detail = f"已复制到 {dest}"
                 if trashed:

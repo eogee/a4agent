@@ -110,14 +110,25 @@ class EngineDownloader:
             for z in zips:
                 _extract_flat(z, staging, self._cancel)
 
-            # 原子换入：先确认关键文件在，再替换旧目录
+            # 换入前先确认关键文件在；再把旧目录整体改名保底，新目录就位后
+            # 才删旧的。直接 rmtree 旧目录意味着 rename 一旦失败（杀软锁文件
+            # 等）引擎就全没了，只能重下
             if not is_engine_present(staging):
                 raise IOError("解压后未找到 llama-server.exe，引擎包内容异常")
 
             old = Path(engine_dir)
+            old_bak = old.with_name(old.name + ".bak")
+            if old_bak.exists():
+                shutil.rmtree(old_bak, ignore_errors=True)
             if old.exists():
-                shutil.rmtree(old)
-            Path(staging).rename(old)
+                old.rename(old_bak)
+            try:
+                Path(staging).rename(old)
+            except Exception:
+                if old_bak.exists() and not old.exists():
+                    old_bak.rename(old)  # 换入失败就还回去，保住旧引擎
+                raise
+            shutil.rmtree(old_bak, ignore_errors=True)
 
             self._report(stage="✔ 引擎安装完成", received=grand_total,
                          total=grand_total, done=True)
@@ -146,6 +157,10 @@ class EngineDownloader:
                     last_report = now
                     self._report(stage=label, received=received,
                                  total=total or grand_total)
+        if total and received != total:
+            # 断流/截断在此刻就报错，而不是等用户白等完整包下载后
+            # 在解压阶段才收到 BadZipFile
+            raise IOError(f"下载不完整（{received}/{total} 字节），请重试")
         return received
 
     def _report(self, stage="", received=None, total=None,

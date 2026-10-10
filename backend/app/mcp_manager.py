@@ -1184,6 +1184,10 @@ def _backup_config(path: Path) -> Path | None:
         return None
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     dest = config_manager.backup_dir() / f"mcp.{path.name}.{ts}.bak"
+    n = 1
+    while dest.exists():  # 秒级时间戳同秒互写会静默覆盖，加后缀去重
+        dest = config_manager.backup_dir() / f"mcp.{path.name}.{ts}_{n}.bak"
+        n += 1
     shutil.copy2(path, dest)
     backups = sorted(config_manager.backup_dir().glob(f"mcp.{path.name}.*.bak"))
     for old in backups[:-BACKUP_KEEP]:
@@ -1614,10 +1618,18 @@ def _decrypt_snapshot(payload: dict) -> dict:
         "path": payload.get("original_path", ""),
         "extra": {},
     }
-    for k, v in (payload.get("env_encrypted") or {}).items():
-        server["env"][k] = crypto.decrypt_text(str(v))
-    for k, v in (payload.get("headers_encrypted") or {}).items():
-        server["headers"][k] = crypto.decrypt_text(str(v))
+    try:
+        for k, v in (payload.get("env_encrypted") or {}).items():
+            server["env"][k] = crypto.decrypt_text_strict(str(v))
+        for k, v in (payload.get("headers_encrypted") or {}).items():
+            server["headers"][k] = crypto.decrypt_text_strict(str(v))
+    except crypto.DecryptError as e:
+        # 换机/重装系统后 DPAPI 解不开原设备加密的凭证：按静默空串写回等于把
+        # 用户凭证清空且不可逆，必须中止恢复（快照与回收站条目原样保留）
+        raise ValueError(
+            "回收站快照解密失败（凭证由原设备的 Windows 凭据保护，"
+            "换机或重装后无法解密），已中止恢复以避免写入空凭证"
+        ) from e
     return server
 
 
@@ -1640,10 +1652,14 @@ def delete_to_trash(db, descriptor: dict) -> dict:
     scope, tool, project = server["scope"], server["tool"], server["project"]
     purged = purge_expired(db)
     remaining = [s for s in read_servers(scope, tool, project) if s["name"].lower() != server["name"].lower()]
-    write_servers(scope, tool, project, remaining)
-
+    # 先落快照再改配置：反过来时快照一旦写失败，server 已从配置消失且无任何留档
     payload = _snapshot_payload(server)
     dest = _write_snapshot(payload)
+    try:
+        write_servers(scope, tool, project, remaining)
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
     db.add(
         models.McpTrash(
             server_name=server["name"],
@@ -1954,10 +1970,13 @@ def migrate(db, sources: list[dict], targets: list[dict]) -> dict:
                 remaining = [
                     s for s in target_servers if s["name"].lower() != s_name.lower()
                 ]
+                # 快照文件先落盘、回收站条目等目标写入成功后再登记：
+                # 提前登记的话，write_servers 一失败就会留下「已入回收站」的假记录
+                trashed_rows = []
                 for old in conflicts_in:
                     payload = _snapshot_payload(old)
                     dest = _write_snapshot(payload)
-                    db.add(
+                    trashed_rows.append(
                         models.McpTrash(
                             server_name=old["name"],
                             tool=t_tool,
@@ -1969,7 +1988,14 @@ def migrate(db, sources: list[dict], targets: list[dict]) -> dict:
                         )
                     )
                 remaining.append(server)
-                path = write_servers(t_scope, t_tool, t_project, remaining)
+                try:
+                    path = write_servers(t_scope, t_tool, t_project, remaining)
+                except Exception:
+                    for row in trashed_rows:
+                        Path(row.trash_path).unlink(missing_ok=True)
+                    raise
+                for row in trashed_rows:
+                    db.add(row)
                 conflicts += len(conflicts_in)
                 migrated += 1
                 detail = f"已写入 {path}"

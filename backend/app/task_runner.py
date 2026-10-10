@@ -114,6 +114,16 @@ def _execute(task_id: int) -> None:
         task.started_at = datetime.now()
         db.commit()
 
+        if task.id in _cancelled:
+            # cancel() 在「排队检查」与「RUNNING 落库」之间到达：此时 DB 行已被
+            # cancel 落成 cancelled，worker 若继续拉起引擎会把行复活成 running
+            # （两个 session 互不知情）。落终态收场，不再执行。
+            task.status = CANCELLED
+            task.error_summary = "任务已被取消"
+            task.finished_at = datetime.now()
+            db.commit()
+            return
+
         path = output_path_for(task.tool, task.id)
         timeout = _clamp_timeout(task.timeout_seconds)
         if task.tool in task_engines.HTTP_ENGINES:
@@ -212,6 +222,10 @@ def _run_cli(task, path: Path, timeout: int) -> tuple:
         )
         with _procs_lock:
             _procs[task.id] = proc
+        if task.id in _cancelled:
+            # cancel() 在注册前到达（当时 _procs 里还没有句柄，只能标记）：进程
+            # 一登记就补杀，否则它会跑满整个 timeout 才被状态机落成 cancelled
+            _kill_tree(proc)
         try:
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:

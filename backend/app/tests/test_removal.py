@@ -175,6 +175,35 @@ def test_cleanup_all_aborts_when_snapshot_fails(fake_env, monkeypatch):
     assert "a4a_p3" in config_manager.read_pi_models_config()["providers"]
 
 
+def test_cleanup_all_aborts_on_partial_snapshot(fake_env, monkeypatch):
+    """部分文件快照失败时整体停手：缺回滚依据的文件绝不能被改写。"""
+    _write(fake_env / "pmodels.json", {"providers": {"a4a_p3": {"baseUrl": "x"}}})
+    monkeypatch.setattr(
+        "backend.app.removal.removal_backup.take_snapshot",
+        lambda dry_run=False: {"dir": "N", "files": {}, "errors": ["pi-models: 模拟失败"]},
+    )
+    report = removal.cleanup_all(dry_run=False)
+    assert any("快照不完整" in e for e in report["errors"])
+    assert "a4a_p3" in config_manager.read_pi_models_config()["providers"]
+
+
+def test_cleanup_all_rolls_back_failed_engine(fake_env, monkeypatch):
+    """某端清理抛异常时按永久快照回滚该端文件，兑现「出错即回滚」。"""
+    original = {"providers": {"a4a_p3": {"baseUrl": "x"}}}
+    _write(fake_env / "pmodels.json", original)
+
+    def broken_clean_pi(dry_run):
+        # 模拟「已改写用户文件后才失败」：先改再炸
+        config_manager.atomic_write_pi_models_config({"providers": {}})
+        raise RuntimeError("磁盘满")
+
+    monkeypatch.setattr(removal, "_clean_pi", broken_clean_pi)
+    report = removal.cleanup_all(dry_run=False)
+    assert any("pi 清理失败" in e for e in report["errors"])
+    assert any("已按快照回滚" in e for e in report["errors"])
+    assert config_manager.read_pi_models_config() == original
+
+
 def test_needs_cleanup_detects_managed_entries(fake_env):
     assert removal.needs_cleanup() is False
     _write(fake_env / "pmodels.json", {"providers": {"a4a_p3": {"baseUrl": "x"}}})

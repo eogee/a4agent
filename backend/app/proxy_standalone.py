@@ -167,17 +167,23 @@ def _spawn() -> None:
     )
 
 
-def _refresh_upstream(port: int) -> None:
-    """通知代理按数据库当前生效配置立即刷新上游，避免切换后短暂使用旧上游。"""
+def _refresh_upstream(port: int, token: str = "") -> None:
+    """通知代理按数据库当前生效配置立即刷新上游，避免切换后短暂使用旧上游。
+
+    /v1/proxy/refresh 与代理其余端点同权校验 token（状态文件里就有）。
+    """
     if not port:
         return
     try:
         import urllib.request
 
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["x-api-key"] = str(token)
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/v1/proxy/refresh",
             method="POST",
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             data=b"{}",
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -202,7 +208,7 @@ def ensure_proxy_running() -> dict:
             st = json.loads(status_file.read_text(encoding="utf-8"))
             if _port_alive(st.get("port")) and st.get("token"):
                 if _proxy_compatible(st.get("port")) and _token_owner_ok(st):
-                    _refresh_upstream(st.get("port"))
+                    _refresh_upstream(st.get("port"), st.get("token"))
                     return {
                         "base_url": f"http://127.0.0.1:{st['port']}",
                         "token": st["token"],
@@ -227,7 +233,7 @@ def ensure_proxy_running() -> dict:
                     and st.get("token")
                     and _proxy_compatible(st.get("port"))
                 ):
-                    _refresh_upstream(st.get("port"))
+                    _refresh_upstream(st.get("port"), st.get("token"))
                     return {
                         "base_url": f"http://127.0.0.1:{st['port']}",
                         "token": st["token"],
@@ -301,10 +307,14 @@ def main() -> None:
 
     first = True
     last_signature = None
+    started = time.time()
     while True:
         cfg = _active_openai_config()
         if cfg is None:
-            if not first:
+            # 拉起后 2 分钟内始终没有生效配置就退出：本进程只在切换时被拉起，
+            # 久等无配置说明主流程已放弃（如切换失败回滚），继续轮询只会留下
+            # 一个看不见的孤儿进程
+            if not first or time.time() - started > 120:
                 break
             time.sleep(POLL_INTERVAL)
             continue

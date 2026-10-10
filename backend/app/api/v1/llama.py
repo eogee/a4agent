@@ -183,7 +183,7 @@ def connect():
 
 
 class IntegrateBody(BaseModel):
-    targets: str = "claude"       # claude / codex / dsh / zcode / pi，逗号分隔
+    targets: str = "claude"       # claude / codex（v0.5.1 起不再代管其余端，读入时丢弃）
     activate: bool = False        # 创建后是否立即切换
 
 

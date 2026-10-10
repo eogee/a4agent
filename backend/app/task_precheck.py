@@ -27,6 +27,10 @@ from . import config_manager, task_engines
 from .openai_proxy import PROXY_PORT_END, PROXY_PORT_START
 
 TIMEOUT_SECONDS = 8
+# 预检总预算：三步耗时叠加的硬上限。第三步实测单次就有 90s 上限，OpenCode
+# 失败还会按候选模型逐个重试（每次至多 ~4 分钟），没有总预算时最坏可挂
+# 20 分钟级——下发请求一直占着线程池线程不返回。
+TOTAL_BUDGET_SECONDS = 300
 # 本地翻译代理的端口区间（与 openai_proxy 的钉定保持同一来源）
 _PROXY_PORTS = range(PROXY_PORT_START, PROXY_PORT_END + 1)
 
@@ -213,12 +217,15 @@ def smoke_env(tool: str) -> dict:
     return env
 
 
-def smoke_run(tool: str, timeout: int = 90) -> dict:
+def smoke_run(tool: str, timeout: int = 90, deadline: float | None = None) -> dict:
     """真实跑一次最小无头调用，验证「能不能真用」。
 
     这是解耦后的核心：不再比对配置字段，而是直接验证引擎能否用用户自己的
     配置完成一次真实往返。配置对不对、密钥有效没、模型名拼写、网络通不通
     ——一次调用全都会暴露出来，比任何字段比对都可靠。
+
+    deadline 是可选的总预算（time.monotonic 时刻）：传入后单次超时会被压到
+    剩余预算内，预算耗尽直接放弃实测，避免换模型重试把预检拖成分钟级挂起。
 
     cwd 固定为用户主目录：留空会继承 a4agent 自己的进程目录（开发时是仓库、
     打包后是安装目录），引擎会在那里读到不该读的项目配置。command 侧不再
@@ -226,8 +233,14 @@ def smoke_run(tool: str, timeout: int = 90) -> dict:
     """
     from . import task_engines
 
+    if deadline is not None:
+        remain = deadline - time.monotonic()
+        if remain <= 0:
+            return {"ok": False, "detail": "预检总预算已用尽，实测未执行"}
+        timeout = max(5, min(timeout, int(remain)))
+
     if tool in task_engines.HTTP_ENGINES:
-        return _smoke_run_http(tool, timeout)
+        return _smoke_run_http(tool, timeout, deadline=deadline)
 
     try:
         argv = task_engines.build_argv(tool, "回复 ok 两个字即可")
@@ -264,11 +277,13 @@ def smoke_run(tool: str, timeout: int = 90) -> dict:
     return {"ok": False, "detail": f"实测未通过：{parsed['error']}"}
 
 
-def _smoke_run_http(tool: str, timeout: int) -> dict:
+def _smoke_run_http(tool: str, timeout: int, deadline: float | None = None) -> dict:
     """HTTP 引擎（OpenCode）的实测：建会话 → 等空闲 → 读终态 → 删会话。
 
     与 CLI 实测同口径同承诺（真的跑一次、拿到产出才算通过），只是执行载体换成
     HTTP 会话。会话用完即删，绝不在用户 OpenCode 里堆测试会话。
+
+    deadline：换模型重试前先看剩余预算，用尽就不再发起下一次尝试。
 
     **实测发现的必要性**：服务端默认模型可能已废弃而清单里仍标 enabled=true，
     所以「有模型」这第二步挡不住这类故障——第三步真的跑一次、并按错误内容换
@@ -310,6 +325,8 @@ def _smoke_run_http(tool: str, timeout: int) -> dict:
     except opencode_client.OpenCodeError:
         candidates = []
     for model in candidates:
+        if deadline is not None and time.monotonic() >= deadline:
+            break  # 总预算用尽：再试也只是挂更久，如实按最后一次失败返回
         parsed, messages = attempt(model)
         if parsed["ok"]:
             return {"ok": True, "detail": f"实测通过（已避开不可用模型 {model['id']}）"}
@@ -332,8 +349,12 @@ def run(db, tool: str, provider, api_key: str, model: str) -> dict:
     （跑一次最小无头调用）。第三步是关键：它验证的是「能不能真跑」，而
     不是「配置字段是否等于我们写的值」，因此用户在自己应用里配的任意组合
     都能被支持，也不依赖 a4agent 的托管配置。
+
+    第三步受 TOTAL_BUDGET_SECONDS 总预算约束：本函数在 POST /tasks 内同步
+    执行，预算防止换模型重试把下发请求拖成分钟级挂起。
     """
     started = time.time()
+    deadline = time.monotonic() + TOTAL_BUDGET_SECONDS
     steps = []
 
     t0 = time.time()
@@ -358,7 +379,7 @@ def run(db, tool: str, provider, api_key: str, model: str) -> dict:
         # 就绪判断失败时不再实测（配置都没配好，跑必然失败，徒增等待）
         if ready:
             t0 = time.time()
-            live = smoke_run(tool)
+            live = smoke_run(tool, deadline=deadline)
             steps.append(
                 {"name": "reachability", "label": _STEPS[2][1], "ok": live["ok"],
                  "detail": live["detail"], "ms": int((time.time() - t0) * 1000)}

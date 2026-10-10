@@ -6,6 +6,7 @@ feedback_images），随后把内容与截图以邮件附件送达 eogee@qq.com�
 mail_secrets.py）；邮件失败不影响入库，emailed 标志随响应返回。
 """
 import asyncio
+import os
 import platform as _platform
 import sys
 from datetime import date
@@ -101,11 +102,17 @@ async def create_feedback(
 
     blobs: list[tuple[str, str, bytes]] = []
     for f in files:
-        data = await f.read()
-        if len(data) > FEEDBACK_IMAGE_MAX_BYTES:
-            raise HTTPException(400, f"截图 {f.filename} 超过 1MB")
-        if (f.content_type or "").split(";")[0] not in ALLOWED_IMAGE_MIMES:
+        mime = (f.content_type or "").split(";")[0]
+        if mime not in ALLOWED_IMAGE_MIMES:
             raise HTTPException(400, f"截图 {f.filename} 不是支持的图片格式")
+        # 先用文件对象自身的偏移量拦截超大文件再读字节：Starlette 把超过阈值的
+        # 上传落盘缓冲，无条件 read() 会把整个文件拉进内存（攻击面是 OOM）
+        f.file.seek(0, os.SEEK_END)
+        size = f.file.tell()
+        f.file.seek(0)
+        if size > FEEDBACK_IMAGE_MAX_BYTES:
+            raise HTTPException(400, f"截图 {f.filename} 超过 1MB")
+        data = await f.read()
         blobs.append((f.filename or "image.png", f.content_type or "image/png", data))
 
     # 防刷频控（同 EoListen：每日限量）；本地单用户，按全量表计数即可

@@ -44,7 +44,36 @@ def update_ignore(body: VersionBody):
 
 
 def _exit_after_apply() -> None:
-    """后台任务：响应 flush 后立即退出整个 GUI 进程，释放 AppMutex 给安装器。"""
+    """后台任务：响应 flush 后先做退出清理，再退出整个 GUI 进程释放 AppMutex。
+
+    清理与 desktop.main 的退出路径同源：回收无头任务子进程与 llama-server。
+    直接 os._exit 会把它们留成孤儿——llama-server 继续占着 8080，更新完成后
+    重启必报「端口已被占用」。
+    """
+    try:
+        from ... import task_runner
+
+        task_runner.shutdown_all("应用更新")
+    except Exception:
+        pass
+    try:
+        from ... import opencode_listen
+
+        opencode_listen.stop()
+    except Exception:
+        pass
+    try:
+        from ...llama import runtime as llama_runtime
+
+        llama_runtime.shutdown()
+    except Exception:
+        pass
+    try:
+        from ...database import get_data_dir
+
+        (get_data_dir() / "desktop.json").unlink(missing_ok=True)
+    except OSError:
+        pass
     os._exit(0)
 
 

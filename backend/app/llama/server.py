@@ -18,6 +18,23 @@ logger = logging.getLogger(__name__)
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
+def _redact_args(args: list) -> str:
+    """拼装命令行用于展示；--api-key 的值脱敏——这行会进日志面板，截图/共享
+    屏幕时明文密钥跟着走。"""
+    out = []
+    redact_next = False
+    for a in args:
+        if redact_next:
+            out.append("***")
+            redact_next = False
+        elif a == "--api-key":
+            out.append(a)
+            redact_next = True
+        else:
+            out.append(a)
+    return " ".join(out)
+
+
 class ServerEngine:
     """单个 llama-server 实例的生命周期管理，线程安全。"""
 
@@ -30,6 +47,13 @@ class ServerEngine:
         self._on_state = on_state or (lambda s: None)
         self._state = "stopped"  # stopped / starting / running / failed
         self.last_exit_code: int | None = None
+        # 启动参数回存：内存裁剪与崩溃自动重启消费配置里的运行时设置
+        # （此前这三个设置只有设置页的存取往返，行为侧从未读取）
+        self._trim_enabled = True
+        self._trim_delay_seconds = 90
+        self._restart_on_crash = False
+        self._crash_restarts = 0  # 健康就绪即清零；连崩 3 次后放弃，防崩溃死循环
+        self._start_params: tuple | None = None
 
     @property
     def state(self) -> str:
@@ -51,7 +75,9 @@ class ServerEngine:
             self._on_log(f"[错误] {reason}")
         self._set_state("failed")
 
-    def start(self, engine_dir: Path, args: list, host: str, port: int) -> None:
+    def start(self, engine_dir: Path, args: list, host: str, port: int,
+              trim_enabled: bool = True, trim_delay_seconds: int = 90,
+              restart_on_crash: bool = False) -> None:
         with self._lock:
             if self.is_busy:
                 return
@@ -68,7 +94,7 @@ class ServerEngine:
                 return
 
             self._on_log(f"[启动] {exe}")
-            self._on_log("[参数] " + " ".join(args))
+            self._on_log("[参数] " + _redact_args(args))
             try:
                 self._proc = subprocess.Popen(
                     [str(exe)] + args,
@@ -87,6 +113,11 @@ class ServerEngine:
                 return
 
             self._set_state("starting")
+            self._trim_enabled = trim_enabled
+            self._trim_delay_seconds = trim_delay_seconds
+            self._restart_on_crash = restart_on_crash
+            self._start_params = (engine_dir, args, host, port,
+                                  trim_enabled, trim_delay_seconds, restart_on_crash)
             self._poll_stop.clear()
             threading.Thread(target=self._pump_output, daemon=True,
                              name="llama-log-pump").start()
@@ -105,6 +136,33 @@ class ServerEngine:
                     self._on_log(line)
         except (ValueError, OSError):
             pass  # 进程关闭时管道断裂属正常
+        # stdout EOF = 进程已退出。健康检查线程就绪后即收工，这里是运行期
+        # 崩溃的唯一观测点；收尾与（按设置触发的）自动重启统一在本路径
+        with self._lock:
+            crashed = self._state in ("starting", "running") and not self._poll_stop.is_set()
+            if crashed:
+                allow_restart = self._restart_on_crash and self._crash_restarts < 3
+                if allow_restart:
+                    self._crash_restarts += 1
+        if not crashed:
+            return  # 主动停止或健康检查失败路径负责收尾，这里不抢
+        self.last_exit_code = proc.returncode
+        self._on_log(f"[失败] 服务进程退出，exit code {proc.returncode}")
+        if allow_restart:
+            self._on_log(f"[自动重启] auto_restart_on_crash 已启用，2 秒后重启"
+                         f"（第 {self._crash_restarts}/3 次）")
+            time.sleep(2)
+            with self._lock:
+                if self._poll_stop.is_set():
+                    self._set_state("stopped")
+                    return
+                self._set_state("failed")
+            params = self._start_params
+            if params is not None:
+                self._on_log("[自动重启] 正在重启 llama-server")
+                self.start(*params)
+            return
+        self._set_state("failed")
 
     def _poll_health(self, host: str, port: int, proc: subprocess.Popen) -> None:
         probe_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
@@ -115,14 +173,17 @@ class ServerEngine:
             if proc.poll() is not None:
                 self.last_exit_code = proc.returncode
                 self._on_log(f"[失败] 服务进程退出，exit code {proc.returncode}")
-                self._set_state("failed")
+                # 状态终态与自动重启由日志泵的 EOF 路径统一处理，这里不抢
                 return
             try:
                 with urllib.request.urlopen(url, timeout=2) as resp:
                     if resp.status == 200:
                         self._on_log(f"[就绪] health ok —— http://{probe_host}:{port}/")
                         self._set_state("running")
-                        self._schedule_ram_trim(proc)
+                        with self._lock:
+                            self._crash_restarts = 0  # 活过一次健康检查，连崩计数归零
+                        self._schedule_ram_trim(proc, self._trim_enabled,
+                                                self._trim_delay_seconds)
                         return
             except Exception:
                 pass  # 还没起来，继续等

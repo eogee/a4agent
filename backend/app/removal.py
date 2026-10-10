@@ -25,6 +25,14 @@ logger = logging.getLogger(__name__)
 _HANDLED_PREFIXES = (A4AGENT_PROVIDER_PREFIX,) + LEGACY_PROVIDER_PREFIXES
 _PROXY_PORTS = set(range(PROXY_PORT_START, PROXY_PORT_END + 1))
 
+# 各端涉及的永久快照标签（与 removal_backup._targets 对应）：
+# 清理抛异常时按这份映射把该端的用户文件从快照还原，兑现「出错即回滚」
+_ENGINE_SNAPSHOT_LABELS = {
+    "dsh": ("dsh-settings", "dsh-settings-imported", "dsh-credentials"),
+    "zcode": ("zcode-cli", "zcode-v2"),
+    "pi": ("pi-models", "pi-settings"),
+}
+
 
 def _is_managed(key: str) -> bool:
     return str(key).startswith(_HANDLED_PREFIXES)
@@ -224,12 +232,18 @@ def cleanup_all(dry_run: bool = False) -> dict:
     try:
         snap = removal_backup.take_snapshot(dry_run=dry_run)
         report["snapshots"] = {"dir": snap["dir"], "files": snap["files"]}
-        if snap["errors"]:
-            report["errors"].extend(snap["errors"])
     except Exception as e:
         # 快照失败就必须停手：没有回滚依据就不要动用户文件
         report["errors"].append(f"快照失败，已中止清理：{e}")
         logger.exception("清理前快照失败，中止")
+        return report
+    if snap["errors"]:
+        # 部分文件快照失败 = 对应文件没有回滚依据，继续清理可能造成不可回滚的
+        # 改写。红线是「每个动作前强制快照」，缺依据就整体停手
+        report["errors"].append(
+            "快照不完整，已中止清理（未改动任何用户文件）：" + "；".join(snap["errors"])
+        )
+        logger.warning("清理前快照部分失败，中止：%s", snap["errors"])
         return report
 
     for key, fn in (("dsh", _clean_dsh), ("zcode", _clean_zcode), ("pi", _clean_pi)):
@@ -238,6 +252,15 @@ def cleanup_all(dry_run: bool = False) -> dict:
         except Exception as e:
             report["errors"].append(f"{key} 清理失败：{e}")
             logger.exception("清理 %s 托管配置失败", key)
+            if not dry_run:
+                # 兑现「出错即回滚」：把该端文件从永久快照还原（此前只承诺未实现）
+                restored, restore_errors = removal_backup.restore_labels(
+                    snap["dir"], _ENGINE_SNAPSHOT_LABELS[key])
+                if restored:
+                    report["errors"].append(
+                        f"{key} 已按快照回滚 {len(restored)} 个文件：{'、'.join(restored)}")
+                for err in restore_errors:
+                    report["errors"].append(f"{key} 回滚失败：{err}")
     return report
 
 

@@ -32,14 +32,18 @@ if "--apply-update" in sys.argv:
     _ERROR_ALREADY_EXISTS = 183
 
     def _wait_mutex_released(timeout_s: float = 20) -> bool:
-        """轮询等待主实例释放 AppMutex；拿到所有权立即释放给安装器。"""
+        """轮询等待主实例释放 AppMutex；拿到所有权立即释放给安装器。
+
+        与 singleton.acquire 同一道安全通道：use_last_error=True +
+        ctypes.get_last_error()，误读 LastError 会把「主实例还在」判成
+        「已退出」，提前拉起安装器撞正在被占用的 _internal。
+        """
         if sys.platform != "win32":
             time.sleep(2)  # 非 Windows 开发兜底
             return True
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
         kernel32.CreateMutexW.restype = wintypes.HANDLE
-        kernel32.GetLastError.restype = wintypes.DWORD
         kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
         kernel32.CloseHandle.restype = wintypes.BOOL
         deadline = time.time() + timeout_s
@@ -48,7 +52,7 @@ if "--apply-update" in sys.argv:
             if not handle:  # 创建失败（如权限）→ 重试，不当作已就绪
                 time.sleep(0.2)
                 continue
-            if kernel32.GetLastError() != _ERROR_ALREADY_EXISTS:
+            if ctypes.get_last_error() != _ERROR_ALREADY_EXISTS:
                 kernel32.CloseHandle(handle)  # 立即释放，让安装器能创建互斥体
                 return True
             kernel32.CloseHandle(handle)

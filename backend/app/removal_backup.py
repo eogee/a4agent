@@ -8,6 +8,7 @@
 与 config_manager.backup_* 的区别：那些是为「切换」服务的滚动备份（保留最近
 N 份，会被清理），这里是为「一次性迁移」服务的永久留档。
 """
+import os
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -76,6 +77,38 @@ def take_snapshot(dry_run: bool = False) -> dict:
 def _suffix(src: Path) -> str:
     """保留原扩展名（.yaml / .json），便于人工比对。"""
     return src.suffix or ".bak"
+
+
+def restore_labels(snap_dir: str, labels) -> tuple[list[str], list[str]]:
+    """把快照目录中指定标签的文件原样还原到原路径，返回 (已还原路径, 失败说明)。
+
+    供 cleanup_all 在某端清理抛异常后按红线回滚该端的用户文件。逐文件独立
+    还原（临时文件 + os.replace，避免还原半截），单个失败不阻断其余。
+    """
+    src_dir = Path(snap_dir)
+    if not src_dir.is_dir():
+        return [], [f"快照目录不存在，无法回滚：{snap_dir}"]
+    restored: list[str] = []
+    errors: list[str] = []
+    for label, path in _targets():
+        if label not in labels:
+            continue
+        snap = src_dir / f"{label}{_suffix(path)}"
+        if not snap.is_file():
+            continue  # 清理前该文件本就不存在，无需还原
+        tmp = path.with_name(path.name + ".restore.tmp")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(snap, tmp)
+            os.replace(tmp, path)
+            restored.append(str(path))
+        except OSError as e:
+            errors.append(f"{label}: {e}")
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+    return restored, errors
 
 
 def latest_snapshot() -> Path | None:

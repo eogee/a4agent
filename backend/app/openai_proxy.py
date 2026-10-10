@@ -770,7 +770,8 @@ async def messages(request: Request):
             if resp.status != 200:
                 return JSONResponse(
                     _error_body(f"upstream HTTP {resp.status}: {detail[:500]}"),
-                    status_code=502,
+                    status_code=_upstream_status(resp.status),
+                    headers=_retry_after_headers(resp),
                 )
         data = json.loads(resp.read().decode("utf-8", "replace"))
     except Exception as e:
@@ -802,8 +803,22 @@ async def _version():
 
 
 @proxy_app.post("/v1/proxy/refresh")
-async def _proxy_refresh():
-    """按数据库当前生效配置刷新上游地址与密钥，避免切换后代理仍在用旧上游。"""
+async def _proxy_refresh(request: Request):
+    """按数据库当前生效配置刷新上游地址与密钥，避免切换后代理仍在用旧上游。
+
+    与其余端点同权要求 token：本端点会把生效配置解密后装进代理，不能对本机
+    任意进程/网页开放（响应还会带出 upstream_base 与模型名）。
+    """
+    token = request.headers.get("x-api-key")
+    if not token:
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            token = auth[7:].strip()
+    if not _state["token"] or token != _state["token"]:
+        return JSONResponse(
+            _error_body("invalid bearer token", "authentication_error"),
+            status_code=401,
+        )
     try:
         from .config_manager import target_list
         from .crypto import decrypt_text
