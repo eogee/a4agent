@@ -215,7 +215,28 @@ if AVAILABLE:
 
 
 def show(title: str, message: str, on_click=None) -> bool:
-    """弹一条系统通知横幅；返回是否成功发起（横幅可能被系统静默）。"""
+    """发桌面通知横幅：原生 WinRT toast 优先（有声、来源区 a4agent+logo、
+    无消息泵崩溃面），失败降级 legacy 气泡（本文件 _legacy_show）。"""
+    if not AVAILABLE:
+        return False
+    try:
+        from . import win_toast_native
+
+        ok, detail = win_toast_native.show(title, message, on_click=on_click)
+        if ok:
+            return True
+        logger.warning("原生 toast 未发出，降级 legacy 气泡：%s", detail)
+    except Exception:  # noqa: BLE001 - 原生链路任何异常都走降级
+        logger.exception("原生 toast 调用异常，降级 legacy 气泡")
+    try:
+        return _legacy_show(title, message, on_click)
+    except Exception:  # noqa: BLE001 - 横幅失败不能拖累任务提醒链
+        logger.exception("legacy 气泡横幅异常")
+        return False
+
+
+def _legacy_show(title: str, message: str, on_click=None) -> bool:
+    """Shell_NotifyIconW 气泡横幅（legacy）：原生 toast 不可用时的降级路径。"""
     if not AVAILABLE:
         return False
     try:

@@ -68,6 +68,32 @@ if "--apply-update" in sys.argv:
     time.sleep(1)
     os._exit(0)
 
+if "--toast-wake" in sys.argv:
+    # 原生 toast 点击唤醒：横幅 activationType="protocol" + launch="a4agent://wake"，
+    # 协议处理器（见 win_toast_native.ensure_aumid 注册）指向本命令，系统在用户
+    # 点击横幅时拉起新进程。必须短路在重型 import 之前；唤醒常驻实例主窗口，
+    # 失败静默退出（通知点击不能报错打扰）。
+    import json as _json
+    import pathlib as _pathlib
+    import urllib.request as _urllib
+
+    try:
+        override = os.environ.get("A4AGENT_DATA_DIR") or os.environ.get("A4API_DATA_DIR")
+        if override:
+            base = _pathlib.Path(override)
+        elif getattr(sys, "frozen", False):
+            base = _pathlib.Path(os.environ.get("APPDATA", str(_pathlib.Path.home()))) / "a4agent"
+        else:
+            base = _pathlib.Path(__file__).resolve().parent / "backend" / "database"
+        port = int(_json.loads((base / "desktop.json").read_text(encoding="utf-8"))["port"])
+        req = _urllib.Request(
+            f"http://127.0.0.1:{port}/api/v1/desktop/wake", method="POST",
+            data=b"{}", headers={"Content-Type": "application/json"})
+        _urllib.urlopen(req, timeout=3).read()
+    except Exception:  # noqa: BLE001 - 唤醒失败静默
+        pass
+    sys.exit(0)
+
 if len(sys.argv) >= 2 and sys.argv[1] == "hook":
     # Hook 子命令：终端宿主（Claude Code / ZCode 等）以管道重定向调用本进程，
     # 读 stdin 载荷、stdout 回写决策。必须短路在重型 import 之前——hook 是
