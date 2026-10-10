@@ -9,6 +9,7 @@
 """
 import json
 import logging
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -107,10 +108,40 @@ def _user_text(o: dict) -> str | None:
     return None
 
 
+# 宿主注入上下文块白名单：配对标签整段移除（各家实测样本见下）。
+# 不做通用 XML 剥离——用户第一条消息贴代码/贴 XML 很常见，白名单只认
+# 宿主保留名，避免把用户自己的内容当注入误吃。
+_INJECTED_TAG_BLOCKS = (
+    "system-reminder",      # WorkBuddy / Claude Code：<system-reminder data-role=...>
+    "user_instructions",    # Codex
+    "environment_context",  # Codex：<environment_context>…日期/文件系统…
+    "INSTRUCTIONS",         # Codex：# AGENTS.md instructions 标题下的 <INSTRUCTIONS> 块
+)
+# 无正文语义的注入行（标题/告示），整行移除
+_INJECTED_LINE_PATTERNS = (
+    re.compile(r"^# AGENTS\.md instructions[^\n]*\n", re.MULTILINE),  # Codex 标题行
+    re.compile(r"^Caveat:[^\n]*\n", re.MULTILINE),  # Claude Code 本地命令告示前缀
+)
+# WorkBuddy 把真实提问包在 <user_query> 壳里挂在注入块之后：只剥壳留内容
+_USER_QUERY_SHELL = re.compile(r"</?user_query\b[^>]*>")
+
+
+def strip_injected(text: str) -> str:
+    """剥掉宿主注入的上下文块，剩真实用户输入；整条都是注入时返回空串。"""
+    for tag in _INJECTED_TAG_BLOCKS:
+        text = re.sub(rf"<{tag}\b[^>]*>.*?</{tag}>", "", text,
+                      flags=re.DOTALL | re.IGNORECASE)
+    for pat in _INJECTED_LINE_PATTERNS:
+        text = pat.sub("", text)
+    return _USER_QUERY_SHELL.sub("", text).strip()
+
+
 def extract_first_prompt(transcript_path: str | None, max_length: int = 80) -> str | None:
     """transcript 里第一条用户消息——hook 侧会话没有标题，拿它当「话题名称」。
 
     工具结果也挂在 user 名下（tool_result 块无 text），按块类型自然滤掉；
+    WorkBuddy/Codex 会在首条消息注入上下文（system-reminder/AGENTS.md 等），
+    剥离后为空说明整条都是注入（真话在后面几条），继续往下找；
     ZCode 的合成伪 transcript 只有 assistant 消息，抽不到返回 None，由调用方退回目录名。
     """
     if not transcript_path:
@@ -129,7 +160,10 @@ def extract_first_prompt(transcript_path: str | None, max_length: int = 80) -> s
         if not isinstance(o, dict):
             continue
         text = _user_text(o)
-        if text and text.strip():
-            cleaned = text.strip()
-            return cleaned[:max_length] + ("..." if len(cleaned) > max_length else "")
+        if not text or not text.strip():
+            continue
+        cleaned = strip_injected(text)
+        if not cleaned:
+            continue
+        return cleaned[:max_length] + ("..." if len(cleaned) > max_length else "")
     return None

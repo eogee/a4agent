@@ -8,7 +8,7 @@ import pytest
 from backend.app.hooks import deskqueue, dispatch, dsh_register, handlers, register, response
 from backend.app.hooks.transcript import (clamp_output, extract_first_prompt,
                                           extract_last_output,
-                                          resolve_last_output)
+                                          resolve_last_output, strip_injected)
 
 
 @pytest.fixture
@@ -112,6 +112,55 @@ def test_extract_first_prompt_truncated(tmp_path):
                   "content": "问" * 200}}), encoding="utf-8")
     out = extract_first_prompt(str(f))
     assert len(out) == 83 and out.endswith("...")
+
+
+def test_extract_first_prompt_strips_workbuddy_injection(tmp_path):
+    """WorkBuddy 首条消息被 system-reminder 注入包裹，真实提问在 user_query 壳里
+    （真实样本形态，16k+ 字符注入 + 末尾 <user_query>）。"""
+    injected = ('<system-reminder data-role="user-context">\n<user_info>\n'
+                "OS Version: win32\nShell: bash\n</user_info>\n"
+                "<identity_context>\nBOOTSTRAP.md 内容\n</identity_context>\n"
+                "</system-reminder>\n"
+                "<user_query>你查阅一下本地的代码然后更新文档</user_query>")
+    f = tmp_path / "wb.jsonl"
+    f.write_text(json.dumps({"type": "message", "role": "user", "content": [
+        {"type": "text", "text": injected}]}), encoding="utf-8")
+    assert extract_first_prompt(str(f)) == "你查阅一下本地的代码然后更新文档"
+
+
+def test_extract_first_prompt_skips_all_injection_codex(tmp_path):
+    """Codex 首条全是注入（AGENTS.md + environment_context），剥完为空要跳过，
+    取后面第一条真实消息。"""
+    first = ("# AGENTS.md instructions for C:\\proj\n\n<INSTRUCTIONS>\n工作区约定\n"
+             "</INSTRUCTIONS>\n\n<environment_context>\n  <current_date>2026-09-25"
+             "</current_date>\n</environment_context>")
+    lines = [
+        json.dumps({"type": "response_item", "payload": {"type": "message", "role": "user",
+                    "content": [{"type": "input_text", "text": first}]}}),
+        json.dumps({"type": "response_item", "payload": {"type": "message", "role": "user",
+                    "content": [{"type": "input_text", "text": "真正的提问在这"}]}}),
+    ]
+    f = tmp_path / "codex.jsonl"
+    f.write_text("\n".join(lines), encoding="utf-8")
+    assert extract_first_prompt(str(f)) == "真正的提问在这"
+
+
+def test_extract_first_prompt_keeps_user_xml(tmp_path):
+    """用户自己贴的 XML/HTML 不是注入，不能误吃。"""
+    f = tmp_path / "x.jsonl"
+    f.write_text(json.dumps({"type": "user", "message": {"role": "user", "content":
+                  "<html><body>帮我看看这个页面布局</body></html>"}}), encoding="utf-8")
+    assert extract_first_prompt(str(f)) == "<html><body>帮我看看这个页面布局</body></html>"
+
+
+def test_strip_injected_partial_cases():
+    """零散注入形态：注入块夹在正文中间、user_query 壳只出现半边、Caveat 前缀。"""
+    assert strip_injected(
+        "前文\n<system-reminder>\n上下文\n</system-reminder>\n后文") == "前文\n\n后文"
+    assert strip_injected("<user_query>只有开壳没有闭壳") == "只有开壳没有闭壳"
+    assert strip_injected("Caveat: 本地命令生成\n\n真实提问") == "真实提问"
+    assert strip_injected("<USER_INSTRUCTIONS>\n大写也能剥\n</USER_INSTRUCTIONS>") == ""
+    assert strip_injected("普通消息原样保留") == "普通消息原样保留"
 
 
 # ---------------- 桌面队列 ----------------
