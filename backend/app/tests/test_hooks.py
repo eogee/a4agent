@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 
 from backend.app.hooks import deskqueue, dispatch, dsh_register, handlers, register, response
-from backend.app.hooks.transcript import (clamp_output, extract_last_output,
+from backend.app.hooks.transcript import (clamp_output, extract_first_prompt,
+                                          extract_last_output,
                                           resolve_last_output)
 
 
@@ -77,6 +78,40 @@ def test_extract_codex_style(tmp_path):
 
 def test_resolve_prefers_direct_field():
     assert resolve_last_output({"last_assistant_message": "直送", "transcript_path": None}) == "直送"
+
+
+def test_extract_first_prompt_all_hosts(tmp_path):
+    """四家宿主的第一条用户消息都能抽出；工具结果块（挂在 user 名下）天然滤掉。"""
+    lines = [
+        json.dumps({"type": "user", "message": {"role": "user", "content": "帮我修登录页"}}),
+        json.dumps({"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "content": "工具结果不算提问"}]}}),
+    ]
+    f = tmp_path / "claude.jsonl"
+    f.write_text("\n".join(lines), encoding="utf-8")
+    assert extract_first_prompt(str(f)) == "帮我修登录页"
+
+    f2 = tmp_path / "wb.jsonl"
+    f2.write_text(json.dumps({"type": "message", "role": "user", "content": [
+        {"type": "text", "text": "wb 的提问"}]}), encoding="utf-8")
+    assert extract_first_prompt(str(f2)) == "wb 的提问"
+
+    f3 = tmp_path / "codex.jsonl"
+    f3.write_text(json.dumps({"type": "response_item", "payload": {"type": "message",
+                  "role": "user", "content": [{"type": "input_text", "text": "codex 的提问"}]}}),
+        encoding="utf-8")
+    assert extract_first_prompt(str(f3)) == "codex 的提问"
+
+    assert extract_first_prompt(None) is None
+    assert extract_first_prompt(str(tmp_path / "missing.jsonl")) is None
+
+
+def test_extract_first_prompt_truncated(tmp_path):
+    f = tmp_path / "t.jsonl"
+    f.write_text(json.dumps({"type": "user", "message": {"role": "user",
+                  "content": "问" * 200}}), encoding="utf-8")
+    out = extract_first_prompt(str(f))
+    assert len(out) == 83 and out.endswith("...")
 
 
 # ---------------- 桌面队列 ----------------
@@ -249,7 +284,9 @@ def test_stop_pushes_with_last_output(hook_cfg, data_dir, monkeypatch):
     input_payload = {"session_id": "abcdef123456", "cwd": "D:\\proj",
                      "last_assistant_message": "修好了三处"}
     assert handlers.handle_stop(input_payload, "Claude Code", hook_cfg) is None
-    assert published[0][0] == "Claude Code"
+    # 话题名称取 cwd 目录名（无 transcript）；标题=话题，正文首行=类型
+    assert published[0][0] == "proj"
+    assert published[0][1].startswith("已完成\nClaude Code")
     assert "AI 最后输出" in published[0][1] and "修好了三处" in published[0][1]
     last = json.loads((data_dir / "last_session.json").read_text(encoding="utf-8"))
     assert last["session_id"] == "abcdef123456" and last["agent"] == "Claude Code"
@@ -275,7 +312,8 @@ def test_dispatch_home_mode_does_not_block(hook_cfg, data_dir, monkeypatch):
     out = dispatch.dispatch({"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion",
                              "tool_input": {"questions": [{"question": "Q"}]}}, "claude")
     assert out is None
-    assert queued == ["有提问需要处理"]
+    # 统一样式：正文=类型\n应用名（无 cwd/transcript 时话题兜底，monkeypatch 只收 message）
+    assert queued == ["问题作答\nClaude Code"]
 
 
 def test_dispatch_zcode_asku_permission_skips_queue(data_dir, monkeypatch):
@@ -586,7 +624,8 @@ def test_handle_stop_desktop_off_still_pushes_mobile(hook_cfg, monkeypatch):
                         lambda cfg, title, message, timeout=8.0, actions=None:
                         published.append(title) or (True, ""))
     handlers.handle_stop({"session_id": "s1"}, "Claude Code", hook_cfg, desktop_on=False)
-    assert published == ["Claude Code"]
+    # 无 cwd 无 transcript：话题为空兜底「a4agent 通知」
+    assert published == ["a4agent 通知"]
 
 
 # ---------------- 桌面队列容错 ----------------

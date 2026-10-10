@@ -13,8 +13,9 @@ from pathlib import Path
 
 from ..database import get_data_dir
 from ..phone import ntfy
+from ..phone.notifier import format_notice
 from . import deskqueue, response
-from .transcript import resolve_last_output
+from .transcript import extract_first_prompt, resolve_last_output
 
 logger = logging.getLogger(__name__)
 
@@ -174,18 +175,26 @@ def _save_last_session(input: dict, agent_name: str) -> None:
         logger.warning("最近会话记录写入失败", exc_info=True)
 
 
+def session_topic(input: dict) -> str:
+    """会话的话题名称（统一样式第 1 行）：transcript 第一条用户消息，
+    取不到退回项目目录名，再退回空串（format_notice 兜底「a4agent 通知」）。"""
+    topic = extract_first_prompt(input.get("transcript_path"))
+    if topic:
+        return topic
+    return Path((input.get("cwd") or "").strip()).name
+
+
 def handle_stop(input: dict, agent_name: str, cfg: dict, desktop_on: bool = True) -> None:
-    """Stop 事件：桌面弹窗 + 手机推送（含 AI 最后输出）。Stop Hook 无需输出。"""
+    """Stop 事件：桌面横幅 + 手机推送，统一样式（话题名称/已完成/应用名）。
+    Stop Hook 无需输出。"""
     _save_last_session(input, agent_name)
     if input.get("_resumed"):
         return None  # 续聊子进程的结果已由续聊链路推回手机，不重复推送
-    cwd = input.get("cwd") or "未知目录"
-    session = (input.get("session_id") or "—")[:8]
-    details = f"任务已完成\n目录: {cwd}\n会话: {session}"
+    topic = session_topic(input)
     if desktop_on:
-        deskqueue.queue_notify(agent_name, "任务已完成")
+        deskqueue.queue_notify(*format_notice(topic, "已完成", agent_name))
     if cfg.get("topic"):
-        last_output = resolve_last_output(input)
-        message = f"{details}\n\nAI 最后输出：\n{last_output}" if last_output else details
-        ntfy.publish(cfg, agent_name, message)
+        last_output = resolve_last_output(input) or ""
+        ntfy.publish(cfg, *format_notice(topic, "已完成", agent_name,
+                                         last_output, include_last_output=True))
     return None

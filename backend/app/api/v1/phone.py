@@ -67,7 +67,7 @@ def test_push():
     if err := phone_config.validate(cfg["server"], cfg["topic"]):
         raise HTTPException(422, err)
     ok, reason = ntfy.publish(cfg, "a4agent 测试通知",
-                              "✅ 收到这条说明手机通知已打通")
+                              "收到这条说明手机通知已打通")
     return schemas.PhoneTestOut(sent=ok, detail=reason)
 
 
@@ -87,7 +87,7 @@ def test_desktop():
     if not win_toast.AVAILABLE:
         return schemas.PhoneTestOut(sent=False, detail="仅 Windows 支持系统通知横幅")
     try:
-        sent = win_toast.show("a4agent 测试通知", "✅ 收到这条说明桌面横幅已打通")
+        sent = win_toast.show("a4agent 测试通知", "收到这条说明桌面横幅已打通")
     except Exception as exc:  # noqa: BLE001 - 失败要可见但不抛栈给前端
         logger.exception("桌面横幅测试异常")
         return schemas.PhoneTestOut(sent=False, detail=str(exc))

@@ -18,6 +18,13 @@ def _reset_pending():
     opencode_client._dispatched.clear()
 
 
+@pytest.fixture(autouse=True)
+def _stub_session_fetch(monkeypatch):
+    """权限横幅要拉会话标题；默认桩掉防真实 HTTP，具体用例按需覆盖。"""
+    monkeypatch.setattr(opencode_client, "get_session",
+                        lambda *a, **k: {"title": "演示会话"})
+
+
 @pytest.fixture
 def data_dir(tmp_path, monkeypatch):
     from backend.app import database
@@ -48,6 +55,9 @@ def _patch_conn(monkeypatch, base="http://127.0.0.1:49374", pwd="pw"):
 def test_execution_event_notifies_with_mapped_status(monkeypatch):
     _patch_conn(monkeypatch)
     monkeypatch.setattr(opencode_client, "get_session", lambda *a, **k: {"title": "我的会话"})
+    monkeypatch.setattr(opencode_client, "list_messages",
+                        lambda *a, **k: [{"type": "assistant",
+                                          "content": [{"type": "text", "text": "干完了"}]}])
     got = []
     monkeypatch.setattr(opencode_listen.task_notify, "notify", got.append)
     opencode_listen._on_event({"type": "session.execution.failed",
@@ -56,6 +66,24 @@ def test_execution_event_notifies_with_mapped_status(monkeypatch):
     assert got[0]["status"] == "failed"
     assert got[0]["tool"] == "opencode"
     assert got[0]["session_id"] == "ses_12345678abcd"
+    assert got[0]["last_output"] == "干完了"
+
+
+def test_execution_event_survives_message_fetch_failure(monkeypatch):
+    """消息流拉不到：退回只推标题，提醒本身不能丢。"""
+    _patch_conn(monkeypatch)
+    monkeypatch.setattr(opencode_client, "get_session", lambda *a, **k: {"title": "T"})
+
+    def boom(*a, **k):
+        raise opencode_client.OpenCodeError("消息流不可用")
+
+    monkeypatch.setattr(opencode_client, "list_messages", boom)
+    got = []
+    monkeypatch.setattr(opencode_listen.task_notify, "notify", got.append)
+    opencode_listen._on_event({"type": "session.execution.succeeded",
+                               "data": {"sessionID": "ses_12345678abcd"}})
+    assert len(got) == 1
+    assert got[0]["last_output"] == ""
 
 
 def test_execution_event_skips_dispatched_session(monkeypatch):
@@ -93,6 +121,12 @@ def test_permission_asked_home_mode_only_desktop(data_dir, monkeypatch):
          "resources": ["echo hi"]})
     assert pushed == []
     assert opencode_listen._pending == {}
+    # 桌面横幅照发，统一样式：标题=会话标题，正文=类型\n应用名
+    queued = list((data_dir / "notify-queue").glob("*.json"))
+    assert len(queued) == 1
+    req = json.loads(queued[0].read_text(encoding="utf-8"))
+    assert req == {"title": "演示会话", "message": "权限申请\nOpenCode",
+                   "ts": req["ts"]}
 
 
 def test_permission_asked_out_mode_pushes_three_buttons(data_dir, out_cfg, monkeypatch):
@@ -118,13 +152,14 @@ def test_permission_asked_out_mode_pushes_three_buttons(data_dir, out_cfg, monke
 
 
 def test_permission_asked_without_topic_not_registered(data_dir):
-    """手机推送未配置（无话题）：不登记待批，交由 OpenCode 界面兜底。"""
+    """手机推送未配置（无话题）：不登记待批，桌面横幅照发，交由 OpenCode 界面兜底。"""
     from backend.app.phone import config as phone_config
 
     phone_config.save({"enabled": True, "topic": "", "hook": {"mode": "out"}})
     opencode_listen._handle_permission_asked(
         {"id": "per_1", "sessionID": "ses_1", "action": "shell", "resources": []})
     assert opencode_listen._pending == {}
+    assert list((data_dir / "notify-queue").glob("*.json"))
 
 
 def test_permission_replied_clears_pending(data_dir, out_cfg, monkeypatch):

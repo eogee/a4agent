@@ -7,6 +7,7 @@
 import logging
 
 from ..phone import config as phone_config
+from ..phone.notifier import format_notice
 from . import deskqueue, handlers
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,8 @@ def dispatch(input: dict, agent: str, cfg: dict | None = None) -> dict | None:
         is_ask = tool_name == "AskUserQuestion" or (agent == "codex" and tool_name == "request_user_input")
         if is_ask:
             if desktop_on:
-                deskqueue.queue_notify(name, "有提问需要处理")
+                deskqueue.queue_notify(*format_notice(
+                    handlers.session_topic(input), "问题作答", name))
             if not is_out:
                 return None  # 终端优先：不阻塞
             return handlers.handle_ask_user_question(input, name, agent, wait_seconds, cfg)
@@ -60,7 +62,8 @@ def dispatch(input: dict, agent: str, cfg: dict | None = None) -> dict | None:
         # ZCode 对一次提问同时触发 PreToolUse 和 PermissionRequest：提问提醒已由
         # PreToolUse 分支负责，这里跳过弹窗避免重复通知与误导性文案
         if tool_name != "AskUserQuestion" and desktop_on:
-            deskqueue.queue_notify(name, "有权限请求需要处理")
+            deskqueue.queue_notify(*format_notice(
+                handlers.session_topic(input), "权限申请", name))
         if not is_out:
             return None  # 终端优先：不阻塞
         return handlers.handle_permission_request(input, name, wait_seconds, cfg)

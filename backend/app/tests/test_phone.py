@@ -131,9 +131,9 @@ def test_compose_success_has_no_error_line():
         "id": 7, "tool": "claude", "status": "success",
         "prompt": "审查错误处理", "error": "",
     })
-    assert "任务 #7" in title and "已完成" in title
-    assert "Claude" in message and "审查错误处理" in message
-    assert "\n" not in message
+    # 统一样式：标题=话题名称，正文=通知类型\n应用名称（任务编号保留）
+    assert title == "审查错误处理"
+    assert message == "已完成\n任务 #7 · Claude Code"
 
 
 def test_compose_failed_includes_error():
@@ -141,14 +141,66 @@ def test_compose_failed_includes_error():
         "id": 8, "tool": "codex", "status": "failed",
         "prompt": "跑测试", "error": "引擎无产出",
     })
-    assert "失败" in title
-    assert "Codex" in message and "引擎无产出" in message
+    assert title == "跑测试"
+    assert message.startswith("失败\n任务 #8 · Codex\n引擎无产出")
+
+
+def test_compose_session_event_has_no_task_number():
+    """OpenCode 会话事件没有本地任务号，第三行就是应用名。"""
+    title, message = notifier.compose({
+        "id": "oc:1234abcd", "tool": "opencode", "status": "success",
+        "prompt": "重构登录页", "session_id": "ses_x", "error": "",
+    })
+    assert title == "重构登录页"
+    assert message == "已完成\nOpenCode"
 
 
 def test_compose_unknown_tool_falls_back():
     _, message = notifier.compose({"id": 1, "tool": "xx", "status": "success",
                                    "prompt": "p", "error": ""})
     assert "xx" in message
+
+
+def test_compose_has_no_status_icon():
+    """终态通知纯文字（用户决议去图标）：任何状态都不拼 emoji。"""
+    for status in ("success", "failed", "timeout", "cancelled", "其他"):
+        _, message = notifier.compose({"id": 1, "tool": "claude", "status": status,
+                                       "prompt": "p", "error": ""})
+        assert not any(ch in message for ch in ("✅", "❌", "⏱", "🚫", "🔔"))
+
+
+def test_compose_last_output_only_on_request():
+    """「AI 最后输出」只进手机推送（include_last_output=True）；桌面横幅短版不带。"""
+    event = {"id": 1, "tool": "claude", "status": "success", "prompt": "p",
+             "error": "", "last_output": "结论：可行"}
+    _, short = notifier.compose(event)
+    assert "AI 最后输出" not in short
+    _, full = notifier.compose(event, include_last_output=True)
+    assert "AI 最后输出" in full and "结论：可行" in full
+
+
+def test_compose_last_output_truncated():
+    event = {"id": 1, "tool": "claude", "status": "success", "prompt": "p",
+             "error": "", "last_output": "字" * 1500}
+    _, message = notifier.compose(event, include_last_output=True)
+    assert ("字" * notifier._LAST_OUTPUT_MAX + "...") in message
+    assert len(message) < notifier._LAST_OUTPUT_MAX + 100
+
+
+def test_compose_without_last_output_unchanged():
+    event = {"id": 1, "tool": "claude", "status": "success", "prompt": "p", "error": ""}
+    _, message = notifier.compose(event, include_last_output=True)
+    assert message == "已完成\n任务 #1 · Claude Code"  # 没有最后输出时不出现空段落
+
+
+def test_format_notice_fallback_title():
+    """话题名称为空兜底「a4agent 通知」；hook 链与任务链共用这一份拼装。"""
+    title, message = notifier.format_notice("", "已完成", "Claude Code")
+    assert title == "a4agent 通知"
+    assert message == "已完成\nClaude Code"
+    title, message = notifier.format_notice("  ", "权限申请", "OpenCode")
+    assert title == "a4agent 通知"
+    assert message == "权限申请\nOpenCode"
 
 
 def test_on_event_disabled_skips(data_dir, monkeypatch):

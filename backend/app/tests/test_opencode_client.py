@@ -485,6 +485,21 @@ def test_parse_output_empty_is_failure():
     assert "无文本产出" in r["error"]
 
 
+def test_last_assistant_text_takes_final_round():
+    """多轮会话只取收尾那条 assistant 的文本，中间轮叙述不算产出。"""
+    msgs = (_messages("先看一眼文件")
+            + [{"type": "user", "payload": {"text": "继续"}}]
+            + _messages("收尾结论"))
+    assert opencode_client.last_assistant_text(msgs) == "收尾结论"
+
+
+def test_last_assistant_text_skips_textless_tail():
+    """最后一条 assistant 无文本块（如纯工具轮）时回退到上一条有文本的。"""
+    msgs = _messages("上一段") + [{"type": "assistant", "content": []}]
+    assert opencode_client.last_assistant_text(msgs) == "上一段"
+    assert opencode_client.last_assistant_text([{"type": "user"}]) == ""
+
+
 # ---------------- 连接配置 ----------------
 
 

@@ -30,7 +30,12 @@ logger = logging.getLogger(__name__)
 
 AVAILABLE = sys.platform == "win32"
 
-AUMID = "eogee.a4agent"
+AUMID = "eogee.a4agent.v2"
+# v1（eogee.a4agent）身份被系统通知平台缓存污染：首次注册时 IconUri 还是 512px
+# 原图，来源区渲染失败 → 系统把坏身份永久缓存（写对 DisplayName/IconUri、重启
+# 通知宿主都不回读，实测 Win11 24H2），来源区只能显示原始 AUMID 串。换新身份
+# 即时治愈（新身份首次入册即读当前注册表）；旧键由 ensure_aumid 兜底清理。
+_LEGACY_AUMIDS = ("eogee.a4agent",)
 DISPLAY_NAME = "a4agent"
 WAKE_PROTOCOL = "a4agent"  # 点击横幅时系统打开 a4agent://wake（见 desktop.py --toast-wake）
 
@@ -51,32 +56,38 @@ def resources_dir() -> Path:
     return Path(__file__).resolve().parent.parent.parent / "resources"
 
 
-def _logo_uri() -> str:
-    return (resources_dir() / "logo.png").resolve().as_uri()
+def _small_logo_path() -> Path:
+    """来源区小图标：64px 缩版。512px 原图实测在来源区槽位渲染不出来。"""
+    return resources_dir() / "logo_small.png"
 
 
 def ensure_aumid() -> None:
-    """注册来源身份与点击协议（幂等）：来源区显示 a4agent + logo，
+    """注册来源身份与点击协议（幂等）：来源区显示小 logo + a4agent，
     点击横幅时系统打开 a4agent://wake → desktop.py --toast-wake 唤回主窗口。"""
     if not AVAILABLE:
         return
     import winreg
 
-    icon = str((resources_dir() / "logo.png").resolve())
+    icon = str(_small_logo_path().resolve())
     with winreg.CreateKey(
             winreg.HKEY_CURRENT_USER,
             rf"Software\Classes\AppUserModelId\{AUMID}") as key:
-        name = None
+        # 来源应用名：Win11 24H2 实测只认 DisplayName 值（不写就整串显示原始
+        # AUMID「eogee.a4agent」），老系统认键默认值——两处都写，幂等。
+        winreg.SetValueEx(key, "", 0, winreg.REG_SZ, DISPLAY_NAME)
+        winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, DISPLAY_NAME)
         try:
-            name, _ = winreg.QueryValueEx(key, "")
+            winreg.SetValueEx(key, "IconUri", 0, winreg.REG_SZ, icon)
         except OSError:
-            pass  # 新键默认值未设置：QueryValueEx 抛 FileNotFoundError 而非返回空
-        if name != DISPLAY_NAME:
-            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, DISPLAY_NAME)
-            try:
-                winreg.SetValueEx(key, "IconUri", 0, winreg.REG_SZ, icon)
-            except OSError:
-                pass  # IconUri 写不上不影响身份显示，仅少来源图标
+            pass  # IconUri 写不上不影响身份显示，仅少来源小图标
+
+    # 旧身份键清理：身份缓存污染过，留着只会让降级到旧版的场景继续难看
+    for legacy in _LEGACY_AUMIDS:
+        try:
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER,
+                             rf"Software\Classes\AppUserModelId\{legacy}")
+        except OSError:
+            pass  # 键不存在即目标态
 
     # 点击协议：URL Protocol 惯例键 + open 命令。命令按运行形态生成
     # （frozen: a4agent.exe --toast-wake；dev: python desktop.py --toast-wake）。
@@ -96,18 +107,19 @@ def ensure_aumid() -> None:
         winreg.SetValueEx(key, "", 0, winreg.REG_SZ, cmd)
 
 
-def build_toast_xml(title: str, message: str,
-                    logo: bool = True, sound: bool = True) -> str:
-    """ToastGeneric 全量 XML：appLogoOverride 正文图标 + 系统默认提示音 +
-    协议激活（点击唤回主窗口）。纯函数便于测试。"""
-    img = (f'<image placement="appLogoOverride" src="{_logo_uri()}"'
-           ' hint-crop="circle"/>') if logo else ""
+def build_toast_xml(title: str, message: str, sound: bool = True) -> str:
+    """ToastGeneric 全量 XML：系统默认提示音 + 协议激活（点击唤回主窗口）。
+
+    不放正文大图标（appLogoOverride 圆形 logo 过大，用户决议去掉）；来源区
+    的小 logo + 应用名由系统按 AUMID 注册表（DisplayName/IconUri）渲染。
+    纯函数便于测试。
+    """
     audio = ('<audio src="ms-winsoundevent:Notification.Default"/>'
              if sound else '<audio silent="true"/>')
     return (
         f'<toast activationType="protocol" launch="{WAKE_PROTOCOL}://wake" duration="short">'
         "<visual><binding template=\"ToastGeneric\">"
-        f"{img}<text>{escape(title)}</text><text>{escape(message)}</text>"
+        f"<text>{escape(title)}</text><text>{escape(message)}</text>"
         f"</binding></visual>{audio}</toast>"
     )
 

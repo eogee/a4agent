@@ -149,6 +149,9 @@ def _execute(task_id: int) -> None:
                 "status": status,
                 "error": error,
                 "prompt": (task.prompt or "")[:80],
+                # OpenCode 路径在 _run_http_once 单独取收尾段；CLI 引擎的
+                # parsed["text"] 本就是最终产出，直接复用
+                "last_output": str(parsed.get("last_output") or parsed.get("text") or ""),
             }
         )
         logger.info("无头任务 #%s（%s）结束：%s", task.id, task.tool, status)
@@ -304,6 +307,8 @@ def _run_http_once(task, path: Path, timeout: int, model: dict | None,
         messages = opencode_client.list_messages(sid, base, password)
         parsed = opencode_client.parse_output(messages, session, exit_code=0,
                                               timed_out=timed_out)
+        # 多轮会话的 text 是全部文本块拼接，通知要的「AI 最后输出」单取收尾那段
+        parsed["last_output"] = opencode_client.last_assistant_text(messages)
         # 模型名在会话创建阶段就被拒时，服务端可能**只给一个空 failed 会话**：
         # 实测不存在的模型 → 消息流里既无 assistant 消息也无 error 字段，只有
         # idle{failed} + 原始 user 文本。这种情况下错误原因只能从会话日志取，

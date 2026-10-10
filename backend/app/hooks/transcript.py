@@ -74,3 +74,62 @@ def resolve_last_output(input: dict) -> str | None:
     其余宿主无此字段，回退读 transcript 文件。"""
     return clamp_output(input.get("last_assistant_message")) or extract_last_output(
         input.get("transcript_path"))
+
+
+def _user_text(o: dict) -> str | None:
+    """单条 JSONL 记录里的用户消息文本；不是用户消息返回 None。"""
+    message = o.get("message")
+    # Claude Code / ZCode：type=user，role 在 message.role；content 可为文本或块列表
+    if o.get("type") == "user" or (isinstance(message, dict) and message.get("role") == "user"):
+        if isinstance(message, dict):
+            content = message.get("content")
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                parts = [b.get("text", "") for b in content if isinstance(b, dict)
+                         and b.get("type") in ("text", "input_text") and b.get("text")]
+                if parts:
+                    return "\n".join(parts)
+    # WorkBuddy：顶层 type="message" + role="user"
+    if o.get("type") == "message" and o.get("role") == "user" and isinstance(o.get("content"), list):
+        parts = [b.get("text", "") for b in o["content"] if isinstance(b, dict)
+                 and b.get("type") in ("input_text", "output_text", "text") and b.get("text")]
+        if parts:
+            return "\n".join(parts)
+    # Codex：response_item 且 payload.type="message"、role="user"
+    payload = o.get("payload")
+    if o.get("type") == "response_item" and isinstance(payload, dict) \
+            and payload.get("type") == "message" and payload.get("role") == "user":
+        parts = [b.get("text", "") for b in (payload.get("content") or [])
+                 if isinstance(b, dict) and b.get("type") in ("input_text", "text") and b.get("text")]
+        if parts:
+            return "\n".join(parts)
+    return None
+
+
+def extract_first_prompt(transcript_path: str | None, max_length: int = 80) -> str | None:
+    """transcript 里第一条用户消息——hook 侧会话没有标题，拿它当「话题名称」。
+
+    工具结果也挂在 user 名下（tool_result 块无 text），按块类型自然滤掉；
+    ZCode 的合成伪 transcript 只有 assistant 消息，抽不到返回 None，由调用方退回目录名。
+    """
+    if not transcript_path:
+        return None
+    try:
+        content = Path(transcript_path).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in content.splitlines():
+        if not line.strip():
+            continue
+        try:
+            o = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(o, dict):
+            continue
+        text = _user_text(o)
+        if text and text.strip():
+            cleaned = text.strip()
+            return cleaned[:max_length] + ("..." if len(cleaned) > max_length else "")
+    return None

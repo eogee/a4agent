@@ -30,6 +30,7 @@ from . import opencode_client, task_notify
 from .hooks import deskqueue, response
 from .phone import config as phone_config
 from .phone import ntfy
+from .phone.notifier import format_notice
 
 logger = logging.getLogger(__name__)
 
@@ -174,8 +175,17 @@ def _handle_execution(status: str, data: dict) -> None:
     if not session_id or opencode_client.is_dispatched(session_id):
         return  # a4agent 下发的会话由任务终态通知，不重复推
     info: dict = {}
+    last_output = ""
     try:
-        info = opencode_client.get_session(session_id, *opencode_client.resolve_connection())
+        base, password = opencode_client.resolve_connection()
+        try:
+            info = opencode_client.get_session(session_id, base, password)
+        except opencode_client.OpenCodeError:
+            pass
+        # 会话标题开场即定死；「AI 最后输出」得另拉消息流（与六端 Stop 通知
+        # 同语义）。拉不到就退回只推标题，不影响提醒本身。
+        last_output = opencode_client.last_assistant_text(
+            opencode_client.list_messages(session_id, base, password))
     except opencode_client.OpenCodeError:
         pass
     task_notify.notify(
@@ -186,6 +196,7 @@ def _handle_execution(status: str, data: dict) -> None:
             "error": str(info.get("error") or ""),
             "prompt": (str(info.get("title") or "OpenCode 会话"))[:80],
             "session_id": session_id,
+            "last_output": last_output,
         }
     )
 
@@ -216,14 +227,21 @@ def _pending_pop_by_permission(permission_id: str):
 
 def _handle_permission_asked(data: dict) -> None:
     cfg = phone_config.load()
-    # 桌面横幅两条模式都发（与六端一致）；手机参与仅限「外出·手机优先」
+    permission_id = str(data.get("id") or "")
+    session_id = str(data.get("sessionID") or "")
+    # 桌面横幅两条模式都发（与六端一致）；话题名称取会话标题，取不到用兜底词
     if cfg.get("desktop", True):
-        deskqueue.queue_notify("OpenCode", "有权限请求需要处理")
+        topic = "OpenCode 会话"
+        try:
+            base, password = opencode_client.resolve_connection()
+            info = opencode_client.get_session(session_id, base, password)
+            topic = str(info.get("title") or "").strip() or topic
+        except opencode_client.OpenCodeError:
+            pass
+        deskqueue.queue_notify(*format_notice(topic, "权限申请", "OpenCode"))
     if not (cfg.get("enabled") and cfg.get("topic")
             and cfg.get("hook", {}).get("mode") == "out"):
         return
-    permission_id = str(data.get("id") or "")
-    session_id = str(data.get("sessionID") or "")
     if not permission_id or not session_id:
         return
     base, password = opencode_client.resolve_connection()

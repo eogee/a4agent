@@ -426,6 +426,22 @@ def parse_output(messages: list[dict], session: dict | None = None,
     return {"ok": True, "text": text, "error": "", "usage": usage}
 
 
+def last_assistant_text(messages: list[dict]) -> str:
+    """最后一条带文本的 assistant 消息的文本——会话通知的「AI 最后输出」。
+
+    与 parse_output 的 text（全部文本块拼接）不同：多轮会话里中间轮的
+    过程叙述不算产出，手机上用户想看的是收尾那段话。
+    """
+    for m in reversed(list(_iter_assistant(messages))):
+        parts = [str(p.get("text") or "").strip()
+                 for p in (m.get("content") or [])
+                 if isinstance(p, dict) and p.get("type") == "text"]
+        parts = [t for t in parts if t]
+        if parts:
+            return "\n".join(parts)
+    return ""
+
+
 # ---------------- 事件订阅（SSE） ----------------
 
 

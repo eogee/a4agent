@@ -381,10 +381,13 @@ def _subscribe_task_notifications(win) -> None:
     from backend.app.phone.notifier import compose
 
     def on_event(event: dict) -> None:
-        if _STATE["visible"]:
+        visible = _STATE["visible"]
+        # 下发任务窗口可见时不弹（页面自己有应用内提示，避免双重打扰）；
+        # OpenCode 会话终局发生在应用之外、页面内没有任何提示，与六端同权总要弹
+        if visible and not event.get("session_id"):
             return
-        # Window 没有 visible 属性，可见性由 on_closing / wake 自己记
-        task_notify.flash_taskbar(_hwnd_of(win))
+        if not visible:
+            task_notify.flash_taskbar(_hwnd_of(win))
         title, message = compose(event)
         win_toast.show(title, message, on_click=lambda: _wake(win))
 

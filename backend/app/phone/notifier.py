@@ -11,44 +11,67 @@ from . import config, ntfy
 
 logger = logging.getLogger(__name__)
 
-# (标题状态词, 推送图标)；cancelled 默认不推，开关见 config.DEFAULT_EVENTS
+# 通知类型词（统一样式第 2 行）；cancelled 默认不推手机，开关见 config.DEFAULT_EVENTS
 _STATUS_META = {
-    "success": ("已完成", "✅"),
-    "failed": ("失败", "❌"),
-    "timeout": ("超时", "⏱"),
-    "cancelled": ("已取消", "🚫"),
+    "success": "已完成",
+    "failed": "失败",
+    "timeout": "超时",
+    "cancelled": "已取消",
 }
 
-# OpenCode 侧发起的会话（不是 a4agent 下发的任务）标题前缀：说清来源，
-# 免得手机上一条「任务 #xxx 已完成」让人误以为是本地队列里的任务。
-_OC_SESSION_PREFIX = "OpenCode "
+_ERROR_MAX = 200
+# 「AI 最后输出」推送截断，与 hooks.transcript.MAX_LENGTH 同限
+_LAST_OUTPUT_MAX = 1000
 
 _registered = False
 _register_lock = threading.Lock()
 
 
-def compose(event: dict) -> tuple[str, str]:
-    """事件 → (标题, 正文)。纯函数便于测试。"""
-    task_id = event.get("id")
-    status = event.get("status", "")
-    meta = _STATUS_META.get(status)
-    status_word, icon = meta if meta else (status or "结束", "🔔")
+def format_notice(topic: str, type_word: str, app: str, last_output: str = "",
+                  include_last_output: bool = False) -> tuple[str, str]:
+    """统一通知样式（用户定稿）：标题=话题名称，正文=类型\\n应用名称。
+
+    两条链（hook / 任务）的桌面横幅与手机推送全部走这里，样式只有这一份；
+    原生 toast 的来源区（logo + a4agent）由系统按 AUMID 自带，不用拼。
+    include_last_output 只给手机推送开：追加「AI 最后输出」段，桌面横幅
+    短版不带——1000 字会把系统 toast 撑爆。
+    """
+    title = (topic or "").strip() or "a4agent 通知"
+    message = f"{type_word}\n{app}"
+    last = (last_output or "").strip()
+    if include_last_output and last:
+        message += (f"\n\nAI 最后输出：\n{last[:_LAST_OUTPUT_MAX]}"
+                    + ("..." if len(last) > _LAST_OUTPUT_MAX else ""))
+    return title, message
+
+
+def compose(event: dict, include_last_output: bool = False) -> tuple[str, str]:
+    """任务链事件 → 统一样式。纯函数便于测试。
+
+    下发任务第三行带任务编号（用户决议保留）：任务 #7 · Claude Code；
+    OpenCode 会话事件没有编号，第三行就是 OpenCode。
+    """
+    status = str(event.get("status") or "")
+    type_word = _STATUS_META.get(status, status or "通知")
     label = task_engines.ENGINE_LABELS.get(event.get("tool", ""), event.get("tool", ""))
-    # 会话来源的事件（OpenCode 网页端里发起的活）没有本地任务号，
-    # 标题改用来源前缀，不假装它是队列里的第几号任务。
     if event.get("session_id"):
-        title = f"{_OC_SESSION_PREFIX}{status_word}"
+        app = label
     else:
-        title = f"任务 #{task_id} {status_word}"
-    message = f"{icon} [{label}] {event.get('prompt', '')}"
+        app = f"任务 #{event.get('id')} · {label}"
+    title = str(event.get("prompt") or "").strip() or "a4agent 通知"
+    message = f"{type_word}\n{app}"
     error = (event.get("error") or "").strip()
     if error and status != "success":
-        message += f"\n{error}"
+        message += f"\n{error[:_ERROR_MAX]}" + ("..." if len(error) > _ERROR_MAX else "")
+    last = str(event.get("last_output") or "").strip()
+    if include_last_output and last:
+        message += (f"\n\nAI 最后输出：\n{last[:_LAST_OUTPUT_MAX]}"
+                    + ("..." if len(last) > _LAST_OUTPUT_MAX else ""))
     return title, message
 
 
 def _deliver(cfg: dict, event: dict) -> None:
-    title, message = compose(event)
+    title, message = compose(event, include_last_output=True)
     ok, reason = ntfy.publish(cfg, title, message)
     if not ok:
         logger.warning("任务 #%s 手机通知未送达：%s", event.get("id"), reason)
