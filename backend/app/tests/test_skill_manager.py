@@ -31,6 +31,7 @@ def env(tmp_path, monkeypatch):
         "zcode": tmp_path / "zcode-skills",
         "pi": tmp_path / "pi-skills",
         "qoder": tmp_path / "qoder-skills",
+        "opencode": tmp_path / "opencode-skills",
         "projects_root": tmp_path / "projects",
     }
     monkeypatch.setenv("A4AGENT_DATA_DIR", str(ctx["data"]))
@@ -40,7 +41,10 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("A4AGENT_ZCODE_SKILLS_PATH", str(ctx["zcode"]))
     monkeypatch.setenv("A4AGENT_PI_SKILLS_PATH", str(ctx["pi"]))
     monkeypatch.setenv("A4AGENT_QODER_SKILLS_PATH", str(ctx["qoder"]))
-    for key in ("claude", "codex", "dsh", "zcode", "pi", "qoder"):
+    # OpenCode 根同样必须隔离：漏设会让发现流程扫描用户真实的
+    # ~/.config/opencode/skills，其内容会污染「发现结果应当只有这些」的断言
+    monkeypatch.setenv("A4AGENT_OPENCODE_SKILLS_PATH", str(ctx["opencode"]))
+    for key in ("claude", "codex", "dsh", "zcode", "pi", "qoder", "opencode"):
         ctx[key].mkdir(parents=True)
     ctx["projects_root"].mkdir(parents=True)
     # 项目根指向临时目录下的 projects_root

@@ -19,6 +19,10 @@ _STATUS_META = {
     "cancelled": ("已取消", "🚫"),
 }
 
+# OpenCode 侧发起的会话（不是 a4agent 下发的任务）标题前缀：说清来源，
+# 免得手机上一条「任务 #xxx 已完成」让人误以为是本地队列里的任务。
+_OC_SESSION_PREFIX = "OpenCode "
+
 _registered = False
 _register_lock = threading.Lock()
 
@@ -30,7 +34,12 @@ def compose(event: dict) -> tuple[str, str]:
     meta = _STATUS_META.get(status)
     status_word, icon = meta if meta else (status or "结束", "🔔")
     label = task_engines.ENGINE_LABELS.get(event.get("tool", ""), event.get("tool", ""))
-    title = f"任务 #{task_id} {status_word}"
+    # 会话来源的事件（OpenCode 网页端里发起的活）没有本地任务号，
+    # 标题改用来源前缀，不假装它是队列里的第几号任务。
+    if event.get("session_id"):
+        title = f"{_OC_SESSION_PREFIX}{status_word}"
+    else:
+        title = f"任务 #{task_id} {status_word}"
     message = f"{icon} [{label}] {event.get('prompt', '')}"
     error = (event.get("error") or "").strip()
     if error and status != "success":

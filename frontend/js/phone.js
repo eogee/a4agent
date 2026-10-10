@@ -119,6 +119,32 @@ layui.use(['layer', 'form', 'element'], function () {
       '</div>' +
       '<div class="phone-col-right">' +
       '<div class="task-form phone-hook-card">' +
+        '<div class="task-form-head">OpenCode 接入' +
+          '<span class="task-active-config">接管正在运行的 OpenCode：任务下发 + 终局提醒</span></div>' +
+        '<div class="task-form-row">' +
+          '<label>启用接入</label>' +
+          '<input type="checkbox" id="oc-enabled">' +
+          '<span class="phone-hint">开启后，「任务下发」可选择 OpenCode 作为引擎，并接收其会话终局提醒</span>' +
+        '</div>' +
+        '<div class="task-form-row">' +
+          '<label>服务地址</label>' +
+          '<input type="text" id="oc-base" class="layui-input phone-input" placeholder="http://127.0.0.1:49374">' +
+        '</div>' +
+        '<div class="task-form-row">' +
+          '<label>服务密码</label>' +
+          '<input type="password" id="oc-password" class="layui-input phone-input" autocomplete="new-password" ' +
+            'placeholder="本机模式留空：自动读取 ~/.config/opencode/service.json">' +
+        '</div>' +
+        '<div class="task-form-row phone-actions">' +
+          '<button class="layui-btn layui-btn-normal layui-btn-sm" id="oc-save">保存</button>' +
+          '<button class="layui-btn layui-btn-sm" id="oc-test">测试连接</button>' +
+          '<span class="phone-chan-item" style="margin-left:8px;">' +
+            '<i class="phone-chan-dot" id="oc-dot"></i>状态 <b id="oc-state">未启用</b></span>' +
+        '</div>' +
+        '<div class="phone-sec-tip">本机装了 OpenCode 即可直接用：a4agent 会自动读取它的服务密码与默认端口。' +
+          '密码用 Windows DPAPI 加密存储，界面永不回显；远程服务需填写上面的地址与密码（留空表示沿用本机配置）。</div>' +
+      '</div>' +
+      '<div class="task-form phone-hook-card">' +
         '<div class="task-form-head">会话交互' +
           '<span class="task-active-config">终端里 AI 的提问 / 权限请求推手机作答（Claude Code 等）</span></div>' +
         '<div class="task-form-row">' +
@@ -339,16 +365,103 @@ layui.use(['layer', 'form', 'element'], function () {
     });
   }
 
+  /* ---------- OpenCode 接入 ---------- */
+  var OC_API = '/api/v1/opencode';
+
+  function ocGet(path) {
+    return fetch(OC_API + path, { headers: { 'Content-Type': 'application/json' } })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          if (!r.ok) throw new Error(parseError(j, r.status));
+          return j;
+        });
+      });
+  }
+
+  function ocSend(path, method, body) {
+    return fetch(OC_API + path, {
+      method: method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    }).then(function (r) {
+      return r.json().then(function (j) {
+        if (!r.ok) throw new Error(parseError(j, r.status));
+        return j;
+      });
+    });
+  }
+
+  function renderOcStatus(st) {
+    var box = document.getElementById('oc-state');
+    var dot = document.getElementById('oc-dot');
+    if (!box || !dot) return;
+    if (!st.enabled) {
+      box.textContent = '未启用';
+      dot.className = 'phone-chan-dot';
+    } else if (st.reachable) {
+      box.textContent = '已连接 · v' + (st.version || '?');
+      dot.className = 'phone-chan-dot is-on';
+    } else {
+      box.textContent = st.detail || '未连接';
+      dot.className = 'phone-chan-dot is-off';
+    }
+  }
+
+  function fillOcForm(st) {
+    document.getElementById('oc-enabled').checked = !!st.enabled;
+    document.getElementById('oc-base').value = st.base_url || '';
+    // 密码不回显：留空表示保持原样（后端按此语义处理）
+    document.getElementById('oc-password').value = '';
+    renderOcStatus(st);
+  }
+
+  function readOcForm() {
+    return {
+      enabled: document.getElementById('oc-enabled').checked,
+      base_url: document.getElementById('oc-base').value.trim(),
+      password: document.getElementById('oc-password').value
+    };
+  }
+
+  function ocSave() {
+    return ocSend('/config', 'PUT', readOcForm()).then(fillOcForm);
+  }
+
+  function bindOcActions() {
+    document.getElementById('oc-save').addEventListener('click', function () {
+      ocSave().then(function () { layer.msg('已保存', { icon: 1 }); })
+        .catch(function (e) { layer.msg(e.message, { icon: 2 }); });
+    });
+    document.getElementById('oc-test').addEventListener('click', function () {
+      ocSave().then(function () { return ocSend('/test', 'POST'); })
+        .then(function (st) {
+          renderOcStatus(st);
+          if (st.reachable) {
+            layer.msg('已连接 OpenCode ' + (st.version || '') + '，任务下发可选用它', { icon: 1 });
+          } else {
+            layer.alert('连接失败：' + (st.detail || '未知原因'), { icon: 2, title: 'OpenCode 连接' });
+          }
+        })
+        .catch(function (e) { layer.alert(e.message, { icon: 2, title: 'OpenCode 连接' }); });
+    });
+  }
+
   function boot() {
     renderShell();
     bindActions();
     bindHookActions();
+    bindOcActions();
     apiGet('/config').then(fillForm)
       .catch(function (e) {
         var box = document.getElementById('phone-content');
         if (box) box.innerHTML = '<div class="empty-tip">加载失败：' + escapeHtml(e.message) + '</div>';
       });
     loadHookStatus().catch(function () { /* hook 区随主配置一起由空态兜底 */ });
+    ocGet('/config').then(fillOcForm)
+      .catch(function (e) {
+        var box = document.getElementById('oc-state');
+        if (box) box.textContent = '读取失败：' + e.message;
+      });
   }
 
   window.addEventListener('main-tab-changed', function (e) {

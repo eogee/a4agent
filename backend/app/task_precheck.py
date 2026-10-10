@@ -183,6 +183,23 @@ def _read_user_config_signal(tool: str) -> tuple[bool, str]:
             # 加密，本工具读不到内容：不能据此判「未就绪」（那会短路第三步
             # 实测，qoder 任务将永远无法下发），就绪与否交由实测给出真实答案
             return True, "配置经专有加密无法读取，跳过就绪判断，以实测结果为准"
+        if tool == "opencode":
+            # 服务端有一份权威的模型清单（GET /api/model）。这里不比对用户选了
+            # 哪个模型——那是用户的自由度——只确认「至少有一个可用模型」。
+            #
+            # ⚠️ 实测坑：enabled=true **不等于能用**。本机清单首项 exo-free 已
+            # 废弃，服务端仍标 enabled=true，真跑才报 provider.invalid-request。
+            # 因此这里只作为「有没有配」的粗判，废弃一类问题交给第三步实测暴露，
+            # 不在此处宣称「模型可用」。
+            from . import opencode_client
+
+            base, password = opencode_client.resolve_connection()
+            data = opencode_client.api("GET", "/api/model", base_url=base, password=password,
+                                       timeout=TIMEOUT_SECONDS)
+            rows = (data or {}).get("data") if isinstance(data, dict) else None
+            if isinstance(rows, list) and rows:
+                return True, f"服务端列出 {len(rows)} 个模型（是否真正可用以下一步实测为准）"
+            return False, "OpenCode 服务端没有可用模型，请在 OpenCode 里完成模型配置"
     except Exception as e:  # 读配置失败不应让整个预检崩掉
         return False, f"读取 {tool} 配置失败（{e}），请以实测结果为准"
     return False, f"请先在 {hint}"
@@ -208,6 +225,9 @@ def smoke_run(tool: str, timeout: int = 90) -> dict:
     重复传工作目录，与 task_runner._run_cli 保持同一种处理方式。
     """
     from . import task_engines
+
+    if tool in task_engines.HTTP_ENGINES:
+        return _smoke_run_http(tool, timeout)
 
     try:
         argv = task_engines.build_argv(tool, "回复 ok 两个字即可")
@@ -241,6 +261,60 @@ def smoke_run(tool: str, timeout: int = 90) -> dict:
     parsed = task_engines.parse_output(tool, merged, done.returncode)
     if parsed["ok"]:
         return {"ok": True, "detail": "实测通过，引擎可用"}
+    return {"ok": False, "detail": f"实测未通过：{parsed['error']}"}
+
+
+def _smoke_run_http(tool: str, timeout: int) -> dict:
+    """HTTP 引擎（OpenCode）的实测：建会话 → 等空闲 → 读终态 → 删会话。
+
+    与 CLI 实测同口径同承诺（真的跑一次、拿到产出才算通过），只是执行载体换成
+    HTTP 会话。会话用完即删，绝不在用户 OpenCode 里堆测试会话。
+
+    **实测发现的必要性**：服务端默认模型可能已废弃而清单里仍标 enabled=true，
+    所以「有模型」这第二步挡不住这类故障——第三步真的跑一次、并按错误内容换
+    候选模型再试，才是唯一可靠的判据。预检若在这里把废弃模型判成可用，
+    用户每次下发都会失败一次才看到同样的原因。
+    """
+    from . import opencode_client
+    from .task_runner import _model_rejected
+
+    base, password = opencode_client.resolve_connection()
+
+    def attempt(model) -> tuple[dict, list]:
+        """跑一次实测，返回 (parsed, messages)。"""
+        sid = ""
+        try:
+            sid = opencode_client.create_session("回复 ok 两个字即可", model=model,
+                                                 base_url=base, password=password)
+            idle = opencode_client.wait_idle(sid, base, password, timeout=float(timeout))
+            if not idle:
+                opencode_client.interrupt(sid, base, password)
+                return ({"ok": False, "text": "", "usage": {},
+                         "error": f"实测超时（{timeout}s），OpenCode 会话未在时限内结束"}, [])
+            session = opencode_client.get_session(sid, base, password)
+            messages = opencode_client.list_messages(sid, base, password)
+            return (opencode_client.parse_output(messages, session), messages)
+        except opencode_client.OpenCodeError as e:
+            return ({"ok": False, "text": "", "error": str(e), "usage": {}}, [])
+        finally:
+            if sid:
+                opencode_client.delete_session(sid, base, password)
+
+    parsed, messages = attempt(None)
+    if parsed["ok"]:
+        return {"ok": True, "detail": "实测通过，引擎可用"}
+    if not _model_rejected(parsed, messages):
+        return {"ok": False, "detail": f"实测未通过：{parsed['error']}"}
+    try:
+        candidates = opencode_client.candidate_models(base, password)
+    except opencode_client.OpenCodeError:
+        candidates = []
+    for model in candidates:
+        parsed, messages = attempt(model)
+        if parsed["ok"]:
+            return {"ok": True, "detail": f"实测通过（已避开不可用模型 {model['id']}）"}
+        if not _model_rejected(parsed, messages):
+            break
     return {"ok": False, "detail": f"实测未通过：{parsed['error']}"}
 
 

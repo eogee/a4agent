@@ -106,14 +106,14 @@ class ProjectRootsIn(BaseModel):
 
 class SkillSourceIn(BaseModel):
     scope: str = Field(pattern="^(global|project)$")
-    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi)$")
+    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode)$")
     project: Optional[str] = None
     name: str  # frontmatter name 或目录名
 
 
 class SkillTargetIn(BaseModel):
     scope: str = Field(pattern="^(global|project)$")
-    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi)$")
+    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode)$")
     project: Optional[str] = None
     # 自选项目文件夹（绝对路径）：提供时优先于 project 名，.{tool}/skills 缺失会自动创建
     project_root: Optional[str] = None
@@ -129,14 +129,14 @@ class SkillMigrateIn(BaseModel):
 
 class McpSourceIn(BaseModel):
     scope: str = Field(pattern="^(global|project)$")
-    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi)$")
+    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode)$")
     project: Optional[str] = None
     name: str  # server 名
 
 
 class McpTargetIn(BaseModel):
     scope: str = Field(pattern="^(global|project)$")
-    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi)$")
+    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode)$")
     project: Optional[str] = None
 
 
@@ -149,7 +149,7 @@ class McpServerRefIn(BaseModel):
     """定位某端某个 server（删除 / 详情）。"""
 
     scope: str = Field(pattern="^(global|project)$")
-    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi)$")
+    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode)$")
     project: Optional[str] = None
     name: str
 
@@ -165,7 +165,7 @@ class McpServerCreate(BaseModel):
     """向指定端安装（新建）一个 MCP server。"""
 
     scope: str = Field(pattern="^(global|project)$")
-    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi)$")
+    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode)$")
     project: Optional[str] = None
     name: str
     transport: str = Field(pattern="^(stdio|http|sse)$")
@@ -182,7 +182,7 @@ class McpImportIn(BaseModel):
     """粘贴 JSON 配置片段批量安装（兼容 mcpServers 顶层 / server 字典 / 单对象）。"""
 
     scope: str = Field(pattern="^(global|project)$")
-    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi)$")
+    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode)$")
     project: Optional[str] = None
     config_json: str
 
@@ -192,7 +192,7 @@ class McpImportIn(BaseModel):
 
 class TaskCreate(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
-    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi)$", description="无头引擎")
+    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode)$", description="无头引擎")
     working_dir: Optional[str] = None
     timeout_seconds: Optional[int] = Field(default=None, ge=30, le=3600)
 

@@ -1,10 +1,20 @@
-"""Skill 管理：六端（Claude Code / Codex / dsh / zcode / pi / Qoder）skill 发现、迁移、回收站。
+"""Skill 管理：七端（Claude Code / Codex / dsh / zcode / pi / Qoder / OpenCode）
+skill 发现、迁移、回收站。
 
-六端均采用「<skill-name>/SKILL.md 目录 bundle + frontmatter（name/description）」
+各端均采用「<skill-name>/SKILL.md 目录 bundle + frontmatter（name/description）」
 格式，因此迁移即目录复制。本模块职责：
 
-- 路径解析：六端全局根（含 A4AGENT_*_SKILLS_PATH 环境变量覆盖）+ 可配置项目根
+- 路径解析：七端全局根（含 A4AGENT_*_SKILLS_PATH 环境变量覆盖）+ 可配置项目根
   列表下的项目级根；项目根列表持久化到 get_data_dir()/projects.json。
+
+OpenCode 的两处特例（其余六端沿用既有口径）：
+- **身份是目录名**：技能 ID 由路径派生、大小写敏感，frontmatter name 只是显示名。
+  因此聚合键与冲突判定在 opencode 端按 dir_name（见 _scan_root / _aggregate /
+  _trash_existing_conflicts），显示名仍取 frontmatter name。
+- **兼容目录重叠**：OpenCode 除自有目录外还自动发现 ~/.claude/skills、
+  ~/.agents/skills 及其项目级对应目录，而 .claude 是 Claude 端、.agents 是
+  ZCode/Qoder 的跨工具目录。这类条目会被标注 opencode_visible=True，
+  界面明示「OpenCode 已可见」，避免重复迁移与端数双计。
 - 发现：扫描各根下的 skill bundle，以 frontmatter name 为唯一标识做聚合与
   重复标注（「已在 N 端存在」）；Codex 全局根的保留目录 .system/ 等点开头
   目录一律跳过，不视为用户 skill。
@@ -30,7 +40,7 @@ from .env_compat import env_first
 
 logger = logging.getLogger(__name__)
 
-TOOLS = ("claude", "codex", "dsh", "zcode", "pi", "qoder")
+TOOLS = ("claude", "codex", "dsh", "zcode", "pi", "qoder", "opencode")
 TOOL_LABELS = {
     "claude": "Claude",
     "codex": "Codex",
@@ -38,6 +48,7 @@ TOOL_LABELS = {
     "zcode": "ZCode",
     "pi": "pi",
     "qoder": "Qoder",
+    "opencode": "OpenCode",
 }
 SKILL_FILE = "SKILL.md"
 TRASH_DIR_NAME = "skills_recycle"
@@ -104,8 +115,39 @@ def qoder_skills_root() -> Path:
     return config_manager.qoder_skills_root()
 
 
+def opencode_skills_root() -> Path:
+    """OpenCode 全局 skill 根，可用环境变量 A4AGENT_OPENCODE_SKILLS_PATH 覆盖。
+
+    官方发现路径是 ~/.config/opencode/skills（不是 ~/.opencode/skills）——
+    OpenCode 的用户级数据统一在 ~/.config/opencode 下，与其它端「~/.<tool>/」
+    的约定不同。项目级则是 <项目>/.opencode/skills，正好命中 project_skill_roots
+    的 .{tool}/skills 通用公式，无需特判。
+
+    本工具只托管自有目录，不碰 ~/.claude/skills、~/.agents/skills 等兼容目录
+    （见 opencode_compat_roots）。
+    """
+    override = env_first("A4AGENT_OPENCODE_SKILLS_PATH", "A4API_OPENCODE_SKILLS_PATH")
+    if override:
+        return Path(override)
+    return Path.home() / ".config" / "opencode" / "skills"
+
+
+def opencode_compat_roots(project_path: Path | None = None) -> list[Path]:
+    """OpenCode 除自有目录外还会自动发现的兼容 skill 根。
+
+    官方把 ~/.claude/skills、~/.agents/skills 与项目级对应目录列为兼容来源。
+    这些目录里的 skill 在 OpenCode 端天然可用，但物理归属仍是 Claude /
+    ZCode / Qoder 端——a4agent 据此标注「OpenCode 已可见」，让界面能说清
+    「不必再迁一次」，而不是把它算成第八份副本。
+    """
+    if project_path is not None:
+        return [project_path / ".claude" / "skills",
+                project_path / ".agents" / "skills"]
+    return [claude_skills_root(), Path.home() / ".agents" / "skills"]
+
+
 def global_skill_roots() -> dict:
-    """六端全局 skill 根映射 {tool: Path}。"""
+    """七端全局 skill 根映射 {tool: Path}。"""
     return {
         "claude": claude_skills_root(),
         "codex": codex_skills_root(),
@@ -113,6 +155,7 @@ def global_skill_roots() -> dict:
         "zcode": zcode_skills_root(),
         "pi": pi_skills_root(),
         "qoder": qoder_skills_root(),
+        "opencode": opencode_skills_root(),
     }
 
 
@@ -281,6 +324,44 @@ def pi_skill_notice(skill_dir: Path) -> str:
     return "；".join(problems)
 
 
+def opencode_skill_notice(skill_dir: Path) -> str:
+    """返回该 skill 在 OpenCode 端的使用提示（多条以 ； 分隔）；无提示返回空串。
+
+    OpenCode V2 的判定口径与 pi 相反：它**不强制**任何命名规范，因此这里没有
+    pi 那种「不合规直接不加载」的硬拦截，只有两类真会影响实际使用的情况值得
+    提前告知：
+
+    - 缺 description：该 skill 不会被广告给模型（等于装了没生效）
+    - autoinvoke 关闭：技能仍注册，但不会出现在模型可用列表里
+
+    另外提示 ID 由目录名派生：frontmatter name 与目录名不一致时，用户在
+    @skill-id 里要用的其实是目录名。
+    """
+    md = skill_dir / SKILL_FILE
+    if not md.exists():
+        return ""
+    try:
+        meta, _ = parse_frontmatter(md.read_text(encoding="utf-8-sig"))
+    except OSError:
+        return ""
+    problems: list[str] = []
+    name = str(meta.get("name") or "").strip()
+    desc = meta.get("description")
+    if not (isinstance(desc, str) and desc.strip()):
+        problems.append("OpenCode 要求 frontmatter 有非空 description，否则不会推荐给模型")
+    if name and name != skill_dir.name:
+        problems.append(
+            f"OpenCode 的技能 ID 取目录名「{skill_dir.name}」，"
+            f"frontmatter name「{name}」只作显示名"
+        )
+    if meta.get("disable-model-invocation") is True:
+        problems.append("该技能已设 disable-model-invocation，OpenCode 不会自动调用它")
+    auto = (meta.get("metadata") or {})
+    if isinstance(auto, dict) and auto.get("opencode/autoinvoke") is False:
+        problems.append("该技能已设 metadata.opencode/autoinvoke: false，OpenCode 不会自动调用它")
+    return "；".join(problems)
+
+
 def read_skill(skill_dir: Path, full: bool = False) -> dict | None:
     """读取 skill bundle 元数据；缺 SKILL.md 或目录不可读时返回 None。
 
@@ -313,6 +394,16 @@ def read_skill(skill_dir: Path, full: bool = False) -> dict | None:
     return info
 
 
+def _identity_key(info: dict, tool: str) -> str:
+    """同一上下文内的聚合键（仅供分组结果显示用）：绝大多数端是 frontmatter
+    name，OpenCode 是目录名。
+
+    真正的跨端同一性判定在 _aggregate：那里用「name 或 dir_name 任一命中」，
+    因为 OpenCode 的身份是 ID（目录名）而其余端是显示名，两边都得认。
+    """
+    return info["dir_name"] if tool == "opencode" else info["name"]
+
+
 def _scan_root(root: Path, tool: str, scope: str, project: str | None) -> list[dict]:
     """扫描一个 skill 根，返回其中合法 bundle 列表（跳过点开头目录如 Codex 的 .system/）。"""
     skills: list[dict] = []
@@ -331,32 +422,78 @@ def _scan_root(root: Path, tool: str, scope: str, project: str | None) -> list[d
         info["tool"] = tool
         info["scope"] = scope
         info["project"] = project
+        info["key"] = _identity_key(info, tool)
+        info["opencode_visible"] = False
         skills.append(info)
     return skills
 
 
+def _mark_opencode_visible(entries: list[dict], roots: list[Path]) -> None:
+    """标注落在 OpenCode 兼容目录里的条目（就地改写，标注理由）。
+
+    只标不搬：这些目录物理上属于 Claude / ZCode / Qoder 端，OpenCode 只是顺带
+    能看见。标注让界面能说清「这技能 OpenCode 已经能用」，从而不必再迁一份，
+    也避免把它误算成 OpenCode 端已托管。
+    """
+    keys = {_normkey(r): r for r in roots}
+    if not keys:
+        return
+    for entry in entries:
+        parent = _normkey(Path(entry["path"]).parent)
+        match = keys.get(parent)
+        if match is not None:
+            entry["opencode_visible"] = True
+            entry["opencode_via"] = str(match)
+
+
 def _aggregate(entries: list[dict]) -> list[dict]:
-    """同一上下文内按 frontmatter name 聚合，标注端数与是否重复。"""
+    """同一上下文内按身份键聚合，标注端数、是否重复与 OpenCode 兼容目录可见性。
+
+    跨端合并用「name 或 dir_name 任一命中」，与 _find_source 的定位口径一致。
+    这一条对 OpenCode 尤其重要：它的身份是 dir_name，若只按 name 合并，
+    一个「目录名 gamma、显示名 Shared」的 OpenCode 条目会与「frontmatter name
+    为 Shared」的 Claude 条目分家——用户看到的是同一个技能在两端各一张卡，
+    迁移与一键适配也随之失准。
+    """
     groups: dict[str, list[dict]] = {}
     order: list[str] = []
+    # 归一别名表：把同一实体的 name / dir_name 映射到同一个组键
+    alias: dict[str, str] = {}
+
+    def resolve(token: str) -> str | None:
+        return alias.get(token.lower())
+
     for entry in entries:
-        name = entry["name"]
-        if name not in groups:
-            groups[name] = []
-            order.append(name)
-        groups[name].append(entry)
+        key = entry.get("key") or entry["name"]
+        # OpenCode 条目只以 dir_name 入索引：它的 name 是显示标签而非身份，
+        # 若也参与别名，两个「显示名相同、ID 不同」的技能会被错并成一份
+        # （在 OpenCode 里它们是两个各自独立加载的技能）。
+        tokens = {entry["dir_name"]} if entry.get("tool") == "opencode" \
+            else {key, entry["name"], entry["dir_name"]}
+        found = {resolve(t) for t in tokens if resolve(t)}
+        group_key = found.pop() if found else key
+        for t in tokens:
+            alias[t.lower()] = group_key
+        if group_key not in groups:
+            groups[group_key] = []
+            order.append(group_key)
+        groups[group_key].append(entry)
     result = []
-    for name in sorted(order, key=str.lower):
-        copies = groups[name]
+    for key in sorted(order, key=str.lower):
+        copies = groups[key]
         ends = sorted({c["tool"] for c in copies}, key=TOOLS.index)
         first = copies[0]
+        visible = next((c for c in copies if c.get("opencode_visible")), None)
         result.append(
             {
-                "name": name,
+                "name": key,
+                "display_name": first["name"],
                 "description": first["description"],
                 "ends": ends,
                 "end_count": len(ends),
                 "duplicate": len(copies) > 1,
+                "opencode_visible": visible is not None,
+                "opencode_via": (visible or {}).get("opencode_via", ""),
                 "copies": copies,
             }
         )
@@ -364,11 +501,12 @@ def _aggregate(entries: list[dict]) -> list[dict]:
 
 
 def discover() -> dict:
-    """全量发现：全局上下文按 name 聚合；每个项目上下文各自聚合。"""
+    """全量发现：全局上下文按身份键聚合；每个项目上下文各自聚合。"""
     global_entries: list[dict] = []
     roots = global_skill_roots()
     for tool in TOOLS:
         global_entries.extend(_scan_root(roots[tool], tool, "global", None))
+    _mark_opencode_visible(global_entries, opencode_compat_roots())
 
     projects_out = []
     for proj in project_dirs():
@@ -378,6 +516,7 @@ def discover() -> dict:
             entries.extend(_scan_root(proots[tool], tool, "project", proj["project"]))
         if not entries:
             continue  # 只收录含至少一个 skill 的项目
+        _mark_opencode_visible(entries, opencode_compat_roots(proj["root"]))
         projects_out.append(
             {
                 "project": proj["project"],
@@ -669,9 +808,21 @@ def _find_source(descriptor: dict) -> tuple[Path, dict]:
     raise ValueError(f"在{where}{TOOL_LABELS.get(tool, tool)}端未找到 skill：{name}")
 
 
-def _trash_existing_conflicts(db, dest_root: Path, incoming_name: str, incoming_dir: str) -> int:
-    """目标根下已存在的同名 skill 先移入回收站，返回处理条数。"""
+def _trash_existing_conflicts(
+    db,
+    dest_root: Path,
+    incoming_name: str,
+    incoming_dir: str,
+    tool: str | None = None,
+) -> int:
+    """目标根下已存在的同名 skill 先移入回收站，返回处理条数。
+
+    判定口径跟目标端对齐：OpenCode 的技能身份是目录名，只有目录名相同才算同一
+    个技能。若沿用「目录名或 frontmatter name 任一命中」，会把一个仅显示名相同、
+    ID 实际不同的既有技能误删——那是在替用户销毁一个能正常工作的条目。
+    """
     moved = 0
+    dir_only = tool == "opencode"
     lowered_name = incoming_name.lower()
     lowered_dir = incoming_dir.lower()
     if not dest_root.is_dir():
@@ -682,7 +833,7 @@ def _trash_existing_conflicts(db, dest_root: Path, incoming_name: str, incoming_
         meta = read_skill(child)
         same_dir = child.name.lower() == lowered_dir
         same_name = bool(meta) and meta["name"].lower() == lowered_name
-        if not (same_dir or same_name):
+        if not (same_dir or (same_name and not dir_only)):
             continue
         location = skill_location(child)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -811,7 +962,9 @@ def migrate(db, sources: list[dict], targets: list[dict]) -> dict:
                     dest_root = _root_for(t_scope, t_tool, t_project)
                 dest_root.mkdir(parents=True, exist_ok=True)
                 dest = dest_root / src.name
-                trashed = _trash_existing_conflicts(db, dest_root, entry["name"], src.name)
+                trashed = _trash_existing_conflicts(
+                    db, dest_root, entry["name"], src.name, tool=t_tool
+                )
                 conflicts += trashed
                 shutil.copytree(src, dest)
                 migrated += 1
@@ -822,6 +975,10 @@ def migrate(db, sources: list[dict], targets: list[dict]) -> dict:
                     notice = pi_skill_notice(dest)
                     if notice:
                         detail += f"；⚠ pi 不会加载该 skill：{notice}"
+                elif t_tool == "opencode":
+                    notice = opencode_skill_notice(dest)
+                    if notice:
+                        detail += f"；⚠ OpenCode 端注意：{notice}"
                 db.add(models.SkillMigration(**base, status="success", detail=detail))
                 results.append(
                     {

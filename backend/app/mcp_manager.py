@@ -49,7 +49,7 @@ except ModuleNotFoundError:  # Python 3.10
 
 logger = logging.getLogger(__name__)
 
-TOOLS = ("claude", "codex", "dsh", "zcode", "pi", "qoder")
+TOOLS = ("claude", "codex", "dsh", "zcode", "pi", "qoder", "opencode")
 TOOL_LABELS = {
     "claude": "Claude",
     "codex": "Codex",
@@ -57,6 +57,7 @@ TOOL_LABELS = {
     "zcode": "ZCode",
     "pi": "pi",
     "qoder": "Qoder",
+    "opencode": "OpenCode",
 }
 TRASH_DIR_NAME = "mcp_recycle"
 TRASH_KEEP_DAYS = 30
@@ -77,7 +78,14 @@ TRANSPORT_CAPABILITY = {
     "zcode": {"stdio", "sse", "http"},  # 官方 schema 明确支持三种传输
     "pi": {"stdio", "http"},  # pi 明确拒绝 legacy SSE，只认 stdio / streamable HTTP
     "qoder": {"stdio", "sse", "http"},  # 与 claude 同构，三种传输都认
+    # OpenCode 只有两种传输：type=local 走 stdio，type=remote 走 Streamable HTTP，
+    # 配置里**没有 legacy sse 的位置**——迁移到它的 sse 条目整对失败，不静默降级。
+    "opencode": {"stdio", "http"},
 }
+
+# OpenCode 的 schema 严格（未知键会被丢弃），归一化时把规范字段收走，
+# 其余（codemode / timeout / protocol / oauth / disabled 等）进 extra 无损保留。
+OPENCODE_SERVER_OWNED_KEYS = ("type", "command", "cwd", "environment", "url", "headers")
 
 # dsh 项目级不支持（cordis 配置为全局 profile 层）；zcode 项目级支持
 # （<repo>/.zcode/config.json → mcp.servers）；pi 项目级支持
@@ -91,6 +99,9 @@ DASH_SCOPE_CAPABILITY = {
     "zcode": ("global", "project"),
     "pi": ("global", "project"),
     "qoder": ("global",),
+    # OpenCode 全局 ~/.config/opencode/opencode.json(c)、项目 <repo>/opencode.json(c)
+    # 或 <repo>/.opencode/opencode.json(c)，两端都是它自己的文件，无跨端复用问题。
+    "opencode": ("global", "project"),
 }
 
 # ---------------- MCP 简介知识库 ----------------
@@ -329,6 +340,54 @@ def qoder_mcp_path() -> Path:
     return config_manager.qoder_home() / "mcp.json"
 
 
+def opencode_config_dir() -> Path:
+    """OpenCode 用户级配置目录 ~/.config/opencode（与 skill 根同处）。"""
+    override = os.environ.get("A4AGENT_OPENCODE_CONFIG_DIR")
+    if override:
+        return Path(override)
+    return Path.home() / ".config" / "opencode"
+
+
+def opencode_mcp_path() -> Path:
+    """OpenCode 全局配置：~/.config/opencode/opencode.json(c) 的 mcp.servers。
+
+    OpenCode 同时认 .json 与 .jsonc（后者可带注释与尾逗号），因此写入前先探测
+    哪个文件真实存在：已存在的 jsonc 绝不降级写成 json，否则会把用户手写的
+    注释一起格式化掉。两个都不存在时按官方首选新建 .jsonc。
+    """
+    base = opencode_config_dir()
+    jsonc = base / "opencode.jsonc"
+    if jsonc.is_file():
+        return jsonc
+    plain = base / "opencode.json"
+    if plain.is_file():
+        return plain
+    return jsonc
+
+
+def opencode_project_mcp_path(project_root: Path) -> Path:
+    """OpenCode 项目级配置路径。
+
+    官方合并规则是「从当前目录逐级向上，先合并直接文件，再合并 .opencode 里的，
+    **.opencode 覆盖同名键**」。因此当四个候选同时存在时，真正生效的是
+    .opencode 那一份——按低优先级顺序探测会把配置写进被覆盖的文件，
+    写完 OpenCode 根本不读，等于静默失效。
+
+    故按生效优先级从高到低探测；都不存在时新建在 .opencode/opencode.jsonc
+    （与项目级 skill 的 .opencode 约定同处，也避免日后用户加的根级文件把它盖掉）。
+    """
+    candidates = [
+        project_root / ".opencode" / "opencode.jsonc",
+        project_root / ".opencode" / "opencode.json",
+        project_root / "opencode.jsonc",
+        project_root / "opencode.json",
+    ]
+    for path in candidates:
+        if path.is_file():
+            return path
+    return candidates[0]
+
+
 def mcp_config_file(scope: str, tool: str, project: str | None) -> Path:
     """(scope, tool, project) → 配置文件路径；未知组合抛 ValueError。"""
     if scope == "global":
@@ -344,6 +403,8 @@ def mcp_config_file(scope: str, tool: str, project: str | None) -> Path:
             return pi_mcp_path()
         if tool == "qoder":
             return qoder_mcp_path()
+        if tool == "opencode":
+            return opencode_mcp_path()
     if scope == "project":
         if not project:
             raise ValueError("项目级位置缺少项目名")
@@ -362,6 +423,8 @@ def mcp_config_file(scope: str, tool: str, project: str | None) -> Path:
             return zcode_project_mcp_path(root)
         if tool == "pi":
             return pi_project_mcp_path(root)
+        if tool == "opencode":
+            return opencode_project_mcp_path(root)
         raise ValueError(f"{TOOL_LABELS[tool]} 端不支持项目级 MCP 配置")
     raise ValueError(f"未知 scope：{scope}")
 
@@ -734,6 +797,175 @@ def render_qoder(server: dict) -> dict:
     return out
 
 
+def loads_jsonc(text: str):
+    """解析 JSON/JSONC，返回对象；失败返回 None（不抛异常）。
+
+    降级顺序：标准 JSON → 去行/块注释 → 去尾逗号。字符串内的 // 与 /* 会被误伤，
+    故逐字符扫描并跟踪引号状态，而不是正则全文替换——配置文件里出现
+    "https://…" 这类值是常态，正则做法会把它改坏。
+    """
+    if text is None:
+        return None
+    try:
+        return json.loads(text)
+    except ValueError:
+        pass
+    try:
+        stripped = _strip_jsonc(text)
+        try:
+            return json.loads(stripped)
+        except ValueError:
+            return json.loads(_drop_trailing_commas(stripped))
+    except ValueError:
+        return None
+
+
+def _strip_jsonc(text: str) -> str:
+    """去掉注释，保留字符串字面量原样。"""
+    out: list[str] = []
+    i, n = 0, len(text)
+    in_str = False
+    while i < n:
+        ch = text[i]
+        if in_str:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                in_str = False
+            i += 1
+            continue
+        if ch == '"':
+            in_str = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "/" and i + 1 < n and text[i + 1] == "/":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if ch == "/" and i + 1 < n and text[i + 1] == "*":
+            i += 2
+            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+                i += 1
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _drop_trailing_commas(text: str) -> str:
+    """去掉对象/数组里末尾多余逗号（同样跳过字符串字面量）。"""
+    out: list[str] = []
+    i, n = 0, len(text)
+    in_str = False
+    while i < n:
+        ch = text[i]
+        if in_str:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                in_str = False
+            i += 1
+            continue
+        if ch == '"':
+            in_str = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == ",":
+            j = i + 1
+            while j < n and text[j] in " \t\r\n":
+                j += 1
+            if j < n and text[j] in "}]":
+                i += 1  # 丢弃这个逗号
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def normalize_opencode(name: str, raw: dict, path: Path, tool: str, scope: str, project: str | None) -> dict:
+    """OpenCode 的 server 条目 → 归一 schema。
+
+    两处形状差异必须在这里抹平，否则迁移中枢会错位：
+    - **命令是一个数组**：官方把可执行与参数合并成 `command: ["npx","-y","pkg"]`，
+      归一 schema 是 command + args，故按首个元素拆开；
+    - **环境变量键叫 environment**（不是 env）。
+
+    传输只有两种：type=local → stdio，type=remote → http。另有 codemode/timeout/
+    protocol/oauth/disabled 等自有键，收进 extra 原样保留，读写一个不动。
+    """
+    typ = str(raw.get("type") or "local").lower()
+    transport = "http" if typ == "remote" else "stdio"
+    raw_command = raw.get("command")
+    command: str | None = None
+    args: list[str] = []
+    if isinstance(raw_command, list) and raw_command:
+        command = str(raw_command[0])
+        args = [str(a) for a in raw_command[1:]]
+    elif isinstance(raw_command, str) and raw_command:
+        command = raw_command
+    server = {
+        "name": name,
+        "transport": transport,
+        "command": command,
+        "args": args,
+        "env": dict(raw.get("environment") or {}) if isinstance(raw.get("environment"), dict) else {},
+        "url": raw.get("url"),
+        "headers": dict(raw.get("headers") or {}) if isinstance(raw.get("headers"), dict) else {},
+        "cwd": raw.get("cwd"),
+        # OpenCode 的 schema 是严格的，写入未知键会被丢弃，因此 description
+        # 不能作为字段写回去——它只作为本地卡片介绍，不进配置文件。
+        "description": "",
+        "tool": tool,
+        "scope": scope,
+        "project": project,
+        "path": str(path),
+        "extra": {k: v for k, v in raw.items()
+                  if k not in OPENCODE_SERVER_OWNED_KEYS},
+    }
+    return server
+
+
+def render_opencode(server: dict) -> dict:
+    """归一 server → OpenCode 条目：command 合并成数组、environment 换名。
+
+    先铺 extra 再写规范字段：extra 里若残留同名字段（理论上不会，
+    OWNED_KEYS 已排除）由规范值覆盖，保证写出去的一定是官方 schema 认的形状。
+    """
+    out: dict = dict(server.get("extra") or {})
+    if server["transport"] == "http":
+        out["type"] = "remote"
+        if server.get("url"):
+            out["url"] = server["url"]
+        if server.get("headers"):
+            out["headers"] = dict(server["headers"])
+    else:
+        out["type"] = "local"
+        parts: list[str] = []
+        if server.get("command"):
+            # 原样写出，不套 _portable_command 的 .cmd 归一：OpenCode 侧是
+            # OpenCode 自己 spawn 这个进程，不是 a4agent；写 npx.cmd 反而
+            # 与用户在 OpenCode 界面里配置的写法不一致，也会让配置在非
+            # Windows 环境上失效。
+            parts.append(str(server["command"]))
+        parts.extend(str(a) for a in (server.get("args") or []))
+        if parts:
+            out["command"] = parts
+        if server.get("env"):
+            out["environment"] = dict(server["env"])
+        if server.get("cwd"):
+            out["cwd"] = server["cwd"]
+    return out
+
+
 # ---------------- 读取 ----------------
 
 
@@ -889,6 +1121,42 @@ def read_qoder_servers(path: Path, tool: str = "qoder", scope: str = "global", p
     return servers
 
 
+def read_opencode_servers(path: Path, tool: str = "opencode", scope: str = "global", project: str | None = None) -> list[dict]:
+    """读取 opencode.json(c) 的 mcp.servers。
+
+    JSONC 容错：官方允许注释与尾逗号，普通 json.loads 会直接失败。这里逐级降级
+    ——先试标准 JSON，再剥离行注释与块注释、去掉尾逗号后重试；仍失败则如实记日志
+    返回空列表，**绝不猜内容**（猜错等于静默改写用户的配置）。写入侧同样只产出
+    标准 JSON，因此新建/重写的文件始终是合法 JSONC。
+    """
+    if not path.exists():
+        return []
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError as e:
+        logger.warning("读取 %s 失败：%s", path, e)
+        return []
+    data = loads_jsonc(text)
+    if data is None:
+        logger.warning("解析 %s 失败：不是合法的 JSON/JSONC，已按「无可用 server」处理", path)
+        return []
+    if not isinstance(data, dict):
+        return []
+    mcp = data.get("mcp")
+    servers_map = mcp.get("servers") if isinstance(mcp, dict) else None
+    if not isinstance(servers_map, dict):
+        return []
+    servers = []
+    for name, raw in servers_map.items():
+        if not isinstance(raw, dict):
+            continue
+        try:
+            servers.append(normalize_opencode(str(name), raw, path, tool, scope, project))
+        except Exception:
+            continue
+    return servers
+
+
 def read_servers(scope: str, tool: str, project: str | None = None) -> list[dict]:
     """从指定位置读取归一 server 列表（文件不存在返回空）。"""
     path = mcp_config_file(scope, tool, project)
@@ -902,6 +1170,8 @@ def read_servers(scope: str, tool: str, project: str | None = None) -> list[dict
         return read_pi_servers(path, tool, scope, project)
     if tool == "qoder":
         return read_qoder_servers(path, tool, scope, project)
+    if tool == "opencode":
+        return read_opencode_servers(path, tool, scope, project)
     return read_dsh_servers(path, tool, scope, project)
 
 
@@ -1046,6 +1316,40 @@ def _write_qoder(path: Path, servers: list[dict]) -> None:
     _atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2))
 
 
+def _write_opencode(path: Path, servers: list[dict]) -> None:
+    """重写 opencode.json(c) 的 mcp.servers：只换该子树，其余顶层键原样保留。
+
+    与 Qoder 同款的中止原则：读取失败必须中止，不能按空配置重建——OpenCode 的
+    配置里还有 model / agents / permissions 等用户资产，重建等于清空。
+
+    关于注释：写入一律产出标准 JSON（合法 JSONC），因此不会写出语法错误，但用户
+    手写的注释会在这一个文件上丢失。取舍理由——a4agent 的写入都是「整子树替换」，
+    要保留注释就得实现带注释感知的编辑器（改一个 JSONC 文件而不能动其它字符），
+    风险远大于收益。真要保注释的用户，可改用 OpenCode 自己的配置界面，或由
+    a4agent 后续接入运行时 API（PUT /api/experimental/mcp/{server}）走官方的
+    连接态变更，完全不碰文件。
+    """
+    data: dict = {}
+    if path.exists():
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except OSError as e:
+            raise ValueError(f"读取 {path} 失败，已中止写入：{e}")
+        loaded = loads_jsonc(text)
+        if loaded is None:
+            raise ValueError(
+                f"{path} 不是合法的 JSON/JSONC，已中止写入（避免破坏你的配置）"
+            )
+        if isinstance(loaded, dict):
+            data = loaded
+    mcp = data.get("mcp")
+    if not isinstance(mcp, dict):
+        mcp = {}
+    mcp["servers"] = {s["name"]: render_opencode(s) for s in servers}
+    data["mcp"] = mcp
+    _atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2))
+
+
 def write_servers(scope: str, tool: str, project: str | None, servers: list[dict]) -> Path:
     """把归一 server 列表写回指定位置（先备份），返回配置文件路径。"""
     path = mcp_config_file(scope, tool, project)
@@ -1060,6 +1364,8 @@ def write_servers(scope: str, tool: str, project: str | None, servers: list[dict
         _write_pi(path, servers)
     elif tool == "qoder":
         _write_qoder(path, servers)
+    elif tool == "opencode":
+        _write_opencode(path, servers)
     elif tool == "dsh":
         _write_dsh(path, servers)
     else:
@@ -1165,7 +1471,11 @@ def _mask_server(server: dict) -> dict:
 
 
 def discover() -> dict:
-    """全量发现：全局六端 + 各项目（claude/codex/zcode/pi），按 name 聚合。"""
+    """全量发现：全局与各项目的 server 聚合结果。
+
+    项目级遍历与 roots 都从 TOOLS / DASH_SCOPE_CAPABILITY 推导，新增端不必
+    在这里补一行——漏补的后果是「静默不显示」，比报错更难发现。
+    """
     custom = load_mcp_descriptions()
     global_entries: list[dict] = []
     for tool in TOOLS:
@@ -1177,7 +1487,11 @@ def discover() -> dict:
     projects_out = []
     for proj in project_dirs():
         entries: list[dict] = []
-        for tool in ("claude", "codex", "zcode", "pi"):
+        # 按各端自己声明的项目级能力遍历，不写死端清单：
+        # 新增端时忘了改这里，它的项目级配置会整段不显示（静默漏项）。
+        for tool in TOOLS:
+            if "project" not in DASH_SCOPE_CAPABILITY.get(tool, ()):
+                continue
             entries.extend(read_servers("project", tool, proj["project"]))
         if not entries:
             continue
@@ -1192,13 +1506,11 @@ def discover() -> dict:
     return {
         "global": _aggregate(global_entries, mask=True, descriptions=custom),
         "projects": projects_out,
+        # 同样按 TOOLS 生成，新增端自动带上路径
         "roots": {
-            "claude": str(claude_mcp_path()),
-            "codex": str(codex_mcp_path()),
-            "dsh": str(dsh_mcp_patch_path()),
-            "zcode": str(zcode_mcp_path()),
-            "pi": str(pi_mcp_path()),
-            "qoder": str(qoder_mcp_path()),
+            tool: str(dsh_mcp_patch_path() if tool == "dsh"
+                      else mcp_config_file("global", tool, None))
+            for tool in TOOLS
         },
         "project_roots": load_project_roots(),
         "capability": {tool: sorted(list(transports)) for tool, transports in TRANSPORT_CAPABILITY.items()},

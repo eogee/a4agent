@@ -781,11 +781,11 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   /* ---------- 技能管理 ---------- */
-  var TOOL_LABEL = { claude: 'Claude', codex: 'Codex', dsh: 'dsh', zcode: 'ZCode', pi: 'pi', qoder: 'Qoder' };
-  // 六端清单唯一定义处：新增/删除端只改这里（后端 TOOLS 与 schemas 闸门需同步）
-  var TOOL_KEYS = ['claude', 'codex', 'dsh', 'zcode', 'pi', 'qoder'];
-  // MCP 项目级只有这四端有独立文件：dsh 是全局 profile 层，Qoder 复用 Claude Code 的 <repo>/.mcp.json
-  var MCP_PROJECT_TOOLS = ['claude', 'codex', 'zcode', 'pi'];
+  var TOOL_LABEL = { claude: 'Claude', codex: 'Codex', dsh: 'dsh', zcode: 'ZCode', pi: 'pi', qoder: 'Qoder', opencode: 'OpenCode' };
+  // 七端清单唯一定义处：新增/删除端只改这里（后端 TOOLS 与 schemas 闸门需同步）
+  var TOOL_KEYS = ['claude', 'codex', 'dsh', 'zcode', 'pi', 'qoder', 'opencode'];
+  // MCP 项目级有独立文件的端：dsh 是全局 profile 层，Qoder 复用 Claude Code 的 <repo>/.mcp.json
+  var MCP_PROJECT_TOOLS = ['claude', 'codex', 'zcode', 'pi', 'opencode'];
   var skillView = 'global'; // global | project
   var skillData = null;
   var skillQuery = ''; // 搜索关键词，仅前端过滤已缓存的 skillData
@@ -838,11 +838,16 @@ layui.use(['layer', 'form', 'element'], function () {
     var desc = g.description
       ? '<div class="card-meta skill-desc" title="' + escapeHtml(g.description) + '">' + escapeHtml(g.description) + '</div>'
       : '<div class="card-meta skill-desc skill-desc-none">无描述</div>';
+    // OpenCode 除自有目录外还会自动发现 ~/.claude/skills、~/.agents/skills。
+    // 落在这些兼容目录里的 skill 在 OpenCode 端本来就能用，说明白可避免白迁一份。
+    var ocVisible = g.opencode_visible && g.ends.indexOf('opencode') === -1
+      ? '<div class="card-meta skill-desc">OpenCode 已可见（经 ' + escapeHtml(g.opencode_via || '兼容目录') + '），无需重复迁移</div>'
+      : '';
     return '' +
       '<div class="config-card skill-card" data-group="' + escapeHtml(g.name) + '" data-scope="' + scope + '" data-project="' + escapeHtml(project || '') + '">' +
         '<div class="skill-badges">' + badges + dup + '</div>' +
         '<div class="card-name">' + escapeHtml(g.name) + '</div>' +
-        desc +
+        desc + ocVisible +
         '<div class="skill-copies">' + copies + '</div>' +
         '<div class="card-actions">' +
           '<button class="layui-btn layui-btn-sm layui-btn-normal" data-sk="migrate">迁移…</button>' +
@@ -861,8 +866,8 @@ layui.use(['layer', 'form', 'element'], function () {
       if (match) gs = gs.filter(match);
       if (!gs.length) {
         if (match) { box.innerHTML = noMatchTip(skillQuery, '技能'); return; }
-        box.innerHTML = '<div class="empty-tip">六端的全局目录还没有任何 skill<br>' +
-          '<span style="font-size:12px;">~/.claude/skills · ~/.codex/skills · ~/.dsh/skills · ~/.zcode/skills · ~/.pi/agent/skills · ~/.qoder/skills</span></div>';
+        box.innerHTML = '<div class="empty-tip">各端的全局目录还没有任何 skill<br>' +
+          '<span style="font-size:12px;">~/.claude/skills · ~/.codex/skills · ~/.dsh/skills · ~/.zcode/skills · ~/.pi/agent/skills · ~/.qoder/skills · ~/.config/opencode/skills</span></div>';
         return;
       }
       box.innerHTML = gs.map(function (g) { return skillGroupCard(g, 'global', ''); }).join('');
@@ -890,7 +895,7 @@ layui.use(['layer', 'form', 'element'], function () {
         '<div class="proj-head">' +
           '<span class="proj-name">' + escapeHtml(p.project) + '</span>' +
           '<span class="proj-root" title="' + escapeHtml(p.root) + '">' + escapeHtml(p.root) + '</span>' +
-          '<button class="layui-btn layui-btn-xs" data-sk="adapt" data-project="' + escapeHtml(p.project) + '">一键适配六端</button>' +
+          '<button class="layui-btn layui-btn-xs" data-sk="adapt" data-project="' + escapeHtml(p.project) + '">一键适配全部端</button>' +
         '</div>';
       if (!p.skills.length) {
         html += '<div class="empty-tip proj-empty">该项目下没有 skill</div>';
@@ -1170,15 +1175,24 @@ layui.use(['layer', 'form', 'element'], function () {
     });
   }
 
-  /* ---- 项目一键适配六端：把项目内所有 skill 补齐到缺失的端 ---- */
+  /* ---- 项目一键适配全部端：把项目内所有 skill 补齐到缺失的端 ---- */
   function adaptProject(project) {
     if (migrationBusy) return;
     var p = (skillData.projects || []).find(function (x) { return x.project === project; });
     if (!p || !p.skills.length) { layer.msg('该项目没有可迁移的 skill', { icon: 0 }); return; }
     var plan = []; // [{source, targets[], name, missing[]}]
+    var shadowed = 0; // 经兼容目录已对 OpenCode 可见、无需再补的条目数
     p.skills.forEach(function (g) {
-      var missing = TOOL_KEYS.filter(function (t) { return g.ends.indexOf(t) === -1; });
-      if (!missing.length || !g.copies.length) return;
+      var missing = TOOL_KEYS.filter(function (t) {
+        if (g.ends.indexOf(t) !== -1) return false;
+        // OpenCode 会自动发现 .claude/skills 与 .agents/skills，补一份纯属重复
+        if (t === 'opencode' && g.opencode_visible) return false;
+        return true;
+      });
+      if (!missing.length || !g.copies.length) {
+        if (g.opencode_visible && g.ends.indexOf('opencode') === -1) shadowed++;
+        return;
+      }
       plan.push({
         source: { scope: 'project', tool: g.copies[0].tool, project: project, name: g.name },
         targets: missing.map(function (t) { return { scope: 'project', tool: t, project: project }; }),
@@ -1186,13 +1200,18 @@ layui.use(['layer', 'form', 'element'], function () {
         missing: missing
       });
     });
-    if (!plan.length) { layer.msg('该项目的 skill 已在 ' + TOOL_KEYS.map(function (t) { return TOOL_LABEL[t]; }).join(' / ') + ' 六端齐全', { icon: 1 }); return; }
+    if (!plan.length) {
+      var tip = '该项目的 skill 已在 ' + TOOL_KEYS.map(function (t) { return TOOL_LABEL[t]; }).join(' / ') + ' 齐全';
+      if (shadowed) tip += '（其中 ' + shadowed + ' 个 OpenCode 已可见，无需重复适配）';
+      layer.msg(tip, { icon: 1, time: shadowed ? 4200 : 2000 });
+      return;
+    }
     var lines = plan.map(function (x) {
       return '<li>「' + escapeHtml(x.name) + '」→ ' + x.missing.map(function (t) { return TOOL_LABEL[t]; }).join('、') + '</li>';
     }).join('');
     layer.open({
       type: 1,
-      title: '一键适配六端 · ' + escapeHtml(project),
+      title: '一键适配全部端 · ' + escapeHtml(project),
       area: ['440px', 'auto'],
       content: '<div style="padding:18px 24px;"><p style="margin-bottom:10px;">将按以下计划复制补齐（源端保留）：</p><ul class="adapt-list">' + lines + '</ul></div>',
       btn: ['执行迁移', '取消'],
@@ -1206,7 +1225,7 @@ layui.use(['layer', 'form', 'element'], function () {
             label: '「' + x.name + '」→ ' + x.missing.map(function (t) { return TOOL_LABEL[t]; }).join('、')
           };
         });
-        runMigrateTasks(tasks, '一键适配六端 · ' + project + '（源端保留）', function (res) {
+        runMigrateTasks(tasks, '一键适配全部端 · ' + project + '（源端保留）', function (res) {
           if (!res.failed) {
             layer.msg('适配完成：已迁移 ' + res.migrated + ' 处', { icon: 1, time: 2600 });
           } else {
@@ -1440,8 +1459,8 @@ layui.use(['layer', 'form', 'element'], function () {
       if (match) gs = gs.filter(match);
       if (!gs.length) {
         if (match) { box.innerHTML = noMatchTip(mcpQuery, ' MCP server'); return; }
-        box.innerHTML = '<div class="empty-tip">六端还未配置任何 MCP server<br>' +
-          '<span style="font-size:12px;">~/.claude.json · ~/.codex/config.toml · cordis.patch.yml · ~/.zcode/cli/config.json · ~/.pi/agent/mcp.json · ~/.qoder/mcp.json</span></div>';
+        box.innerHTML = '<div class="empty-tip">各端还未配置任何 MCP server<br>' +
+          '<span style="font-size:12px;">~/.claude.json · ~/.codex/config.toml · cordis.patch.yml · ~/.zcode/cli/config.json · ~/.pi/agent/mcp.json · ~/.qoder/mcp.json · ~/.config/opencode/opencode.jsonc</span></div>';
         return;
       }
       box.innerHTML = gs.map(function (g) { return mcpGroupCard(g, 'global', ''); }).join('');

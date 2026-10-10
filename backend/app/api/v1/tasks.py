@@ -54,14 +54,21 @@ def create_task(body: schemas.TaskCreate, db: Session = Depends(get_db)):
             raise HTTPException(422, f"工作目录不存在或不是文件夹：{working_dir}")
         working_dir = str(folder)
     active = crud.get_active_config(db)
-    if active is None or active.provider is None:
-        raise HTTPException(409, "还没有生效的配置方案，请先在「配置方案」页切换一次")
-
-    api_key = decrypt_text(active.api_key_encrypted)
-    if not api_key:
-        # 与切换接口同一道闸：空 Key 会让连通预检得到误导性的「密钥无效」
-        raise HTTPException(409, "该配置方案的 API Key 解密失败或为空，请到「配置方案」页重新保存一次 Key")
-    result = task_precheck.run(db, body.tool, active.provider, api_key, active.model)
+    # HTTP 引擎（OpenCode）自带自己的模型与凭据体系（用户在 OpenCode 里配），
+    # 不走 a4agent 的配置方案：要求用户先切换一个生效方案，对它毫无意义，
+    # 只会把「OpenCode 已经能跑」这种状态卡在一句无关的提示上。
+    needs_local_config = body.tool not in task_engines.HTTP_ENGINES
+    if needs_local_config:
+        if active is None or active.provider is None:
+            raise HTTPException(409, "还没有生效的配置方案，请先在「配置方案」页切换一次")
+        api_key = decrypt_text(active.api_key_encrypted)
+        if not api_key:
+            # 与切换接口同一道闸：空 Key 会让连通预检得到误导性的「密钥无效」
+            raise HTTPException(409, "该配置方案的 API Key 解密失败或为空，请到「配置方案」页重新保存一次 Key")
+    else:
+        api_key = ""
+    result = task_precheck.run(db, body.tool, active.provider if needs_local_config else None,
+                               api_key, active.model if active else "")
     if not result["ok"]:
         # 预检失败不入队也不落列表行：422 的 detail 由前端弹窗原样展示，
         # 保持一句话可执行的原因
@@ -73,8 +80,8 @@ def create_task(body: schemas.TaskCreate, db: Session = Depends(get_db)):
         working_dir=working_dir,
         timeout_seconds=body.timeout_seconds or task_runner.DEFAULT_TIMEOUT_SECONDS,
         status=task_runner.PENDING,
-        config_id=active.id,
-        model=active.model or "",
+        config_id=active.id if active else None,
+        model=(active.model if active else "") or "",
         precheck_result=json.dumps(result, ensure_ascii=False),
         precheck_ms=result["ms"],
         error_summary="",

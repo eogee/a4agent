@@ -14,7 +14,11 @@ router = APIRouter()
 
 @router.get("/mcp/discover")
 def discover_mcp():
-    """全量发现：全局六端与各项目（claude/codex/zcode/pi）的 MCP server 聚合结果。"""
+    """全量发现：全局各端与各项目的 MCP server 聚合结果。
+
+    作用域随端而异：claude/codex/dsh/zcode/pi/qoder/opencode 各自的文件，
+    Qoder 项目级复用 Claude 的 .mcp.json，dsh 只有全局 profile 层。
+    """
     return mcp_manager.discover()
 
 

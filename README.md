@@ -2,35 +2,46 @@
 
 English | [简体中文](README.zh-CN.md)
 
-**A management console for six AI coding tools + a local LLM inference console**: unified **skill management** and **MCP management** across all six tools — **Claude Code, Codex, dsh (DeepSeek Harness), ZCode (Zhipu Agentic Dev Environment), pi (local pi coding agent), and Qoder (AI IDE)** — plus API provider switching for the two CLI tools without a graphical config UI (Claude Code, Codex), and a built-in llama.cpp local model inference console. Everything is done through a visual interface; no manual config-file editing required.
+**A management console for seven AI coding tools + a local LLM inference console**: unified **skill management** and **MCP management** across all seven tools — **Claude Code, Codex, dsh (DeepSeek Harness), ZCode (Zhipu Agentic Dev Environment), pi (local pi coding agent), Qoder (AI IDE), and OpenCode** — plus API provider switching for the two CLI tools without a graphical config UI (Claude Code, Codex), and a built-in llama.cpp local model inference console. Everything is done through a visual interface; no manual config-file editing required.
 
 | Capability | Description |
 |---|---|
-| **Skill Management** | Auto-discovery of global/project-level skills on all six tools, aggregation badges, cross-tool migration, recycle-bin restore, one-click sync of a project's skills to every missing tool |
-| **MCP Management** | Auto-discovery and **one-click install** of MCP servers on all six tools, cross-tool migration (validated by a transport capability matrix), snapshot recycle bin, automatic/custom **descriptions**; secrets are masked/encrypted throughout |
+| **Skill Management** | Auto-discovery of global/project-level skills on all seven tools, aggregation badges, cross-tool migration, recycle-bin restore, one-click sync of a project's skills to every missing tool |
+| **MCP Management** | Auto-discovery and **one-click install** of MCP servers on all seven tools, cross-tool migration (validated by a transport capability matrix), snapshot recycle bin, automatic/custom **descriptions**; secrets are masked/encrypted throughout |
 | **API Switching** | One-click provider / model / API-key switching for the two CLI tools without a graphical UI (Claude Code, Codex), with automatic backup, atomic writes, and DPAPI-encrypted key storage; the other four tools have their own provider UIs and are configured by the user in-app |
 | **Local Models** | Turn any `.gguf` model into an OpenAI-compatible local/LAN API service in one click: engine auto-download by GPU, model library scanning, VRAM risk assessment, one-click profile creation for Claude Code / Codex |
-| **Task Dispatch** | Run any of the six CLIs in **headless mode** as background tasks: dispatch-and-return, automatic pre-flight checks (engine ready / config ready / real connectivity), queue polling, output archiving, cancel & timeout, and tasks survive closing the window. Uses the config you already set up in each app |
+| **Task Dispatch** | Run any of the seven tools in **headless mode** as background tasks: dispatch-and-return, automatic pre-flight checks (engine ready / config ready / real connectivity), queue polling, output archiving, cancel & timeout, and tasks survive closing the window. Uses the config you already set up in each app |
 | **Notifications** | Two independent channels so you are not tied to the desk: **phone push** (ntfy) for task completion/failure/timeout with the agent's last output, and **desktop toasts** that wake the window on click. Session hooks for **Claude Code / Codex / ZCode / Qoder / WorkBuddy / dsh** let you answer the agent's questions and approve permissions from your phone |
+
+---
+
+## OpenCode Integration (since v0.6.0)
+
+Beyond managing OpenCode's skills and MCP like any other tool, a4agent **drives the OpenCode instance you already have running**. It works out of the box on this machine — a4agent reads that service's password and default port (`49374`) on its own. Enable it on the Notifications page and you get:
+
+- **OpenCode as a dispatch engine**: tasks run as sessions against the live service instead of spawning a fresh CLI process each time. Approval-free execution uses **session-scoped permission rules**, so your global config is left untouched; cost, usage, and outcome come back structured; cancelling sends an interrupt rather than killing a process.
+- **Notifications for sessions you start in OpenCode's web UI**: when those finish, fail, or get interrupted, they reach you through the same desktop toast and phone push.
+
+For a remote OpenCode server, fill in the address and password on the same card (the password is stored with Windows DPAPI encryption and is never echoed back in the UI).
 
 ---
 
 ## Skill Management
 
-All six targets use the same skill format (a `<skill-name>/SKILL.md` directory with `name` and `description` frontmatter), so a4agent can manage them as one kind of resource.
+All seven targets use the same skill format (a `<skill-name>/SKILL.md` directory with `name` and `description` frontmatter), so a4agent can manage them as one kind of resource.
 
 ### Discovery & Aggregation
 
-- Scans the **global** and **project-level** skill directories of all six tools, and aggregates by frontmatter `name`: when a skill with the same name exists on several tools, it is badged as "already on N tools".
+- Scans the **global** and **project-level** skill directories of all seven tools, and aggregates by frontmatter `name`: when a skill with the same name exists on several tools, it is badged as "already on N tools".
 - The project root list is configurable (default scan root: `C:\ProgramMine`); only projects containing at least one skill are listed.
 - Codex's reserved global directories (`.system/` and other dot-prefixed dirs) are skipped automatically and not treated as user skills.
 
-### Cross-Tool Migration & "One-Click Sync to Six Tools"
+### Cross-Tool Migration & "One-Click Sync to Every Tool"
 
 - Any skill on any tool can be migrated to any target (global or any project). Migration is a **non-destructive copy**: the source is always kept.
 - Migration targets support **picking any project folder**: the target project needs no prior skills, and a missing `.{tool}/skills` directory is created automatically; the desktop app uses the native folder picker, the browser version falls back to a path input.
 - If the target already has a skill with the same name (matching frontmatter `name` or directory name), the old version goes to the recycle bin instead of being silently overwritten.
-- **"One-click sync to six tools"**: fills in every missing tool for all skills in a project at once — first shows a plan list, then runs with a progress bar while the page is temporarily locked to prevent accidental edits.
+- **"One-click sync to every tool"**: fills in every missing tool for all skills in a project at once — first shows a plan list, then runs with a progress bar while the page is temporarily locked to prevent accidental edits.
 - Every migration writes a **migration log** (time, skill, source, target, result) for full traceability.
 
 ### Recycle Bin
@@ -48,6 +59,7 @@ All six targets use the same skill format (a `<skill-name>/SKILL.md` directory w
 | ZCode | `~/.zcode/skills/` | `<project>/.zcode/skills/` |
 | pi | `~/.pi/agent/skills/` (overridable via `$PI_CODING_AGENT_DIR`) | `<project>/.pi/skills/` |
 | Qoder | `~/.qoder/skills/` (overridable via `$A4AGENT_QODER_HOME`) | `<project>/.qoder/skills/` |
+| OpenCode | `~/.config/opencode/skills/` | `<project>/.opencode/skills/` |
 
 **ZCode**: the official client also recognizes the cross-tool directories `~/.agents/skills` and `<project>/.agents/skills`; a4agent standardizes on the `.zcode` prefix for consistency with the other tools. Skills migrated to ZCode are really loaded by the ZCode client.
 
@@ -55,22 +67,27 @@ All six targets use the same skill format (a `<skill-name>/SKILL.md` directory w
 
 **Qoder**: besides `~/.qoder/skills`, it also recognizes the cross-tool directories `~/.agents/skills` and `<project>/.agents/skills` (lower priority); a4agent standardizes on the `.qoder/skills` prefix, so no project-level special-casing is needed. The config directory name varies by distribution (international `.qoder`, China `.qoder-cn`); a4agent detects whichever actually exists, or you can set `A4AGENT_QODER_HOME` directly.
 
+**OpenCode**: the global root is `~/.config/opencode/skills` (not `~/.opencode/skills`); project-level skills live in `.opencode/skills`. Two behaviors are handled specially, because getting them wrong would be visible:
+
+- **Skill IDs come from the directory name**; the frontmatter `name` is only a display label. a4agent therefore aggregates and resolves conflicts by directory name on the OpenCode side — otherwise two skills with the same display name but different IDs would be merged into one card, or one of them would be deleted during migration (in OpenCode they are two independently working skills).
+- **It also auto-discovers `~/.claude/skills` and `~/.agents/skills`** (`.agents` is additionally ZCode's / Qoder's cross-tool directory). Skills found there are badged "already visible to OpenCode" and the one-click sync skips them, so you never end up with a pointless duplicate copy.
+
 ---
 
 ## MCP Management
 
-Each of the six tools stores its MCP servers in its own config file; a4agent normalizes them into one view (`name` / `transport` / `command` / `args` / `env` / `url` / `headers`).
+Each of the seven tools stores its MCP servers in its own config file; a4agent normalizes them into one view (`name` / `transport` / `command` / `args` / `env` / `url` / `headers`).
 
 ### Discovery & Aggregation
 
-- Auto-discovers global and project-level MCP servers on all six tools and aggregates same-name servers across tools ("already on N tools").
+- Auto-discovers global and project-level MCP servers on all seven tools and aggregates same-name servers across tools ("already on N tools").
 - `env` / `headers` are always **masked** in detail views (key names only); the API never returns plaintext secrets.
 - Every server card shows a **description**: common servers are recognized automatically (a built-in digest library plus live npm registry lookups for npx packages, both cached with failure fallbacks), and you can also click "Describe" to write your own (stored locally, shared across tools, cleared when left empty).
 - Project-level files are recognized automatically: Claude Code `.mcp.json`, Codex `.codex/config.toml`, ZCode `.zcode/config.json`, pi `.pi/mcp.json` (Qoder's project level *is* Claude Code's `.mcp.json`, managed under the Claude tool and not discovered twice).
 
 ### Installing MCP Servers
 
-- Click "Install MCP" to create a server from scratch on any app: pick a target app (Claude Code / Codex / dsh / ZCode / pi / Qoder — written to that app's global config) and a transport (stdio / http / sse, filtered by the target's capabilities — e.g. Codex is stdio-only, pi has no sse), then fill in command/args/env or URL/headers.
+- Click "Install MCP" to create a server from scratch on any app: pick a target app (Claude Code / Codex / dsh / ZCode / pi / Qoder / OpenCode — written to that app's global config) and a transport (stdio / http / sse, filtered by the target's capabilities — e.g. Codex is stdio-only, pi and OpenCode have no sse), then fill in command/args/env or URL/headers.
 - You can also **paste JSON to import in bulk**: paste an existing MCP config snippet (three formats supported: a top-level "mcpServers" object, a name-keyed server dictionary, or a single server object) and install many at once — each entry is independent, so one failure (name conflict, unsupported transport, etc.) doesn't abort the rest, and each reports success/failure.
 - Installation uses each tool's native rendering and atomic writes (a same-name server on the target is explicitly rejected — use migration or delete first); existing servers and unrelated config keys are preserved. Installed servers appear in the card list immediately with descriptions auto-matched.
 
@@ -87,6 +104,7 @@ Each of the six tools stores its MCP servers in its own config file; a4agent nor
 | ZCode | stdio / sse / http | `~/.zcode/cli/config.json`, `<project>/.zcode/config.json` (`mcp.servers`) |
 | pi | stdio / streamable-http | `~/.pi/agent/mcp.json` (global), `<project>/.pi/mcp.json` (project; the project must be trusted by pi) |
 | Qoder | stdio / sse / http | `~/.qoder/mcp.json` (global; project level reuses Claude Code's `<project>/.mcp.json`) |
+| OpenCode | stdio / streamable-http | `~/.config/opencode/opencode.json(c)`, `<project>/.opencode/opencode.json(c)` (`mcp.servers`) |
 
 **dsh**: MCP servers hang off the `@deepseek-ai/dsh-mcp-client` plugin entry; rewrites preserve other non-managed entries. No project-level MCP.
 
@@ -97,6 +115,10 @@ Each of the six tools stores its MCP servers in its own config file; a4agent nor
 **Qoder**: `~/.qoder/mcp.json` is structurally identical to Claude Code's (top-level `mcpServers`; `type` accepts stdio / sse / http / streamable-http). Its own keys are `disabled` (the switch for turning a server off inside Qoder's UI — note it is **not** `enabled`), `timeout`, and `authType`, all **preserved losslessly**. Qoder's **project-level MCP shares the same `<project>/.mcp.json` as Claude Code** (it looks up `.mcp.json` first, then `mcp.json`), so a4agent does not let the Qoder tool take over project-level files — the same file written by two tools would just stomp each other; migrating to Claude project level makes it effective for Qoder project level too. The runtime mirrors `%APPDATA%\Qoder\SharedClientCache\extension\local\mcp.json` and `~/.qoder/mcp-router.json` are in-process state; a4agent neither reads nor writes them and excludes them from backups.
 
 **It is normal for the Qoder view to "show no connected MCP"** — a4agent manages the **user-defined** `~/.qoder/mcp.json`; most connectors actually connected in a Qoder session do not come from that file: built-in connectors (browser control, node REPL, etc.) ship with the Qoder installer, and plugin-bundled connectors live in `~/.qoder/plugins/cache/<source>/<plugin>/mcp.json`. Neither belongs to the user config file, so neither shows up on a4agent's Qoder cards. The test is simple: an empty `~/.qoder/mcp.json` while several MCPs are connected inside Qoder is not a contradiction. To make a server show up in the Qoder view, write it into this file via "Install MCP" or cross-tool migration.
+
+**OpenCode**: servers live under `mcp.servers` with exactly two transports — `local` (stdio) and `remote` (Streamable HTTP). There is **no place for legacy SSE**, so sse sources fail as a whole and are logged. Three shape differences are smoothed over by a4agent: the command is a **single array** (executable and arguments merged; split only when writing back), the environment key is `environment` (not `env`), and the on/off switch is `disabled`. Its own keys `codemode` / `timeout` / `protocol` / `oauth` are **preserved losslessly**.
+
+> OpenCode's config file is JSONC (comments and trailing commas allowed). a4agent writes standard JSON (which is valid JSONC) and reads existing files with comments correctly, but **hand-written comments in that file are lost on write** — an inherent trade-off of whole-subtree replacement. If comments matter to you, configure it in OpenCode's own UI instead. If reading the config fails, a4agent aborts the write rather than rebuilding from an empty config (which would wipe your model / agents / permissions).
 
 ### Recycle Bin & Data Protection
 
@@ -135,7 +157,7 @@ Before switching, the target config file is backed up automatically (rolling, la
 
 ### How Task Dispatch Relates to Config
 
-Task dispatch covers all six tools (Claude Code / Codex / ZCode / Qoder / dsh / pi) and **directly uses the config you already set up in each app** — a4agent no longer writes API configs for these apps; instead it runs a real connectivity check before dispatching:
+Task dispatch covers all seven tools (Claude Code / Codex / ZCode / Qoder / dsh / pi / OpenCode) and **directly uses the config you already set up in each app** — a4agent no longer writes API configs for these apps; instead it runs a real connectivity check before dispatching:
 
 | Step | What is checked |
 |---|---|
@@ -201,11 +223,22 @@ The "Task Dispatch" tab productizes each tool's **headless mode**: write a one-l
 | **Qoder** | `qodercli -p "<task>" -o json` | Single JSON object |
 | **dsh** | `dsh --profile headless "<task>"` | Raw stdout (body field extracted when parseable as JSON) |
 | **pi** | `pi -p "<task>" --mode json --no-session` | JSONL event stream; success decided by `stopReason`, text taken from events |
+| **OpenCode** | **No CLI** — a session against the running service | Session message stream; cost/usage/outcome come from the session's terminal state |
 
 - Engines are auto-detected (installed? version? executable path); **uninstalled engines are greyed out** in the UI with the reason
 - Every command name is resolved to an absolute path first: on Windows these CLIs are npm `.cmd` shims, and handing the bare name to `subprocess` fails to start. Qoder's command is `qodercli` in official docs but `qoder` in blog posts — both are probed
 - Nobody can click "approve" in headless mode, so every command carries permission pre-authorization flags, otherwise the run sticks at an approval prompt or is rejected outright: Claude Code `--permission-mode bypassPermissions`, Codex `--sandbox danger-full-access`, ZCode `--mode yolo`, Qoder and pi `--yolo` (dsh needs none — its headless profile is the headless entry point itself)
 - dsh additionally needs the profile's external plugins disabled: the headless profile lacks the host services they depend on, and startup fails without it. a4agent generates a `--patch` overlay that disables only that set of externally-plugged plugins, leaving the profile itself untouched
+
+### Why OpenCode Is Different
+
+The other six spawn a fresh CLI process per task. OpenCode is **driven through the service you already have running** (default `127.0.0.1:49374`; a remote address works too). That buys three things a CLI cannot offer:
+
+- **Approval-free execution without touching global config**: pre-authorization is a **session-scoped permission rule** (verified: the session object echoes it back), discarded when the task ends. Other tools can only rely on global switches like `--yolo` / `bypassPermissions`.
+- **Success is reported, not guessed**: the session reports `outcome` (succeeded / failed / interrupted) together with cost and usage, and failures carry a structured `error` instead of requiring you to reverse-engineer an exit code.
+- **Interrupt instead of kill**: cancelling sends an interrupt to the server-side session.
+
+OpenCode therefore also skips the "you must have an active profile first" requirement — its models and credentials live in OpenCode, not in a4agent's profile system. Note one subtle failure mode we found by testing: a model the service still reports as `enabled=true` may already be deprecated upstream and only fail on a real run. Both the pre-flight check and the real dispatch retry with another available model when they hit that.
 
 ### Automatic Pre-Flight Checks (no dispatch unless everything passes)
 
@@ -358,11 +391,11 @@ a4agent/
 │   ├── responses_translator.py  # OpenAI Responses protocol translation
 │   ├── proxy_standalone.py   # standalone-process form of the translation proxy
 │   ├── crypto.py             # Windows DPAPI key encryption
-│   ├── skill_manager.py      # six-tool skill discovery, aggregation, migration, recycle bin
-│   ├── mcp_manager.py        # six-tool MCP discovery, installation, migration, snapshots
+│   ├── skill_manager.py      # seven-tool skill discovery, aggregation, migration, recycle bin
+│   ├── mcp_manager.py        # seven-tool MCP discovery, installation, migration, snapshots
 │   ├── removal.py            # cleanup of managed entries handed to the three tools (only self-written ones)
 │   ├── removal_backup.py     # permanent snapshots taken before cleanup
-│   ├── task_engines.py       # headless task engine adapters (six-tool commands & output parsing)
+│   ├── task_engines.py       # headless task engine adapters (commands & output parsing)
 │   ├── task_precheck.py      # three-step pre-flight checks (engine / config / real connectivity)
 │   ├── task_runner.py        # task runner (thread pool, process trees, timeout)
 │   ├── task_notify.py        # task completion notice (in-page hint / taskbar flash)

@@ -1,6 +1,6 @@
 """无头引擎适配层：探测、命令矩阵与产出解析。
 
-覆盖六个支持无头调用的目标（v0.5.1 起从P0 的 pi/dsh 扩展到全量）：
+覆盖七个支持无头调用的目标（v0.5.1 起从P0 的 pi/dsh 扩展到全量）：
 
 | 端| 命令 | 产出契约 |
 |---|---|---|
@@ -10,6 +10,12 @@
 | qoder  | `qodercli -p -o json` | JSON 单对象 |
 | dsh    | `--profile headless` | 纯文本一行 |
 | pi     | `-p --mode json --no-session` | JSONL，取 `message_end` |
+| opencode | **不走 CLI**，走 HTTP 会话 API（见 opencode_client） | 消息流，取 assistant 文本 |
+
+OpenCode 是唯一的非子进程引擎：它本就常驻一个后台服务，接 HTTP 比每次新起
+CLI 更贴近真实形态，且换来会话级免审批（不改用户全局配置）、结构化 outcome/
+cost/tokens 与可中断三项能力。因此本模块对它的参与只有两处——ENGINES 清单与
+产出解析入口，执行逻辑在 opencode_client + task_runner 的 HTTP 分支。
 
 **配置来源一律为用户自己在应用内配好的配置**，本工具不再写入这些应用
 的API 配置（dsh / ZCode / pi 自带完整供应商界面，外部代管反而易错）。
@@ -26,9 +32,11 @@ import subprocess
 import time
 from pathlib import Path
 
+from . import opencode_client
+
 logger = logging.getLogger(__name__)
 
-ENGINES = ("claude", "codex", "zcode", "qoder", "dsh", "pi")
+ENGINES = ("claude", "codex", "zcode", "qoder", "dsh", "pi", "opencode")
 
 ENGINE_LABELS = {
     "claude": "Claude Code",
@@ -37,7 +45,11 @@ ENGINE_LABELS = {
     "qoder": "Qoder",
     "dsh": "dsh",
     "pi": "pi",
+    "opencode": "OpenCode",
 }
+
+# 非子进程引擎：执行与解析都走 HTTP 会话，不能喂 build_argv / 跑进程树。
+HTTP_ENGINES = ("opencode",)
 
 # 各端去界面的配置位置，预检第二步据此判断「用户是否已配好」。
 # 只收录明文可读的配置文件；读不到的（如 Qoder 的加密模型目录）返回 None，
@@ -49,6 +61,7 @@ CONFIG_HINTS = {
     "qoder": "设置 → 模型 → 添加模型（需登录或 PAT）",
     "dsh": "Settings → Models → Add a custom provider",
     "pi": "在 ~/.pi/agent/models.json 配置 provider",
+    "opencode": "在 OpenCode 里配置好模型（opencode.json 的 model 或界面选择）",
 }
 
 # npm 全局壳在 Windows 上是 .cmd，argv 直接给命令名会FileNotFoundError，
@@ -154,7 +167,13 @@ def resolve_runtime(tool: str) -> dict | None:
     装了 IDE 即具备无头能力（内核随 IDE 更新，登录态共享）。
     qoder 的优先级单独处理：官方 qodercli > 桌面端内置内核 > entry 分发器
     （分发器只是转发壳，背后没有 qodercli 时只会报「CLI 未安装」）。
+
+    opencode 不走这里：它没有 argv，运行时是 HTTP 服务（见 resolve_connection）。
     """
+    if tool in HTTP_ENGINES:
+        base, password = opencode_client.resolve_connection()
+        return {"display": base, "argv_prefix": [], "env": {},
+                "http": True, "password": password}
     command = resolve_command(tool)  # 未知的 tool 在这里抛 ValueError
     if tool == "qoder":
         cli = shutil.which("qodercli")
@@ -235,6 +254,9 @@ def _crash_line(done) -> str:
 
 def probe(tool: str, refresh: bool = False) -> dict:
     """探测单个引擎：安装状态、路径与版本（结果缓存 5 分钟）。"""
+    if tool in HTTP_ENGINES:
+        return opencode_client.probe()  # 内部自带 5 分钟缓存
+
     now = time.time()
     cached = _probe_cache.get(tool)
     if cached and not refresh and now - cached[0] < _PROBE_CACHE_SECONDS:
@@ -380,7 +402,13 @@ def build_argv(tool: str, prompt: str, working_dir: str | None = None) -> list:
 
     每条命令都满足三个硬性要求：结构化输出（便于解析产出）、一次性会话
     （不留状态）、权限预授权（无人在场审批，不预授权会卡死或被拒）。
+
+    HTTP_ENGINES 不适用：它们没有 argv，执行走 opencode_client 的会话 API。
     """
+    if tool in HTTP_ENGINES:
+        raise ValueError(
+            f"{ENGINE_LABELS.get(tool, tool)} 不通过命令行执行（它对接的是运行中的 HTTP 服务）"
+        )
     runtime = resolve_runtime(tool)
     if runtime is None:
         names = "/".join(_SHIM.get(tool, (tool,)))
@@ -434,7 +462,15 @@ def build_argv(tool: str, prompt: str, working_dir: str | None = None) -> list:
 
 
 def parse_output(tool: str, stdout: str, exit_code: int) -> dict:
-    """把引擎产出归一为 {ok, text, error, usage}。"""
+    """把引擎产出归一为 {ok, text, error, usage}。
+
+    HTTP_ENGINES 的产出不是 stdout 文本：调用方（task_runner 的 HTTP 分支）
+    直接把消息流与 Session.Info 交给 opencode_client.parse_output。
+    """
+    if tool in HTTP_ENGINES:
+        raise ValueError(
+            f"{ENGINE_LABELS.get(tool, tool)} 的产出需要会话消息流解析，不能按 stdout 文本解析"
+        )
     if tool == "claude":
         return _parse_json_object(stdout, exit_code, ("result", "text"),
                                   usage_from=_usage_claude)

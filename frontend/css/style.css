@@ -451,6 +451,12 @@ body {
   color: #2b6f8f;
 }
 
+/* OpenCode 徽章：沿用 Codex 蓝的同一色系但更冷一档，与既有标签拉开辨识度 */
+.target-opencode {
+  background: #eaf0fb;
+  color: #3f5f9e;
+}
+
 .card-actions {
   margin-top: auto;
   padding-top: 16px;
@@ -2019,6 +2025,9 @@ html::-webkit-scrollbar {
 }
 
 .phone-chan-dot.is-on { background: #16baaa; }
+
+/* 失败态用危险红：状态点只表达「通没通」，颜色本身即结论 */
+.phone-chan-dot.is-off { background: #c03a2f; }
 
 /* 常驻进程依赖：属于整个页面的约束，用浅色底强调层级 */
 .phone-dep-tip { max-width: 1160px; margin-bottom: 14px; }

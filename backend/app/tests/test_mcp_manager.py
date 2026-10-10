@@ -24,7 +24,7 @@ from backend.app.models import McpMigration, McpTrash
 
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
-    """隔离六端配置文件、dsh patch、数据目录与项目根列表。"""
+    """隔离七端配置文件、dsh patch、数据目录与项目根列表。"""
     ctx = {
         "data": tmp_path / "data",
         "claude_json": tmp_path / "claude.json",
@@ -33,6 +33,7 @@ def env(tmp_path, monkeypatch):
         "zcode_cli": tmp_path / "zcode-cli.json",
         "pi_mcp": tmp_path / "pi-mcp.json",
         "qoder_mcp": tmp_path / "qoder-mcp.json",
+        "oc_config": tmp_path / "opencode-config",
         "projects_root": tmp_path / "projects",
     }
     monkeypatch.setenv("A4AGENT_DATA_DIR", str(ctx["data"]))
@@ -42,6 +43,11 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("A4AGENT_ZCODE_CLI_CONFIG_PATH", str(ctx["zcode_cli"]))
     monkeypatch.setenv("A4AGENT_PI_MCP_PATH", str(ctx["pi_mcp"]))
     monkeypatch.setenv("A4AGENT_QODER_MCP_PATH", str(ctx["qoder_mcp"]))
+    # OpenCode 配置目录同样必须隔离：不设的话 discover() 会读到用户真实的
+    # ~/.config/opencode/opencode.json，其内容（如用户自配的 MCP）会让
+    # 「发现结果应当只有 N 个」这类断言随机失败
+    ctx["oc_config"].mkdir(parents=True)
+    monkeypatch.setenv("A4AGENT_OPENCODE_CONFIG_DIR", str(ctx["oc_config"]))
     # 项目根指向临时目录下的 projects_root（skill 的 project_roots 复用于 MCP）
     ctx["projects_root"].mkdir(parents=True)
     from backend.app import skill_manager

@@ -312,6 +312,12 @@ def main() -> None:
     except Exception:
         pass
     try:
+        from backend.app.main import stop_opencode_events
+
+        stop_opencode_events()
+    except Exception:
+        pass
+    try:
         from backend.app.llama import runtime as llama_runtime
 
         llama_runtime.shutdown()

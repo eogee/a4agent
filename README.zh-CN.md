@@ -2,16 +2,30 @@
 
 [English](README.md) | 简体中文
 
-**六端 AI 编程工具管理台 + 本地大模型推理控制台**：为 **Claude Code、Codex、dsh（DeepSeek Harness）、ZCode（智谱 Agentic 开发环境）、pi（本地 pi coding agent）与 Qoder（AI IDE）** 提供统一的技能管理与 MCP 管理（六端全覆盖），并为其中没有图形配置界面的两个 CLI 工具（Claude Code、Codex）提供 API 服务商切换，同时内置 llama.cpp 本地模型推理。所有操作通过可视化界面完成，无需手动编辑配置文件。
+**七端 AI 编程工具管理台 + 本地大模型推理控制台**：为 **Claude Code、Codex、dsh（DeepSeek Harness）、ZCode（智谱 Agentic 开发环境）、pi（本地 pi coding agent）、Qoder（AI IDE）与 OpenCode** 提供统一的技能管理与 MCP 管理（七端全覆盖），并为其中没有图形配置界面的两个 CLI 工具（Claude Code、Codex）提供 API 服务商切换，同时内置 llama.cpp 本地模型推理。所有操作通过可视化界面完成，无需手动编辑配置文件。
 
 | 能力 | 说明 |
 |---|---|
-| **技能管理** | 六端全局/项目级 skill 自动发现、聚合标注、跨端迁移、回收站恢复，一键把项目 skill 补齐到所有缺失的端 |
-| **MCP 管理** | 六端 MCP server 自动发现与**一键安装**、跨端迁移（按传输能力矩阵校验）、快照回收站、自动/自定义**功能介绍**，密钥全程脱敏/加密 |
+| **技能管理** | 七端全局/项目级 skill 自动发现、聚合标注、跨端迁移、回收站恢复，一键把项目 skill 补齐到所有缺失的端 |
+| **MCP 管理** | 七端 MCP server 自动发现与**一键安装**、跨端迁移（按传输能力矩阵校验）、快照回收站、自动/自定义**功能介绍**，密钥全程脱敏/加密 |
 | **API 切换** | 为无图形界面的 CLI（Claude Code、Codex）一键切换服务商、模型、API Key，配置自动备份、原子写入，密钥 DPAPI 加密存储；其余四端应用自带供应商配置界面，由用户自行配置 |
 | **本地模型** | 把任意 `.gguf` 模型一键变成 OpenAI 兼容的本地/局域网 API 服务：引擎按显卡自动获取、模型库扫描、显存风险评估，一键接入配置方案（Claude Code / Codex） |
-| **任务下发** | 六端 CLI 以**无头模式**后台执行任务：下发即返回、下发前自动预检（引擎可用 / 配置就绪 / 真实连通）、队列轮询、产出留档、取消与超时、关窗不杀任务。直接使用你在各应用内配好的配置 |
+| **任务下发** | 七端以**无头模式**后台执行任务：下发即返回、下发前自动预检（引擎可用 / 配置就绪 / 真实连通）、队列轮询、产出留档、取消与超时、关窗不杀任务。直接使用你在各应用内配好的配置 |
 | **通知提醒** | 两条独立通道让你不必守在电脑前：**手机推送**（ntfy）在任务成功 / 失败 / 超时时送达，含 Agent 最后一段输出；**桌面横幅**点击即唤回窗口。会话 hook 覆盖 **Claude Code / Codex / ZCode / Qoder / WorkBuddy / dsh**，可在手机上直接回答提问、审批权限 |
+
+---
+
+## OpenCode 接入（v0.6.0 起）
+
+除了把 OpenCode 当第七端托管技能与 MCP，本工具还**直接接管你正在运行的那个 OpenCode 实例**：
+本机装了即可用（自动读取它的服务密码与默认端口 `49374`），在「通知提醒」页开启后——
+- **任务下发**多一个 OpenCode 引擎：直接对它常驻的服务建会话执行，而不是每次新起一个 CLI 进程。
+  免审批是**会话级权限**，不改你的全局配置；产出、成本与用量按会话结构化取回；模型被服务端判废时
+  会自动换一个可用模型重试
+- **通知提醒**同时覆盖你在 OpenCode 网页端里发起的会话：跑完 / 出错 / 被中断都会走同一条桌面横幅 +
+  手机推送
+
+需要远程服务时，在同一张卡片里填服务地址与密码（密码经 Windows DPAPI 加密存储，界面永不回显）。
 
 ---
 
@@ -55,15 +69,22 @@
 
 **Qoder**：除 `~/.qoder/skills` 外还识别跨工具目录 `~/.agents/skills` 与 `<项目>/.agents/skills`（优先级低于前者），a4agent 统一托管到 `.qoder/skills` 前缀，与其它端一致，项目级因此无需特判。配置目录名随发行版而变（国际版 `.qoder`、国内版 `.qoder-cn`），默认探测实际存在的那个，也可用 `A4AGENT_QODER_HOME` 直接指定。
 
+**OpenCode**：全局根在 `~/.config/opencode/skills`（不是 `~/.opencode/skills`）；项目级是 `.opencode/skills`。两处与常规端不同，都已按其真实行为特判：
+
+- **技能 ID 取目录名**，frontmatter `name` 只是显示名。因此 a4agent 在 OpenCode 端按目录名聚合并判定冲突——
+  否则两个「显示名相同、ID 不同」的技能会被错并成一份，或在迁移时被误删（它们在 OpenCode 里是两个各自工作的技能）。
+- **它会自动发现 `~/.claude/skills` 与 `~/.agents/skills`**（`.agents` 同时是 ZCode / Qoder 的跨工具目录）。
+  这类条目会被标注「OpenCode 已可见」，一键适配时跳过——不必为了 OpenCode 再迁一份。
+
 ---
 
 ## MCP 管理
 
-六端的 MCP server 都写在各自的配置文件里，a4agent 把它们归一为统一视图（`name` / `transport` / `command` / `args` / `env` / `url` / `headers`）管理。
+七端的 MCP server 都写在各自的配置文件里，a4agent 把它们归一为统一视图（`name` / `transport` / `command` / `args` / `env` / `url` / `headers`）管理。
 
 ### 发现与聚合
 
-- 自动发现六端全局与项目级 MCP server，同名 server 跨端聚合标注（「已在 N 端存在」）。
+- 自动发现七端全局与项目级 MCP server，同名 server 跨端聚合标注（「已在 N 端存在」）。
 - 详情中 `env` / `headers` **一律脱敏**（只回显键名），API 永不回传明文密钥。
 - 每张卡片显示该 server 的**功能介绍**：自动识别常用 server（内置简介库 + npx 包实时查询 npm registry，均有缓存与失败兜底），也支持点「介绍」手工维护说明（本地持久化、跨端共享、留空即清除）。
 - 项目级自动识别：Claude Code `.mcp.json`、Codex `.codex/config.toml`、ZCode `.zcode/config.json`、pi `.pi/mcp.json`（Qoder 的项目级就是 Claude Code 的 `.mcp.json`，归 Claude 端托管，不重复发现）。
@@ -87,6 +108,7 @@
 | ZCode | stdio / sse / http | `~/.zcode/cli/config.json`、`<项目>/.zcode/config.json`（`mcp.servers`） |
 | pi | stdio / streamable-http | `~/.pi/agent/mcp.json`（全局）、`<项目>/.pi/mcp.json`（项目，需该项目被 pi 信任） |
 | Qoder | stdio / sse / http | `~/.qoder/mcp.json`（全局；项目级复用 Claude Code 的 `<项目>/.mcp.json`） |
+| OpenCode | stdio / streamable-http | `~/.config/opencode/opencode.json(c)`、`<项目>/.opencode/opencode.json(c)`（`mcp.servers`） |
 
 **dsh**：MCP server 挂在 `@deepseek-ai/dsh-mcp-client` 插件条目下，重写时保留其它非管理条目；无项目级 MCP。
 
@@ -97,6 +119,10 @@
 **Qoder**：`~/.qoder/mcp.json` 与 Claude Code 同构（顶层 `mcpServers`，`type` 认 stdio / sse / http / streamable-http），自有键是 `disabled`（在 Qoder 界面里关掉某个 server 的开关，注意**不是** `enabled`）、`timeout`、`authType`，a4agent 读写时一并**无损保留**。Qoder 的**项目级 MCP 与 Claude Code 共用同一个 `<项目>/.mcp.json`**（它按 `.mcp.json` → `mcp.json` 的顺序查找），所以 a4agent 不让 Qoder 端再接管项目级文件——同一文件被两端各写一次只会互相踩；迁到 Claude 项目级即 Qoder 项目级同时生效。运行时镜像 `%APPDATA%\Qoder\SharedClientCache\extension\local\mcp.json` 与 `~/.qoder/mcp-router.json` 是进程内状态，a4agent 既不读也不写、不纳入备份。
 
 **Qoder 视图「看不到已连接 MCP」是正常的**——a4agent 管理的是**用户自定义**那一份 `~/.qoder/mcp.json`；而 Qoder 会话里实际连着的多数连接器并不来自这个文件：内置连接器（浏览器控制、node REPL 等）随 Qoder 安装包分发，插件自带的连接器写在 `~/.qoder/plugins/cache/<来源>/<插件>/mcp.json` 里，两者都不属于用户配置文件，因此不会出现在 a4agent 的 Qoder 卡片上。判断依据很简单：`~/.qoder/mcp.json` 为空、而 Qoder 里已连着若干 MCP，二者并不矛盾。想让某个 server 出现在 Qoder 端视图，就用「安装 MCP」或跨端迁移把它写进这个文件。
+
+**OpenCode**：配置在 `mcp.servers` 下，只有两种传输——`local`（stdio）与 `remote`（Streamable HTTP），**没有 legacy SSE 的位置**，所以 sse 来源的条目整对失败并留日志。三处形状差异由 a4agent 抹平：命令是**单个数组**（可执行与参数合一，写回时才拆开）、环境变量键叫 `environment`（不是 `env`）、启停开关叫 `disabled`。`codemode` / `timeout` / `protocol` / `oauth` 等自有键**无损保留**。
+
+> OpenCode 的配置文件是 JSONC（可带注释与尾逗号）。a4agent 写入的是标准 JSON（合法 JSONC），能正确读取带注释的既有文件，但**该文件上的手写注释会在写入时丢失**——这是「整子树替换」的固有取舍。介意的话改用 OpenCode 自己的界面配置即可；配置读取失败时 a4agent 会中止写入，绝不按空配置重建（那会清空你的 model / agents / permissions）。
 
 ### 回收站与数据保护
 
@@ -201,10 +227,21 @@ a4agent 为**没有图形配置界面的 CLI 工具**提供一键切换：目前
 | **Qoder** | `qodercli -p "<任务>" -o json` | JSON 单对象 |
 | **dsh** | `dsh --profile headless "<任务>"` | stdout 直出（能解析为 JSON 时抽正文字段） |
 | **pi** | `pi -p "<任务>" --mode json --no-session` | JSONL 事件流，按 `stopReason` 定成败、按事件取文本 |
+| **OpenCode** | **不走 CLI**，对运行中的服务建会话 | 会话消息流，取 assistant 文本；成本/用量/成败取自会话终态 |
 
 - 引擎自动探测（安装状态 / 版本 / 可执行路径），**未安装的在界面置灰**并给出原因
 - 所有命令都先把命令名解析成绝对路径：Windows 上这些 CLI 都是 npm 的 `.cmd` 壳，直接把命令名交给 `subprocess` 会启动失败。Qoder 的命令名官方文档写 `qodercli`、博客写 `qoder`，两个名字都探测
 - 无头模式下没有人能点审批，因此每条命令都带权限预授权参数，否则会卡在审批或被直接拒绝：Claude Code 用 `--permission-mode bypassPermissions`、Codex 用 `--sandbox danger-full-access`、ZCode 用 `--mode yolo`、Qoder 与 pi 用 `--yolo`（dsh 不需要，其 headless profile 本身即无头入口）
+
+### OpenCode：为什么它不一样
+
+其它六端都是「每次新起一个 CLI 进程」，OpenCode 则是**对接你已经开着的那台服务**（本机默认 `127.0.0.1:49374`，也可填远程地址）。这样做换来三样命令行走不到的能力：
+
+- **免审批不污染全局配置**：预授权是**会话级权限规则**（实测会话对象原样回显），任务结束即失效。其它端只能用 `--yolo` / `bypassPermissions` 这类全局开关
+- **成败不靠猜**：会话终态直接给 `outcome`（成功 / 失败 / 被中断）、成本与用量；失败原因取自结构化的 `error` 字段，不用从退出码反推
+- **可中断**：取消是对服务端会话发 interrupt，不是杀进程
+
+因此 OpenCode 也不受「必须先有一个生效的配置方案」的限制——它的模型与凭据在 OpenCode 里，不走 a4agent 的方案体系。另外实测有一类隐蔽故障：服务端模型清单里标记为可用的模型可能已被上游废弃，真跑才报错。所以预检第三步与正式执行都会在遇到「模型被拒」时换一个可用模型重试。
 - dsh 额外需要屏蔽 profile 里的外部插件：headless profile 缺少它们依赖的 host 服务，不屏蔽会在启动阶段直接失败。a4agent 生成 `--patch` 覆盖层只禁用那批相对路径插入的外部插件，不改 profile 本身
 
 ### 下发前自动预检（不通就不入队）

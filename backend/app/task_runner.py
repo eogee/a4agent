@@ -3,6 +3,7 @@
 下发与执行分离：API 只负责建 pending 行并 submit，本模块在后台线程里跑 CLI，
 stdout 直接重定向到产出文件（前端可轮询到已产生的部分），终态落库并广播提醒。
 """
+import json
 import logging
 import os
 import subprocess
@@ -12,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
-from . import task_engines, task_notify
+from . import opencode_client, task_engines, task_notify
 from .database import SessionLocal, get_data_dir
 from .models import AgentTask
 
@@ -36,6 +37,10 @@ _pool: ThreadPoolExecutor | None = None
 _pool_lock = threading.Lock()
 _procs: dict = {}
 _procs_lock = threading.Lock()
+# HTTP 引擎（OpenCode）在跑的会话：{task_id: (sessionID, base_url, password)}。
+# 取消/退出时据此发 interrupt 而不是去杀进程树——服务端会话不归我们管进程。
+_http_sessions: dict = {}
+_http_lock = threading.Lock()
 _cancelled: set = set()
 # 应用退出抢先收走进程时，把原因交给 worker 落库，避免两边抢写同一行
 _shutdown_reason: dict = {}
@@ -69,8 +74,16 @@ def output_dir() -> Path:
 
 
 def output_path_for(tool: str, task_id: int) -> Path:
-    """pi 的 `--mode json` 是 JSONL 事件流，按原样存；其余引擎出 markdown。"""
-    suffix = "jsonl" if tool == "pi" else "md"
+    """pi 的 `--mode json` 是 JSONL 事件流，按原样存；其余引擎出 markdown。
+
+    OpenCode 的产出取自会话导出（JSON），用 .json 落盘最贴合原貌，也便于排查。
+    """
+    if tool in task_engines.HTTP_ENGINES:
+        suffix = "json"
+    elif tool == "pi":
+        suffix = "jsonl"
+    else:
+        suffix = "md"
     return output_dir() / f"{task_id}.{suffix}"
 
 
@@ -103,9 +116,12 @@ def _execute(task_id: int) -> None:
 
         path = output_path_for(task.tool, task.id)
         timeout = _clamp_timeout(task.timeout_seconds)
-        exit_code, timed_out = _run_cli(task, path, timeout)
-        content = _read_tail(path)
-        parsed = task_engines.parse_output(task.tool, content, exit_code)
+        if task.tool in task_engines.HTTP_ENGINES:
+            parsed, exit_code, timed_out = _run_http(task, path, timeout)
+        else:
+            exit_code, timed_out = _run_cli(task, path, timeout)
+            content = _read_tail(path)
+            parsed = task_engines.parse_output(task.tool, content, exit_code)
 
         forced = _shutdown_reason.pop(task.id, None)
         if forced:
@@ -208,6 +224,137 @@ def _run_cli(task, path: Path, timeout: int) -> tuple:
     return (int(proc.returncode or 0) if proc.returncode is not None else -1), timed_out
 
 
+def _looks_like_empty_rejection(messages: list) -> bool:
+    """空会话失败：只有 user 原文 + idle{failed}，没有任何 assistant 消息。
+
+    这是实测到的「模型名不被接受」的表现形态——服务端在建会话阶段就拒了，
+    所以既没有产出也没有 error 字段。
+    """
+    has_assistant = False
+    idle_failed = False
+    for m in messages or []:
+        if not isinstance(m, dict):
+            continue
+        if m.get("type") == "assistant":
+            has_assistant = True
+        elif m.get("type") == "idle" and m.get("outcome") == "failed":
+            idle_failed = True
+    return idle_failed and not has_assistant
+
+
+def _model_rejected(parsed: dict, messages: list | None = None) -> bool:
+    """失败原因是否指向「模型本身不可用」（值得换一个模型重试）。
+
+    两条依据：错误文案里的关键词，或空会话失败形态（见 _looks_like_empty_rejection）——
+    后者是实测到的服务端行为，光看文案会漏判。
+    """
+    err = str(parsed.get("error") or "").lower()
+    if any(m in err for m in opencode_client._REJECTED_MODEL_MARKERS):
+        return True
+    return messages is not None and _looks_like_empty_rejection(messages)
+
+
+def _run_http_once(task, path: Path, timeout: int, model: dict | None,
+                   base: str, password: str) -> tuple[dict, str, int, bool, list]:
+    """跑一次 HTTP 会话任务。
+
+    返回 (parsed, sessionID, exit_code, timed_out, messages)；messages 一并回传
+    是为了让调用方能识别「空会话失败」这一形态（换模型重试需要它）。
+    """
+    directory = (task.working_dir or "").strip() or None
+    timed_out = False
+    sid = ""
+    try:
+        sid = opencode_client.create_session(
+            task.prompt, directory=directory, model=model,
+            base_url=base, password=password,
+        )
+    except opencode_client.OpenCodeError as e:
+        path.write_text(f"# OpenCode 任务下发失败\n\n会话创建失败：{e}\n", encoding="utf-8")
+        return ({"ok": False, "text": "", "error": f"OpenCode 会话创建失败：{e}",
+                 "usage": {}}, "", 0, False, [])
+
+    with _http_lock:
+        _http_sessions[task.id] = (sid, base, password)
+
+    try:
+        cancelled = task.id in _cancelled
+        # 超时上限给足：wait 是阻塞端点，超时由我们自己兜底而非服务端
+        idle = (not cancelled) and opencode_client.wait_idle(
+            sid, base, password, timeout=float(timeout))
+        if cancelled:
+            opencode_client.interrupt(sid, base, password)
+            opencode_client.wait_idle(sid, base, password, timeout=15)
+        elif not idle and not opencode_client.wait_idle(sid, base, password, timeout=15):
+            timed_out = True
+            opencode_client.interrupt(sid, base, password)
+
+        try:
+            session = opencode_client.get_session(sid, base, password)
+        except opencode_client.OpenCodeError:
+            session = {}
+        try:
+            transcript = opencode_client.export_session(sid, base, password)
+        except opencode_client.OpenCodeError:
+            transcript = json.dumps({"session": session}, ensure_ascii=False, indent=2)
+        path.write_text(transcript, encoding="utf-8")
+
+        messages = opencode_client.list_messages(sid, base, password)
+        parsed = opencode_client.parse_output(messages, session, exit_code=0,
+                                              timed_out=timed_out)
+        # 模型名在会话创建阶段就被拒时，服务端可能**只给一个空 failed 会话**：
+        # 实测不存在的模型 → 消息流里既无 assistant 消息也无 error 字段，只有
+        # idle{failed} + 原始 user 文本。这种情况下错误原因只能从会话日志取，
+        # 否则用户只会看到「OpenCode 会话失败（无文本产出）」而不知道是模型名错。
+        if not parsed.get("ok") and model and _looks_like_empty_rejection(messages):
+            parsed["error"] += f"（请求的模型 {model['providerID']}/{model['id']} 未被接受）"
+        return (parsed, sid, 0, timed_out, messages)
+    finally:
+        with _http_lock:
+            _http_sessions.pop(task.id, None)
+        # 会话清掉，避免任务历史在 OpenCode 侧堆积；失败只记日志（任务结果优先）
+        if not opencode_client.delete_session(sid, base, password):
+            logger.info("OpenCode 会话 %s 未删除（可能已不存在）", sid)
+
+
+def _run_http(task, path: Path, timeout: int) -> tuple[dict, int, bool]:
+    """HTTP 引擎（OpenCode）：建会话 → 等空闲 → 导出产出，必要时换模型重试。
+
+    与 _run_cli 的差异只有一处：没有子进程，所以「取消」不是杀进程树，而是
+    对服务端会话发 interrupt（cancel 路径已单独处理）。产出、终态与提醒的
+    落库逻辑完全复用 CLI 分支，因此状态机对用户是一致的。
+
+    **换模型重试**：实测服务端默认模型可能已废弃（清单里仍标 enabled=true，
+    真跑才报 provider.invalid-request）。这类失败是瞬时的（不烧 token），
+    换服务端清单里的下一个候选重试一次，比直接判任务失败更符合用户预期；
+    候选封顶 3 个，避免「全部模型都坏」时无谓连跑。
+
+    返回 (parsed, exit_code, timed_out)；exit_code 对 HTTP 引擎没有进程语义，
+    固定 0（成败已由 parsed 表达）。
+    """
+    base, password = opencode_client.resolve_connection()
+    parsed, _sid, exit_code, timed_out, messages = _run_http_once(
+        task, path, timeout, None, base, password)
+    if parsed.get("ok") or not _model_rejected(parsed, messages):
+        return (parsed, exit_code, timed_out)
+    # 用户已取消 / 已超时 → 换模型重跑没有意义
+    if task.id in _cancelled or timed_out:
+        return (parsed, exit_code, timed_out)
+
+    try:
+        candidates = opencode_client.candidate_models(base, password)
+    except opencode_client.OpenCodeError:
+        candidates = []
+    for model in candidates:
+        logger.info("OpenCode 任务 #%s：默认模型不可用，换 %s 重试",
+                    task.id, f"{model['providerID']}/{model['id']}")
+        parsed, _sid, exit_code, timed_out, messages = _run_http_once(
+            task, path, timeout, model, base, password)
+        if parsed.get("ok") or not _model_rejected(parsed, messages):
+            return (parsed, exit_code, timed_out)
+    return (parsed, exit_code, timed_out)
+
+
 def _clamp_timeout(value) -> int:
     try:
         seconds = int(value)
@@ -249,7 +396,11 @@ def _kill_tree(proc) -> None:
 
 
 def cancel(task_id: int, db) -> dict:
-    """取消运行中的任务：杀进程树 + 标记 cancelled（pending 任务直接落终态）。"""
+    """取消运行中的任务：杀进程树 + 标记 cancelled（pending 任务直接落终态）。
+
+    HTTP 引擎（OpenCode）没有本地进程可杀，改为给服务端会话发 interrupt；
+    worker 检测到 _cancelled 后会走 interrupt → 落 cancelled 的收尾路径。
+    """
     task = db.get(AgentTask, task_id)
     if task is None:
         raise ValueError("任务不存在")
@@ -267,7 +418,14 @@ def cancel(task_id: int, db) -> dict:
     _cancelled.add(task_id)
     if proc is not None:
         _kill_tree(proc)
-    return {"cancelled": True, "detail": "已终止引擎进程，任务标记为取消"}
+        return {"cancelled": True, "detail": "已终止引擎进程，任务标记为取消"}
+    with _http_lock:
+        session = _http_sessions.get(task_id)
+    if session is not None:
+        sid, base, password = session
+        opencode_client.interrupt(sid, base, password)
+        return {"cancelled": True, "detail": "已中断 OpenCode 会话，任务标记为取消"}
+    return {"cancelled": True, "detail": "已标记为取消"}
 
 
 def shutdown_all(reason: str = "应用退出") -> int:

@@ -274,16 +274,39 @@ def test_healthy_probe_output_is_not_treated_as_crash():
     assert task_engines._failure_summary(["1.0.2"]) == "1.0.2"
 
 
-# ---------------- v0.5.1：六端覆盖 ----------------
+# ---------------- v0.5.1：六端覆盖 + v0.6.0：OpenCode 接入 ----------------
 
 
-def test_engines_cover_all_six_tools():
-    """任务下发覆盖六个确认支持无头调用的目标。"""
-    assert task_engines.ENGINES == ("claude", "codex", "zcode", "qoder", "dsh", "pi")
+def test_engines_cover_all_supported_tools():
+    """任务下发覆盖七个确认支持无头调用的目标。"""
+    assert task_engines.ENGINES == ("claude", "codex", "zcode", "qoder", "dsh", "pi", "opencode")
     for tool in task_engines.ENGINES:
         assert tool in task_engines.ENGINE_LABELS
         assert tool in task_engines.CONFIG_HINTS
-        assert tool in task_engines._YOLO_FLAG
+        if tool not in task_engines.HTTP_ENGINES:
+            assert tool in task_engines._YOLO_FLAG
+
+
+def test_opencode_is_http_engine_not_cli():
+    """OpenCode 走 HTTP 会话而非命令行：argv 与文本解析都要明确拒绝。
+
+    这条约束是防止后续维护者把 opencode 塞回 _SHIM/_YOLO_FLAG——那会在运行时
+    才发现没有命令可用，或更糟：拿 CLI 方式跑却丢了会话级权限与 outcome。
+    """
+    assert "opencode" in task_engines.HTTP_ENGINES
+    assert "opencode" not in task_engines._SHIM
+    with pytest.raises(ValueError):
+        task_engines.build_argv("opencode", "PROMPT")
+    with pytest.raises(ValueError):
+        task_engines.parse_output("opencode", "{}", 0)
+
+
+def test_opencode_runtime_has_no_argv():
+    """resolve_runtime 对 opencode 返回 HTTP 规格，argv_prefix 必须为空。"""
+    runtime = task_engines.resolve_runtime("opencode")
+    assert runtime is not None
+    assert runtime["http"] is True
+    assert runtime["argv_prefix"] == []
 
 
 def test_qoder_command_name_has_fallback():
@@ -293,12 +316,13 @@ def test_qoder_command_name_has_fallback():
 
 
 def test_build_argv_is_headless_and_preauthorized(monkeypatch):
-    """六端命令都必须：无头入口 + 结构化输出 + 权限预授权。
+    """命令行端都必须：无头入口 + 结构化输出 + 权限预授权。
 
     无人值守下没有审批人，不预授权会卡死或被直接拒绝——这是实测踩过的坑。
+    HTTP_ENGINES 不在此列（OpenCode 用会话级 permissions 免审批）。
     """
     monkeypatch.setattr(task_engines, "resolve_command", lambda tool: f"/bin/{tool}")
-    for tool in task_engines.ENGINES:
+    for tool in [t for t in task_engines.ENGINES if t not in task_engines.HTTP_ENGINES]:
         argv = task_engines.build_argv(tool, "PROMPT")
         joined = " ".join(argv)
         assert "PROMPT" in joined
