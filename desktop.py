@@ -312,9 +312,9 @@ def main() -> None:
     except Exception:
         pass
     try:
-        from backend.app.main import stop_opencode_events
+        from backend.app import opencode_listen
 
-        stop_opencode_events()
+        opencode_listen.stop()
     except Exception:
         pass
     try:

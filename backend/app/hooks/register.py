@@ -1,6 +1,6 @@
 """会话 Hook 注册/卸载：把 a4agent 的 hook 命令写进各宿主配置文件。
 
-覆盖六端：
+覆盖七端：
   Claude Code  ~/.claude/settings.json      hooks.{Stop,PreToolUse,PermissionRequest}
   Qoder        ~/.qoder/settings.json       同构 Claude，命令带 qoder 标识
   WorkBuddy    ~/.workbuddy/settings.json   同构 Claude，命令带 workbuddy 标识
@@ -9,6 +9,8 @@
   DSH          ~/.dsh/profiles/*/cordis.patch.yml
                DSH 无外部 hook 协议，改为挂载内置 Cordis 插件（进程内加载），
                实现见 dsh_register.py—— 与上面五端的「写命令」语义不同。
+  OpenCode     不写任何宿主文件：它没有 hook 协议，注册 = 开启 a4agent 侧的
+               服务事件监听（会话终局提醒 + 权限批办），实现见 opencode_listen。
 
 幂等：已注册时不重复写。归属判定用「命令含 a4agent 且含 ' hook'」，
 不会误删用户自己的 a4p（a4phone）或其它 hook 命令。
@@ -29,7 +31,7 @@ OWN_COMMAND_PATTERN = re.compile(r"a4agent[^\"']*\s+hook\b|\ba4agent\b.*\bhook\b
 CODEX_MARKER_START = "# >>> a4agent hooks >>>"
 CODEX_MARKER_END = "# <<< a4agent hooks <<<"
 
-ENGINES = ("claude", "codex", "zcode", "qoder", "workbuddy", "dsh")
+ENGINES = ("claude", "codex", "zcode", "qoder", "workbuddy", "dsh", "opencode")
 
 
 def default_hook_command(agent: str | None = None) -> str:
@@ -388,6 +390,25 @@ def _codex_registered() -> bool:
     return CODEX_MARKER_START in content or bool(re.search(r"a4agent.*\bhook\b", content))
 
 
+# ---------------- OpenCode（服务事件监听开关，不写宿主文件） ----------------
+# OpenCode 没有 hook 协议，「注册」= 开启 a4agent 侧的服务事件监听
+# （会话终局提醒 + 权限批办），实现与语义见 opencode_listen 模块头。
+
+def _opencode_listen():
+    from .. import opencode_listen
+
+    return opencode_listen
+
+
+def register_opencode() -> dict:
+    _opencode_listen().set_listen(True)
+    return {"registered": True, "changed": True, "detail": "已注册"}
+
+def unregister_opencode() -> dict:
+    _opencode_listen().set_listen(False)
+    return {"unregistered": True}
+
+
 # ---------------- 引擎注册表 ----------------
 
 def _engine_paths() -> dict:
@@ -406,6 +427,8 @@ def register_engine(engine: str, hook_command: str | None = None) -> dict:
     if engine == "dsh":
         # DSH 无外部 hook 协议：改为部署 + 挂载内置 Cordis 插件（进程内加载）
         return dsh_register.register_dsh()
+    if engine == "opencode":
+        return register_opencode()
     if engine == "codex":
         changed = register_codex(hook_command or default_hook_command("codex"))
         return {"registered": True, "changed": changed,
@@ -426,6 +449,8 @@ def unregister_engine(engine: str) -> dict:
         return {"unregistered": False, "detail": f"未知引擎：{engine}"}
     if engine == "dsh":
         return dsh_register.unregister_dsh()
+    if engine == "opencode":
+        return unregister_opencode()
     if engine == "codex":
         return {"unregistered": unregister_codex()}
     if engine == "zcode":
@@ -434,9 +459,11 @@ def unregister_engine(engine: str) -> dict:
 
 
 def registration_status() -> dict:
-    """六端注册状态 + 配置文件路径，供 GUI 展示。"""
+    """七端注册状态 + 配置文件路径，供 GUI 展示。"""
     paths = _engine_paths()
     dsh_registered, dsh_path = dsh_register.registered()
+    from ..opencode_client import service_json_path
+
     return {
         "claude": {"registered": _json_hooks_registered(paths["claude"]),
                    "path": str(paths["claude"])},
@@ -447,4 +474,7 @@ def registration_status() -> dict:
         "zcode": {"registered": _zcode_registered(), "path": str(_zcode_config_path())},
         "codex": {"registered": _codex_registered(), "path": str(_codex_config_path())},
         "dsh": {"registered": dsh_registered, "path": dsh_path},
+        "opencode": {"registered": _opencode_listen().listen_enabled(),
+                     # 没有被写入的宿主文件：凭据来自 OpenCode 自己的服务注册文件
+                     "path": str(service_json_path())},
     }

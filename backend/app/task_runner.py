@@ -276,6 +276,8 @@ def _run_http_once(task, path: Path, timeout: int, model: dict | None,
 
     with _http_lock:
         _http_sessions[task.id] = (sid, base, password)
+    # 登记 a4agent 自建会话：事件订阅对同一条终局不再重复推通知
+    opencode_client.mark_dispatched(sid)
 
     try:
         cancelled = task.id in _cancelled

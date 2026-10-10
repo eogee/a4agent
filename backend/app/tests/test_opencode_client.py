@@ -488,17 +488,10 @@ def test_parse_output_empty_is_failure():
 # ---------------- 连接配置 ----------------
 
 
-def test_resolve_connection_prefers_explicit(monkeypatch):
-    monkeypatch.setattr(opencode_client, "read_local_password", lambda: "local")
-    base, pwd = opencode_client.resolve_connection({"base_url": "http://h:1234/",
-                                                   "password": "given"})
-    assert base == "http://h:1234"
-    assert pwd == "given"
-
-
-def test_resolve_connection_falls_back_to_local(monkeypatch):
+def test_resolve_connection_uses_default_and_local_password(monkeypatch):
+    """无连接配置界面：默认端口 + service.json 自动发现，装了 OpenCode 即在。"""
     monkeypatch.setattr(opencode_client, "read_local_password", lambda: "auto")
-    base, pwd = opencode_client.resolve_connection({})
+    base, pwd = opencode_client.resolve_connection()
     assert base == opencode_client.DEFAULT_BASE_URL
     assert pwd == "auto"
 
@@ -548,11 +541,8 @@ def test_model_rejected_ignores_unrelated_failure():
     assert not any(m in err.lower() for m in opencode_client._REJECTED_MODEL_MARKERS)
 
 
-def test_probe_cache_is_keyed_by_connection(monkeypatch):
-    """缓存必须按 (地址, 密码) 分键：从本机切到远程不能复用旧结果。
-
-    否则切换保存后，界面会显示一个根本没连过的地址「已连接」。
-    """
+def test_probe_cache_hit_and_refresh(monkeypatch):
+    """探测结果缓存 5 分钟；refresh=True 直通（任务下发页的刷新按钮依赖它）。"""
     monkeypatch.setattr(opencode_client, "_probe_cache", {})
     monkeypatch.setattr(opencode_client, "read_local_password", lambda: "local-pw")
     seen = []
@@ -562,12 +552,18 @@ def test_probe_cache_is_keyed_by_connection(monkeypatch):
         return {"version": "2.0.26"}
 
     monkeypatch.setattr(opencode_client, "server_info", fake_info)
-    opencode_client.probe({"base_url": "http://127.0.0.1:49374"})
-    opencode_client.probe({"base_url": "http://remote:9999", "password": "pw2"})
-    assert len(seen) == 2, "不同连接复用了同一份探测缓存"
-    # 同参数再探一次应命中缓存
-    opencode_client.probe({"base_url": "http://remote:9999", "password": "pw2"})
-    assert len(seen) == 2
+    opencode_client.probe()
+    opencode_client.probe()
+    assert len(seen) == 1, "缓存未命中"
+    opencode_client.probe(refresh=True)
+    assert len(seen) == 2, "refresh 未绕过缓存"
+
+
+def test_dispatched_registry_roundtrip():
+    sid = "ses_test1234"
+    assert not opencode_client.is_dispatched(sid)
+    opencode_client.mark_dispatched(sid)
+    assert opencode_client.is_dispatched(sid)
 
 
 def test_probe_cache_key_does_not_store_plaintext(monkeypatch):
@@ -584,7 +580,7 @@ def test_probe_without_password_reports_credential_problem(monkeypatch):
     monkeypatch.setattr(opencode_client, "_probe_cache", {})
     info = opencode_client.probe()
     assert info["installed"] is False
-    assert "密码" in info["error"]
+    assert "service.json" in info["error"]
 
 
 def test_probe_reports_version_and_capabilities(monkeypatch):
@@ -613,7 +609,7 @@ def test_event_status_mapping_covers_terminal_events():
     import ast
     import pathlib
 
-    src = pathlib.Path(__file__).resolve().parents[2] / "app" / "main.py"
+    src = pathlib.Path(__file__).resolve().parents[2] / "app" / "opencode_listen.py"
     tree = ast.parse(src.read_text(encoding="utf-8"))
     mapping = None
     for node in tree.body:

@@ -1,7 +1,7 @@
 """OpenCode HTTP 客户端：连接、会话生命周期与事件订阅。
 
 **为什么用 HTTP 而不是拉 CLI 子进程**：OpenCode 本来就跑着一个常驻后台服务
-（本机 127.0.0.1:49374，或远程 host），直接对接它的 API 比每次新起一个 CLI 进程
+（本机 127.0.0.1:49374），直接对接它的 API 比每次新起一个 CLI 进程
 更贴合真实形态，且换来三样 CLI 给不了的能力：
 
 - **会话级免审批**：POST /api/session 接受 permissions 规则，无头任务因此不必
@@ -11,9 +11,8 @@
 - **可中断**：POST /api/session/{id}/interrupt 取消，DELETE 清会话
 
 **鉴权**（实测确认，见 docs/OpenCode-实测记录.md）：HTTP Basic，用户名固定
-`opencode`，密码来自 ~/.config/opencode/service.json。本机模式由本文件自动
-读取；远程模式由用户在界面填 base_url + 密码，密码 DPAPI 加密落盘
-（复用 crypto.encrypt_secret），接口永不回显明文。
+`opencode`，密码来自 ~/.config/opencode/service.json，由本文件自动读取——
+与其他端「装了就在」一致，没有任何连接配置界面。
 
 **降级策略**：所有端点失败都不抛到调用方之外——连接问题统一以 OpenCodeError
 返回，由调用方决定是标记引擎不可用还是如实落库成失败任务。
@@ -21,7 +20,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import logging
 import socket
@@ -30,6 +28,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import OrderedDict
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -40,6 +39,26 @@ CONNECT_TIMEOUT = 5.0
 DEFAULT_TIMEOUT = 300.0
 # 服务端消息保留上限远大于本工具产出文件；导出失败时回退到 /message
 EXPORT_LIMIT = 4 * 1024 * 1024
+
+# ---------------- a4agent 自己下发的会话登记 ----------------
+# 事件订阅对服务上**所有**会话推终局，而下发任务已有任务终态通知；不登记去重
+# 的话，同一次下发用户会收到两条推送。task_runner 建会话时登记，订阅回调查询。
+_DISPATCHED_MAX = 1000
+_dispatched: "OrderedDict[str, float]" = OrderedDict()
+_dispatched_lock = threading.Lock()
+
+
+def mark_dispatched(session_id: str) -> None:
+    """登记一个 a4agent 下发的会话（有界，防长跑进程无限增长）。"""
+    with _dispatched_lock:
+        _dispatched[session_id] = time.time()
+        while len(_dispatched) > _DISPATCHED_MAX:
+            _dispatched.popitem(last=False)
+
+
+def is_dispatched(session_id: str) -> bool:
+    with _dispatched_lock:
+        return session_id in _dispatched
 
 
 class OpenCodeError(Exception):
@@ -67,12 +86,9 @@ def read_local_password() -> str:
     return str(data.get("password") or "") if isinstance(data, dict) else ""
 
 
-def resolve_connection(cfg: dict | None = None) -> tuple[str, str]:
-    """返回 (base_url, password)：优先用户配置，其次本机自动发现。"""
-    cfg = cfg or {}
-    base = str(cfg.get("base_url") or "").strip() or DEFAULT_BASE_URL
-    pwd = str(cfg.get("password") or "").strip() or read_local_password()
-    return base.rstrip("/"), pwd
+def resolve_connection() -> tuple[str, str]:
+    """返回 (base_url, password)：默认端口 + 本机 service.json 自动发现。"""
+    return DEFAULT_BASE_URL, read_local_password()
 
 
 # ---------------- 底层请求 ----------------
@@ -149,20 +165,17 @@ def server_info(base_url: str, password: str) -> dict:
     return api("GET", "/api/info", base_url=base_url, password=password, timeout=CONNECT_TIMEOUT) or {}
 
 
-def probe(cfg: dict | None = None) -> dict:
+def probe(refresh: bool = False) -> dict:
     """探测 OpenCode 端可用性（探测结果缓存 5 分钟，与其它端一致）。
 
     不用 CLI 探测：本机 PATH 上未必有 opencode，而后台服务只要在跑就能连——
-    这正是「对接运行中的实例」的意义。
-
-    缓存按 (地址, 密码指纹) 分键：用户从本机模式切到远程模式后，若还命中本机
-    那次的探测结果，界面就会显示一个根本没连过的地址已就绪。
+    这正是「对接运行中的实例」的意义。未装 OpenCode（读不到 service.json）
+    或服务没起都如实反映在 error 里，装好即自愈，无需任何配置动作。
     """
     now = time.time()
-    base, pwd = resolve_connection(cfg)
-    key = (base, hashlib.sha256(pwd.encode()).hexdigest()[:12] if pwd else "")
-    cached = _probe_cache.get(key)
-    if cached and now - cached[0] < _PROBE_CACHE_SECONDS:
+    base, pwd = resolve_connection()
+    cached = _probe_cache.get(base)
+    if cached and not refresh and now - cached[0] < _PROBE_CACHE_SECONDS:
         return cached[1]
     info: dict = {
         "tool": "opencode",
@@ -174,8 +187,8 @@ def probe(cfg: dict | None = None) -> dict:
     }
     if not pwd:
         info["error"] = (
-            "未取得 OpenCode 服务密码（~/.config/opencode/service.json 不存在或读不到），"
-            "请在设置里填写连接密码"
+            "未检测到本机 OpenCode 服务（~/.config/opencode/service.json 不存在），"
+            "启动 OpenCode 后自动可用"
         )
     else:
         try:
@@ -188,7 +201,7 @@ def probe(cfg: dict | None = None) -> dict:
                 info["capabilities"] = caps
         except OpenCodeError as e:
             info["error"] = f"无法连接 OpenCode 服务：{e}"
-    _probe_cache[key] = (now, info)
+    _probe_cache[base] = (now, info)
     return info
 
 
@@ -422,18 +435,20 @@ class EventStream:
     **实测的关键细节**：SSE 协议自身的 event: 字段是空的，事件类型在 data 里
     JSON 的 type 字段（如 session.execution.succeeded）。按 event: 分派会永远收不到。
 
+    事件**绝不限流**：早期只为终局提醒时按 1 条/秒节流过，但权限批办走同一
+    条流后，permission.asked 撞上 step 事件风暴会被静默丢弃，用户手机永远
+    收不到审批推送。下游各自轻量，风暴放行无害。
+
     重连策略：指数退避 1s→2s→4s…上限 30s；回调抛异常不影响订阅线程存活。
     stop() 幂等，供应用退出调用。
     """
 
-    def __init__(self, base_url: str, password: str, on_event, min_interval: float = 1.0):
+    def __init__(self, base_url: str, password: str, on_event):
         self.base_url = base_url.rstrip("/")
         self.password = password
         self.on_event = on_event
-        self.min_interval = min_interval
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self.last_event_at = 0.0
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -486,10 +501,6 @@ class EventStream:
         payload = _json_or_none(data)
         if not isinstance(payload, dict):
             return
-        now = time.time()
-        if now - self.last_event_at < self.min_interval:
-            return  # 同一瞬间的事件风暴限流：通知只需知道「有过活动」
-        self.last_event_at = now
         try:
             self.on_event(payload)
         except Exception:  # noqa: BLE001 - 单条回调失败不能拖垮订阅

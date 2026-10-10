@@ -536,9 +536,10 @@ def test_codex_marker_block_refreshes_stale_command(fake_home):
     assert register.register_engine("codex", '"C:\\new\\a4agent.exe" hook codex')["changed"] is False
 
 
-def test_status_reports_all_engines(fake_home):
+def test_status_reports_all_engines(fake_home, data_dir):
     status = register.registration_status()
-    assert set(status) == {"claude", "codex", "zcode", "qoder", "workbuddy", "dsh"}
+    assert set(status) == {"claude", "codex", "zcode", "qoder", "workbuddy", "dsh",
+                           "opencode"}
     assert all(not v["registered"] for v in status.values())
 
 
@@ -789,6 +790,20 @@ def test_dsh_registered_status_reflects_mount(tmp_path, monkeypatch):
     ok, path = dsh_register.registered()
     assert ok is True
     assert "2/2" in path
+
+
+def test_opencode_engine_roundtrip(data_dir):
+    """OpenCode 注册 = 服务事件监听开关，不写任何宿主文件。"""
+    from backend.app import opencode_listen
+
+    assert "opencode" in register.ENGINES
+    assert register.registration_status()["opencode"]["registered"] is False
+    result = register.register_engine("opencode")
+    assert result["registered"] is True
+    assert opencode_listen.listen_enabled() is True
+    assert register.registration_status()["opencode"]["registered"] is True
+    assert register.unregister_engine("opencode")["unregistered"] is True
+    assert opencode_listen.listen_enabled() is False
 
 
 def test_dsh_engine_in_register_table(tmp_path, monkeypatch):

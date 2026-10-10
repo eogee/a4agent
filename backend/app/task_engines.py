@@ -255,7 +255,7 @@ def _crash_line(done) -> str:
 def probe(tool: str, refresh: bool = False) -> dict:
     """探测单个引擎：安装状态、路径与版本（结果缓存 5 分钟）。"""
     if tool in HTTP_ENGINES:
-        return opencode_client.probe()  # 内部自带 5 分钟缓存
+        return opencode_client.probe(refresh=refresh)  # 内部自带 5 分钟缓存
 
     now = time.time()
     cached = _probe_cache.get(tool)

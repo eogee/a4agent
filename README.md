@@ -17,12 +17,11 @@ English | [简体中文](README.zh-CN.md)
 
 ## OpenCode Integration (since v0.6.0)
 
-Beyond managing OpenCode's skills and MCP like any other tool, a4agent **drives the OpenCode instance you already have running**. It works out of the box on this machine — a4agent reads that service's password and default port (`49374`) on its own. Enable it on the Notifications page and you get:
+OpenCode gets exactly the same treatment as the other six tools — no dedicated UI anywhere:
 
-- **OpenCode as a dispatch engine**: tasks run as sessions against the live service instead of spawning a fresh CLI process each time. Approval-free execution uses **session-scoped permission rules**, so your global config is left untouched; cost, usage, and outcome come back structured; cancelling sends an interrupt rather than killing a process.
-- **Notifications for sessions you start in OpenCode's web UI**: when those finish, fail, or get interrupted, they reach you through the same desktop toast and phone push.
-
-For a remote OpenCode server, fill in the address and password on the same card (the password is stored with Windows DPAPI encryption and is never echoed back in the UI).
+- **Skills / MCP**: managed as the seventh tool like any other (works out of the box — the service password and default port `49374` are discovered automatically).
+- **Task dispatch**: an OpenCode engine that runs tasks as sessions against the live service instead of spawning a fresh CLI process each time. Approval-free execution uses **session-scoped permission rules**, so your global config is left untouched; cost, usage, and outcome come back structured; deprecated models are automatically retried with a working one.
+- **Session interaction**: the host table on the Notifications page gains an OpenCode row. "Register" turns on the service event listener — sessions you start in OpenCode's web UI reach you through the same desktop toast and phone push when they finish, fail, or get interrupted, and in "phone-first" mode permission requests are pushed to your phone for remote approval (Approve / Always / Deny) via OpenCode's permission API. OpenCode has no hook protocol, so registering **writes nothing into its files**.
 
 ---
 

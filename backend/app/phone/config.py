@@ -56,6 +56,9 @@ def _normalize(raw: dict) -> dict:
         "mode": "out" if hook_in.get("mode") == "out" else "home",
         "timeout": _clamp_int(hook_in.get("timeout"), DEFAULT_HOOK["timeout"], 15, 600),
         "plan_timeout": _clamp_int(hook_in.get("plan_timeout"), DEFAULT_HOOK["plan_timeout"], 30, 1800),
+        # OpenCode 服务事件监听的注册位（会话交互表第七行）：无 hook 协议的端
+        # 注册时不写宿主文件，只翻转这个开关（语义见 opencode_listen 模块头）
+        "opencode": bool(hook_in.get("opencode")),
     }
     # 桌面横幅独立开关（顶层字段，与 enabled/events 同级）：只有显式 False 才关，
     # 缺字段的老配置一律按默认开，不能因为新增开关让既有用户静默
