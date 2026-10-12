@@ -457,6 +457,12 @@ body {
   color: #3f5f9e;
 }
 
+/* WorkBuddy 徽章：青绿调，与上面所有冷色/暖色标签都不撞色 */
+.target-workbuddy {
+  background: #e6f4f1;
+  color: #1f7a68;
+}
+
 .card-actions {
   margin-top: auto;
   padding-top: 16px;

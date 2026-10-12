@@ -34,6 +34,7 @@ def env(tmp_path, monkeypatch):
         "pi_mcp": tmp_path / "pi-mcp.json",
         "qoder_mcp": tmp_path / "qoder-mcp.json",
         "oc_config": tmp_path / "opencode-config",
+        "workbuddy_mcp": tmp_path / "workbuddy-mcp.json",
         "projects_root": tmp_path / "projects",
     }
     monkeypatch.setenv("A4AGENT_DATA_DIR", str(ctx["data"]))
@@ -48,6 +49,8 @@ def env(tmp_path, monkeypatch):
     # 「发现结果应当只有 N 个」这类断言随机失败
     ctx["oc_config"].mkdir(parents=True)
     monkeypatch.setenv("A4AGENT_OPENCODE_CONFIG_DIR", str(ctx["oc_config"]))
+    # WorkBuddy 同理：不隔离会读到用户真实的 ~/.workbuddy/mcp.json
+    monkeypatch.setenv("A4AGENT_WORKBUDDY_MCP_PATH", str(ctx["workbuddy_mcp"]))
     # 项目根指向临时目录下的 projects_root（skill 的 project_roots 复用于 MCP）
     ctx["projects_root"].mkdir(parents=True)
     from backend.app import skill_manager
@@ -1385,3 +1388,136 @@ def test_qoder_project_scope_is_rejected(env, db):
             [{"scope": "project", "tool": "qoder", "project": "proj-qoder"}],
         )
     assert not env["qoder_mcp"].exists()
+
+
+# ---------------- WorkBuddy 端 ----------------
+
+
+def make_workbuddy_global(env, name, entry, extra_top=None):
+    """向 WorkBuddy 的 mcp.json 写入一个 server，保留/附带顶层键。"""
+    loaded = {}
+    if env["workbuddy_mcp"].exists():
+        try:
+            loaded = json.loads(env["workbuddy_mcp"].read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            loaded = {}
+    loaded = loaded if isinstance(loaded, dict) else {}
+    if extra_top:
+        loaded.update(extra_top)
+    servers = dict(loaded.get("mcpServers") or {})
+    servers[name] = entry
+    loaded["mcpServers"] = servers
+    env["workbuddy_mcp"].write_text(json.dumps(loaded, ensure_ascii=False), encoding="utf-8")
+    return env["workbuddy_mcp"]
+
+
+def test_discover_includes_workbuddy_global(env):
+    """WorkBuddy 端：全局 ~/.workbuddy/mcp.json 被发现，三种传输都在能力矩阵里。"""
+    make_workbuddy_global(env, "rea", {"command": "node", "args": ["rea.mjs", "mcp"]})
+    make_claude_global(env, "rea")
+
+    data = mcp_manager.discover()
+    assert data["roots"]["workbuddy"] == str(env["workbuddy_mcp"])
+    assert data["capability"]["workbuddy"] == ["http", "sse", "stdio"]
+    groups = {g["name"]: g for g in data["global"]}
+    assert groups["rea"]["ends"] == ["claude", "workbuddy"]
+
+
+def test_workbuddy_read_normalizes_streamablehttp_and_keeps_timeout(env):
+    """驼峰 streamableHttp 归一为 http；timeout 是每条目生效的自有键，必须进 extra 保住。"""
+    make_workbuddy_global(
+        env,
+        "lighthouse",
+        {"type": "streamableHttp", "url": "https://example.com/mcp", "timeout": 30000},
+    )
+    servers = mcp_manager.read_servers("global", "workbuddy")
+    assert len(servers) == 1
+    assert servers[0]["transport"] == "http"
+    assert servers[0]["extra"]["timeout"] == 30000
+
+
+def test_workbuddy_stdio_without_type_defaults_to_stdio(env):
+    """WorkBuddy 的 stdio 条目通常不写 type：按 command 推导为 stdio。"""
+    make_workbuddy_global(
+        env,
+        "rea",
+        {"command": "node", "args": ["rea.mjs", "mcp"], "timeout": 330000,
+         "env": {"REA_ANALYSIS_PROVIDER": "ghidra"}},
+    )
+    servers = mcp_manager.read_servers("global", "workbuddy")
+    assert servers[0]["transport"] == "stdio"
+    assert servers[0]["args"] == ["rea.mjs", "mcp"]
+    assert servers[0]["env"]["REA_ANALYSIS_PROVIDER"] == "ghidra"
+
+
+def test_workbuddy_write_http_uses_camel_case_streamablehttp(env):
+    """写回必须用 WorkBuddy 认的驼峰拼写：写成 http 它认不出该条目。"""
+    make_workbuddy_global(env, "keep", {"type": "stdio", "command": "node", "timeout": 30})
+    mcp_manager.create_server(
+        "global",
+        "workbuddy",
+        None,
+        {"name": "remote", "transport": "http", "command": None, "args": [],
+         "env": {}, "url": "https://remote.example/mcp", "headers": {},
+         "cwd": None, "description": "远程"},
+    )
+    data = json.loads(env["workbuddy_mcp"].read_text(encoding="utf-8"))
+    assert data["mcpServers"]["remote"]["type"] == "streamableHttp"
+    assert data["mcpServers"]["remote"]["url"] == "https://remote.example/mcp"
+    # 既有条目的 timeout 不被抹平
+    assert data["mcpServers"]["keep"]["timeout"] == 30
+
+
+def test_workbuddy_write_round_trip_keeps_native_keys_and_top_level(env):
+    """装新 server：既有条目的 timeout 与顶层非 mcpServers 键不被抹平。"""
+    path = make_workbuddy_global(
+        env,
+        "legacy",
+        {"type": "stdio", "command": "node", "args": ["l.js"], "timeout": 330000},
+        extra_top={"version": 2},
+    )
+    mcp_manager.create_server(
+        "global",
+        "workbuddy",
+        None,
+        {"name": "fs", "transport": "stdio", "command": "node", "args": ["f.js"],
+         "env": {}, "url": None, "headers": {}, "cwd": None, "description": "文件系统"},
+    )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["version"] == 2
+    assert data["mcpServers"]["legacy"]["timeout"] == 330000
+    assert data["mcpServers"]["fs"]["type"] == "stdio"
+    assert data["mcpServers"]["fs"]["description"] == "文件系统"
+
+
+def test_migrate_claude_to_workbuddy_keeps_sse(env, db):
+    """Claude 全局 server 迁到 WorkBuddy：sse 按该端认的 type 原样写出。"""
+    env["claude_json"].write_text(
+        json.dumps({"mcpServers": {"old": {"type": "sse", "url": "https://a.example/sse"}}}),
+        encoding="utf-8",
+    )
+    result = mcp_manager.migrate(
+        db,
+        [{"scope": "global", "tool": "claude", "project": None, "name": "old"}],
+        [{"scope": "global", "tool": "workbuddy", "project": None}],
+    )
+    assert result["migrated"] == 1 and result["failed"] == 0
+    entry = json.loads(env["workbuddy_mcp"].read_text(encoding="utf-8"))["mcpServers"]["old"]
+    assert entry == {"type": "sse", "url": "https://a.example/sse"}
+
+
+def test_workbuddy_project_scope_is_rejected(env, db):
+    """WorkBuddy 只托管全局：安装与迁移都拒绝项目级。"""
+    make_project(env, "proj-wb")
+    with pytest.raises(ValueError, match="WorkBuddy 端不支持项目级"):
+        mcp_manager.create_server(
+            "project", "workbuddy", "proj-wb", {"name": "fs", "transport": "stdio", "command": "node"}
+        )
+    make_claude_global(env, "sentry")
+    with pytest.raises(ValueError, match="WorkBuddy 端不支持项目级"):
+        mcp_manager.migrate(
+            db,
+            [{"scope": "global", "tool": "claude", "project": None, "name": "sentry"}],
+            [{"scope": "project", "tool": "workbuddy", "project": "proj-wb"}],
+        )
+    assert not env["workbuddy_mcp"].exists()
