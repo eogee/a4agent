@@ -781,9 +781,9 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   /* ---------- 技能管理 ---------- */
-  var TOOL_LABEL = { claude: 'Claude', codex: 'Codex', dsh: 'dsh', zcode: 'ZCode', pi: 'pi', qoder: 'Qoder', opencode: 'OpenCode' };
-  // 七端清单唯一定义处：新增/删除端只改这里（后端 TOOLS 与 schemas 闸门需同步）
-  var TOOL_KEYS = ['claude', 'codex', 'dsh', 'zcode', 'pi', 'qoder', 'opencode'];
+  var TOOL_LABEL = { claude: 'Claude', codex: 'Codex', dsh: 'dsh', zcode: 'ZCode', pi: 'pi', qoder: 'Qoder', opencode: 'OpenCode', workbuddy: 'WorkBuddy' };
+  // 八端清单唯一定义处：新增/删除端只改这里（后端 TOOLS 与 schemas 闸门需同步）
+  var TOOL_KEYS = ['claude', 'codex', 'dsh', 'zcode', 'pi', 'qoder', 'opencode', 'workbuddy'];
   // MCP 项目级有独立文件的端：dsh 是全局 profile 层，Qoder 复用 Claude Code 的 <repo>/.mcp.json
   var MCP_PROJECT_TOOLS = ['claude', 'codex', 'zcode', 'pi', 'opencode'];
   var skillView = 'global'; // global | project
@@ -867,7 +867,7 @@ layui.use(['layer', 'form', 'element'], function () {
       if (!gs.length) {
         if (match) { box.innerHTML = noMatchTip(skillQuery, '技能'); return; }
         box.innerHTML = '<div class="empty-tip">各端的全局目录还没有任何 skill<br>' +
-          '<span style="font-size:12px;">~/.claude/skills · ~/.codex/skills · ~/.dsh/skills · ~/.zcode/skills · ~/.pi/agent/skills · ~/.qoder/skills · ~/.config/opencode/skills</span></div>';
+          '<span style="font-size:12px;">~/.claude/skills · ~/.codex/skills · ~/.dsh/skills · ~/.zcode/skills · ~/.pi/agent/skills · ~/.qoder/skills · ~/.config/opencode/skills · ~/.workbuddy/skills</span></div>';
         return;
       }
       box.innerHTML = gs.map(function (g) { return skillGroupCard(g, 'global', ''); }).join('');
@@ -1460,7 +1460,7 @@ layui.use(['layer', 'form', 'element'], function () {
       if (!gs.length) {
         if (match) { box.innerHTML = noMatchTip(mcpQuery, ' MCP server'); return; }
         box.innerHTML = '<div class="empty-tip">各端还未配置任何 MCP server<br>' +
-          '<span style="font-size:12px;">~/.claude.json · ~/.codex/config.toml · cordis.patch.yml · ~/.zcode/cli/config.json · ~/.pi/agent/mcp.json · ~/.qoder/mcp.json · ~/.config/opencode/opencode.jsonc</span></div>';
+          '<span style="font-size:12px;">~/.claude.json · ~/.codex/config.toml · cordis.patch.yml · ~/.zcode/cli/config.json · ~/.pi/agent/mcp.json · ~/.qoder/mcp.json · ~/.config/opencode/opencode.jsonc · ~/.workbuddy/mcp.json</span></div>';
         return;
       }
       box.innerHTML = gs.map(function (g) { return mcpGroupCard(g, 'global', ''); }).join('');

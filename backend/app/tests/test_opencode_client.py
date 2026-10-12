@@ -32,10 +32,10 @@ def db(tmp_path):
 
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
-    """隔离七端 skill 根、OpenCode 配置目录、数据目录与项目根列表。"""
+    """隔离八端 skill 根、OpenCode 配置目录、数据目录与项目根列表。"""
     ctx = {"data": tmp_path / "data", "projects_root": tmp_path / "projects"}
     monkeypatch.setenv("A4AGENT_DATA_DIR", str(ctx["data"]))
-    for tool in ("CLAUDE", "CODEX", "DSH", "ZCODE", "PI", "QODER", "OPENCODE"):
+    for tool in ("CLAUDE", "CODEX", "DSH", "ZCODE", "PI", "QODER", "OPENCODE", "WORKBUDDY"):
         p = tmp_path / f"{tool.lower()}-skills"
         p.mkdir(parents=True, exist_ok=True)
         monkeypatch.setenv(f"A4AGENT_{tool}_SKILLS_PATH", str(p))
