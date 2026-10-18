@@ -1035,8 +1035,9 @@ layui.use(['layer', 'form', 'element'], function () {
       content:
         '<div class="mig-progress">' +
           '<div class="mig-progress-title">' + escapeHtml(title) + '</div>' +
+          /* 进度条与「下载更新」弹窗完全一致：layui-progress-big + layui-bg-green */
           '<div class="layui-progress layui-progress-big">' +
-            '<div class="layui-progress-bar mig-progress-bar" id="mig-progress-bar" style="width:0%;"></div>' +
+            '<div class="layui-progress-bar layui-bg-green" id="mig-progress-bar" style="width:0%;"></div>' +
           '</div>' +
           '<div class="mig-progress-text" id="mig-progress-text">准备中…（0/' + total + '）</div>' +
           '<div class="mig-progress-hint">迁移进行中，请勿进行其他操作</div>' +
