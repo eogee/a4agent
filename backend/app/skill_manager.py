@@ -29,12 +29,13 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import yaml
 
-from . import config_manager
+from . import config_manager, disk_roots, project_hints
 from .database import get_data_dir
 from .env_compat import env_first
 
@@ -44,9 +45,9 @@ TOOLS = ("claude", "codex", "dsh", "zcode", "pi", "qoder", "opencode", "workbudd
 TOOL_LABELS = {
     "claude": "Claude",
     "codex": "Codex",
-    "dsh": "dsh",
+    "dsh": "DSH",
     "zcode": "ZCode",
-    "pi": "pi",
+    "pi": "Pi",
     "qoder": "Qoder",
     "opencode": "OpenCode",
     "workbuddy": "WorkBuddy",
@@ -55,7 +56,12 @@ SKILL_FILE = "SKILL.md"
 TRASH_DIR_NAME = "skills_recycle"
 TRASH_KEEP_DAYS = 30
 PROJECTS_FILENAME = "projects.json"
-DEFAULT_PROJECT_ROOT = r"C:\ProgramMine"
+# 历史预置值：早期版本把它写死成开发机布局，所有用户装完都只扫这一个目录。
+# 现在只用于识别「这份配置是当年预置的、从没被用户改过」，不再作为默认值。
+LEGACY_DEFAULT_ROOT = r"C:\ProgramMine"
+# 网络盘/UNC 上单次枚举的等待上限：映射盘掉线时 stat 能挂几十秒，
+# 而发现流程跑在请求线程里，不设上限就是整页白屏
+REMOTE_SCAN_TIMEOUT = 3.0
 
 
 # ---------------- 路径解析 ----------------
@@ -180,31 +186,96 @@ def _projects_file() -> Path:
     return get_data_dir() / PROJECTS_FILENAME
 
 
-def load_project_roots() -> list[str]:
-    """读取项目根目录列表；无文件或损坏时返回默认值。去重保序、绝对路径规范化。"""
-    roots: list[str] = []
+def _root_key(path) -> str:
+    """路径比较键：abspath + normcase。
+
+    abspath 顺带把 `/` 归一成 `\\`，不这样做时 `C:/x`、`C:\\x`、`c:\\x` 会被当成
+    三个不同的根：扫三遍、弹窗里重复三行、去重全部失效（实测同一台机器上这几种
+    写法都出现过）。刻意不用 resolve：它要真实访问文件系统，Win11 24H2 会对
+    「不受信任装入点」抛 WinError 448（原因同 _normkey）。
+    """
+    return os.path.normcase(os.path.abspath(str(path)))
+
+
+def normalize_root_text(text) -> str:
+    """用户给的根路径 → 规范绝对路径。
+
+    剥掉首尾引号与空白（从资源管理器「复制路径」常带引号），并把只写了盘符的
+    `D:` 补成 `D:\\`——Windows 上 `D:` 表示「D 盘的当前目录」，语义完全不是
+    用户想要的。
+    """
+    value = str(text or "").strip().strip('"').strip("'").strip()
+    if not value:
+        return ""
+    if re.fullmatch(r"[A-Za-z]:", value):
+        value += "\\"
+    if os.name == "nt" and re.match(r"^[a-z]:", value):
+        value = value[0].upper() + value[1:]  # 盘符统一大写，界面上不出现 c:\ 这种写法
+    try:
+        return os.path.abspath(value)
+    except (OSError, ValueError):
+        return ""
+
+
+def default_project_roots() -> list[str]:
+    """默认扫描范围：本机所有可见盘符（含网络盘）。"""
+    return disk_roots.default_project_roots()
+
+
+def _read_projects_file() -> dict:
     path = _projects_file()
-    if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8-sig"))
-            raw = data.get("roots") if isinstance(data, dict) else None
-            if isinstance(raw, list):
-                roots = [str(r) for r in raw]
-        except (OSError, ValueError):
-            roots = []
-    if not roots:
-        roots = [DEFAULT_PROJECT_ROOT]
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_projects(roots: list[str] | None = None, ignored: list[str] | None = None) -> None:
+    """写回 projects.json；未指定的那一半沿用文件里的原值（只改根不能丢忽略列表）。"""
+    current = _read_projects_file()
+    payload = {
+        "roots": list(roots) if roots is not None else list(current.get("roots") or []),
+        "ignored": list(ignored) if ignored is not None else list(current.get("ignored") or []),
+    }
+    _projects_file().parent.mkdir(parents=True, exist_ok=True)
+    _projects_file().write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def load_project_roots() -> list[str]:
+    """读取项目根目录列表；无文件或损坏时返回默认值。去重保序、路径归一。"""
+    raw = _read_projects_file().get("roots")
+    roots: list[str] = []
+    if isinstance(raw, list):
+        for item in raw:
+            normalized = normalize_root_text(item)
+            if normalized:
+                roots.append(normalized)
+
     result: list[str] = []
     seen: set[str] = set()
-    for r in roots:
-        text = str(r).strip()
-        if not text:
-            continue
-        key = os.path.normcase(text)
+    for text in roots:
+        key = _root_key(text)
         if key in seen:
             continue
         seen.add(key)
         result.append(text)
+
+    if not result:
+        return default_project_roots()
+    # 存量兼容：老版本的预置值是写死的开发机目录。若配置里恰好只有它、而它在本机
+    # 根本不存在，说明这份文件从没被用户真正配置过，换成新预置（存在则尊重原样）。
+    if len(result) == 1 and _root_key(result[0]) == _root_key(LEGACY_DEFAULT_ROOT):
+        try:
+            exists = Path(result[0]).is_dir()
+        except OSError:
+            exists = False
+        if not exists:
+            return default_project_roots()
     return result
 
 
@@ -212,26 +283,65 @@ def save_project_roots(roots: list) -> list[str]:
     """校验并保存项目根目录列表，返回规范化后的列表。非法项直接拒绝。"""
     cleaned: list[str] = []
     seen: set[str] = set()
-    for r in roots or []:
-        text = str(r or "").strip()
+    for item in roots or []:
+        text = normalize_root_text(item)
         if not text:
             continue
         p = Path(text)
         if not p.is_absolute():
             raise ValueError(f"项目根必须是绝对路径：{text}")
-        if not p.is_dir():
+        try:
+            is_dir = p.is_dir()
+        except OSError as e:
+            raise ValueError(f"项目根无法访问：{text}（{e}）") from e
+        if not is_dir:
             raise ValueError(f"项目根不存在或不是目录：{text}")
-        norm = os.path.normcase(p)
-        if norm in seen:
+        key = _root_key(p)
+        if key in seen:
             continue
-        seen.add(norm)
+        seen.add(key)
         cleaned.append(str(p))
     if not cleaned:
         raise ValueError("至少需要一个项目根目录")
-    _projects_file().parent.mkdir(parents=True, exist_ok=True)
-    _projects_file().write_text(
-        json.dumps({"roots": cleaned}, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _write_projects(roots=cleaned)
+    return cleaned
+
+
+def load_ignored_projects() -> list[str]:
+    """被用户忽略的自动发现项目（从历史线索里挖出来、但不想看到的目录）。"""
+    raw = _read_projects_file().get("ignored")
+    if not isinstance(raw, list):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        normalized = normalize_root_text(item)
+        if not normalized:
+            continue
+        key = _root_key(normalized)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(normalized)
+    return result
+
+
+def save_ignored_projects(paths: list) -> list[str]:
+    """保存忽略列表。只做绝对路径校验，不要求目录仍存在（盘拔了不该丢配置）。"""
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in paths or []:
+        text = normalize_root_text(item)
+        if not text:
+            continue
+        if not Path(text).is_absolute():
+            raise ValueError(f"忽略项必须是绝对路径：{text}")
+        key = _root_key(text)
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(text)
+    _write_projects(ignored=cleaned)
     return cleaned
 
 
@@ -246,27 +356,167 @@ def _safe_is_dir(path: Path) -> bool:
         return False
 
 
+def _run_guarded(fn, timeout: float, default):
+    """在守护线程里跑 fn，超时返回 default。
+
+    只用于网络盘/UNC 路径：映射盘掉线时 stat 会一直挂着，HTTP 请求线程不能陪它
+    一起挂。用 daemon 线程而不是线程池——线程池的 worker 默认非守护，解释器退出
+    时会 join，卡死的 worker 会把整个进程退出也拖住。
+    """
+    box: dict = {}
+
+    def target():
+        try:
+            box["value"] = fn()
+        except Exception as e:  # noqa: BLE001 - 兜底，超时/异常都降级为空结果
+            box["error"] = e
+
+    worker = threading.Thread(target=target, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        logger.warning("扫描超时（>%.1fs），已跳过：%s", timeout, getattr(fn, "__name__", fn))
+        return default
+    if "error" in box:
+        logger.warning("扫描失败（已跳过）：%s", box["error"])
+        return default
+    return box.get("value", default)
+
+
+def _list_root_children(root: Path) -> list[Path]:
+    """列某个项目根下的一级子目录（跳过点开头目录）。"""
+
+    def work() -> list[Path]:
+        try:
+            if not root.is_dir():
+                return []
+            children = sorted(root.iterdir(), key=lambda p: p.name.lower())
+        except OSError as e:
+            logger.warning("无法读取项目根 %s：%s（已跳过）", root, e)
+            return []
+        return [c for c in children if not c.name.startswith(".") and _safe_is_dir(c)]
+
+    if disk_roots.is_remote(root):
+        return _run_guarded(work, REMOTE_SCAN_TIMEOUT, [])
+    return work()
+
+
+def _has_skill_dir(path: Path) -> bool:
+    """该目录下是否存在任意一个 .<tool>/skills。
+
+    用于预筛历史线索：线索里绝大多数是普通仓库（本机实测 163 个候选只有 9 个
+    含 skill），先筛掉能避免把它们一股脑塞进项目列表、迁移目标与归属校验。
+    """
+    for tool in TOOLS:
+        if _safe_is_dir(path / f".{tool}" / "skills"):
+            return True
+    return False
+
+
+def _shadows_global_scope(path: Path) -> bool:
+    """该目录是否与全局 skill 根重叠——重叠就不能当项目。
+
+    主目录是最典型的例子：project_skill_roots(主目录) 拼出的 ~/.claude/skills
+    与全局根是**同一个目录**。两边都收，同一批 skill 会同时显示成「全局」和
+    「某项目里的」，端数与重复判断全被污染。全局根本身或它下面的目录同理。
+    """
+    try:
+        if path.parent == path:  # 盘根本身不是项目
+            return True
+    except OSError:
+        return True
+    key = _root_key(path)
+    for root in global_skill_roots().values():
+        root_key = _root_key(root)
+        if key == root_key or key.startswith(root_key + os.sep):
+            return True
+        if root_key.startswith(key + os.sep):
+            return True
+    return False
+
+
+def _disambiguate_names(items: list[dict]) -> list[dict]:
+    """同名不同路径的项目加父目录后缀消歧。
+
+    迁移目标、一键适配都是按项目**名字**定位目录的（_root_for）。默认扫描范围
+    扩到所有盘符、再加上自动发现之后，两个盘下同名的 mlj 会同时出现——不消歧
+    就会出现「点了 A 的项目，写进了 B 的目录」。
+    """
+    counts: dict[str, int] = {}
+    for item in items:
+        counts[item["project"]] = counts.get(item["project"], 0) + 1
+    for item in items:
+        if counts[item["project"]] > 1:
+            parent = str(Path(item["root"]).parent)
+            item["project"] = f'{item["project"]} ({parent})'
+    return items
+
+
 def project_dirs(roots: list[str] | None = None) -> list[dict]:
-    """枚举项目：每个项目根下的一级子目录视为独立项目（跳过点开头目录）。"""
-    result: list[dict] = []
-    seen: set[str] = set()
+    """枚举项目：扫描范围下的一级子目录 + 历史线索反查到的精确目录。
+
+    两条来源缺一不可：
+    - 扫描范围只能覆盖「一级子目录」，用户的项目藏在几层之下时根本看不到；
+    - 历史线索来自各 AI 工具的会话记录，深度任意、零手动操作，但不是每个项目
+      都被工具打开过，扫描范围兜住这部分。
+
+    返回 [{"project", "root", "source", "sources"}]。source ∈ root|hints|both，
+    sources 是人可读的来源明细（如 "自动发现：Claude Code"）。
+    """
+    found: dict[str, dict] = {}
+
+    def add(path: Path, source_text: str, kind: str) -> None:
+        key = _root_key(path)
+        item = found.get(key)
+        if item is None:
+            item = {"project": path.name or str(path), "root": path,
+                    "source": "root", "sources": [], "_kinds": set()}
+            found[key] = item
+        if source_text not in item["sources"]:
+            item["sources"].append(source_text)
+        item["_kinds"].add(kind)
+
+    ignored = {_root_key(p) for p in load_ignored_projects()}
+
     for root_text in roots if roots is not None else load_project_roots():
         root = Path(root_text)
-        if not _safe_is_dir(root):
-            continue
-        try:
-            children = sorted(root.iterdir(), key=lambda p: p.name.lower())
-        except OSError:
-            continue
-        for child in children:
-            if not _safe_is_dir(child) or child.name.startswith("."):
+        for child in _list_root_children(root):
+            if _root_key(child) in ignored:
                 continue
-            key = os.path.normcase(child)
-            if key in seen:
-                continue
-            seen.add(key)
-            result.append({"project": child.name, "root": child})
-    return result
+            add(child, f"扫描范围：{root_text}", "root")
+
+    # 线索发现关闭（或全部失败）时为空，此时行为与旧版完全一致
+    for hint in project_hints.collect():
+        path = Path(hint["path"])
+        if _root_key(path) in ignored:
+            continue
+        if _shadows_global_scope(path) or not _safe_is_dir(path):
+            continue
+        if not _has_skill_dir(path):
+            continue
+        for label in hint.get("sources") or []:
+            add(path, f"自动发现：{label}", "hints")
+
+    items = []
+    for item in found.values():
+        kinds = item.pop("_kinds")
+        item["source"] = "both" if len(kinds) > 1 else ("hints" if "hints" in kinds else "root")
+        items.append(item)
+    return _disambiguate_names(items)
+
+
+def _scan_project(proj_root: Path, project_name: str) -> list[dict]:
+    """扫一个项目下八端的项目级 skill 根；远程项目加超时。"""
+
+    def work() -> list[dict]:
+        entries: list[dict] = []
+        for tool, root in project_skill_roots(proj_root).items():
+            entries.extend(_scan_root(root, tool, "project", project_name))
+        return entries
+
+    if disk_roots.is_remote(proj_root):
+        return _run_guarded(work, REMOTE_SCAN_TIMEOUT, [])
+    return work()
 
 
 def project_skill_roots(project_path: Path) -> dict:
@@ -524,10 +774,7 @@ def discover() -> dict:
 
     projects_out = []
     for proj in project_dirs():
-        proots = project_skill_roots(proj["root"])
-        entries: list[dict] = []
-        for tool in TOOLS:
-            entries.extend(_scan_root(proots[tool], tool, "project", proj["project"]))
+        entries = _scan_project(proj["root"], proj["project"])
         if not entries:
             continue  # 只收录含至少一个 skill 的项目
         _mark_opencode_visible(entries, opencode_compat_roots(proj["root"]))
@@ -535,6 +782,8 @@ def discover() -> dict:
             {
                 "project": proj["project"],
                 "root": str(proj["root"]),
+                "source": proj.get("source", "root"),
+                "sources": proj.get("sources", []),
                 "skills": _aggregate(entries),
             }
         )
@@ -544,6 +793,28 @@ def discover() -> dict:
         "projects": projects_out,
         "roots": {tool: str(path) for tool, path in roots.items()},
         "project_roots": load_project_roots(),
+        "project_hints": project_hints.summary(),
+    }
+
+
+def project_sources(refresh: bool = False) -> dict:
+    """项目来源汇总：扫描范围、默认值、忽略项、自动发现的候选与命中。"""
+    hints = project_hints.summary(force=refresh)
+    return {
+        "roots": load_project_roots(),
+        "defaults": default_project_roots(),
+        "ignored": load_ignored_projects(),
+        "hints": hints,
+        "projects": [
+            {
+                "project": p["project"],
+                "root": str(p["root"]),
+                "source": p.get("source", "root"),
+                "sources": p.get("sources", []),
+                "has_skills": _has_skill_dir(p["root"]),
+            }
+            for p in project_dirs()
+        ],
     }
 
 

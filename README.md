@@ -32,13 +32,14 @@ All eight targets use the same skill format (a `<skill-name>/SKILL.md` directory
 ### Discovery & Aggregation
 
 - Scans the **global** and **project-level** skill directories of all eight tools, and aggregates by frontmatter `name`: when a skill with the same name exists on several tools, it is badged as "already on N tools".
-- The project root list is configurable (default scan root: `C:\ProgramMine`); only projects containing at least one skill are listed.
+- **Project discovery works two ways.** Scan ranges default to every drive on the machine (each first-level folder counts as a project), *and* a4agent reads the history the AI tools already keep — Claude Code's project list, Codex session working directories, and the recent workspaces of VS Code-family editors — so projects nested at any depth show up without you pointing at them. Only projects containing at least one skill are listed.
+- The **Project sources** dialog lists what was auto-discovered (with the tool it came from), lets you ignore entries, add scan ranges with a folder picker, or restore the default ranges.
 - Codex's reserved global directories (`.system/` and other dot-prefixed dirs) are skipped automatically and not treated as user skills.
 
 ### Cross-Tool Migration & "One-Click Sync to Every Tool"
 
 - Any skill on any tool can be migrated to any target (global or any project). Migration is a **non-destructive copy**: the source is always kept.
-- Migration targets support **picking any project folder**: the target project needs no prior skills, and a missing `.{tool}/skills` directory is created automatically; the desktop app uses the native folder picker, the browser version falls back to a path input.
+- Migration targets support **picking any project folder**: the target project needs no prior skills, and a missing `.{tool}/skills` directory is created automatically; both the desktop app and the browser build use the same built-in folder picker.
 - If the target already has a skill with the same name (matching frontmatter `name` or directory name), the old version goes to the recycle bin instead of being silently overwritten.
 - **"One-click sync to every tool"**: fills in every missing tool for all skills in a project at once — first shows a plan list, then runs with a progress bar while the page is temporarily locked to prevent accidental edits.
 - Every migration writes a **migration log** (time, skill, source, target, result) for full traceability.

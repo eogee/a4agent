@@ -3,31 +3,20 @@
 桌面壳有系统原生对话框，但用浏览器打开 127.0.0.1 时 JS 拿不到本机绝对路径
 （浏览器故意隐藏），只能由同机的后端来列。服务只监听 127.0.0.1，接口也只
 返回目录名——不读文件、不返回文件内容。
+
+盘符探测与项目根默认值共用 disk_roots，避免两处各写一份 GetLogicalDrives。
 """
-import ctypes
 import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
+from ...disk_roots import drive_roots
+
 router = APIRouter(prefix="/fs")
 
 # 单个目录列出的上限：node_modules 这类目录动辄上万项，全返回会拖死弹窗
 MAX_DIRS = 800
-
-
-def drive_roots() -> list:
-    """Windows 盘符根目录，非 Windows 返回空。
-
-    用 GetLogicalDrives 的位掩码而不是逐个 isdir：断开的网络盘会让 isdir 卡住。
-    """
-    if os.name != "nt":
-        return []
-    try:
-        mask = ctypes.windll.kernel32.GetLogicalDrives()
-    except Exception:  # noqa: BLE001 - 取不到盘符就只走路径浏览
-        return []
-    return [f"{chr(ord('A') + i)}:\\" for i in range(26) if (mask >> i) & 1]
 
 
 @router.get("/dirs")

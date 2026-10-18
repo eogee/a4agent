@@ -159,85 +159,21 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   /* ---------- 目录浏览弹窗 ---------- */
-  /* 浏览器打开时 JS 拿不到本机绝对路径、原生对话框只在桌面壳存在，
-   * 所以两种形态都走后端列目录（fs.py），保持同一套交互。 */
-  function listDirs(path) {
-    return fetch('/api/v1/fs/dirs?path=' + encodeURIComponent(path || '')).then(function (r) {
-      if (!r.ok) return r.json().then(function (j) { throw new Error(parseError(j, r.status)); },
-        function () { throw new Error('请求失败（HTTP ' + r.status + '）'); });
-      return r.json();
-    });
-  }
-
+  /* 统一交给公共目录选择组件（dirpicker.js）：桌面壳走系统原生对话框，浏览器
+   * 走内置逐级浏览。这里只负责把选中的目录写回 workdir。 */
   function openDirPicker() {
-    var state = { path: '', parent: null, home: '', drives: [], dirs: [], truncated: false };
-
-    function render() {
-      var box = document.getElementById('dir-list');
-      if (!box) return;
-      document.getElementById('dir-current').textContent = state.path || '我的电脑';
-      document.getElementById('dir-up').disabled = state.parent === null;
-      var drives = document.getElementById('dir-drives');
-      drives.innerHTML = (state.drives || []).map(function (d) {
-        return '<button type="button" class="layui-btn layui-btn-xs layui-btn-primary" ' +
-          'data-dir-drive="' + escapeHtml(d) + '">' + escapeHtml(d) + '</button>';
-      }).join('');
-      drives.hidden = !(state.drives || []).length;
-      box.innerHTML = (state.dirs || []).length
-        ? state.dirs.map(function (d) {
-            return '<button type="button" class="dir-item" data-dir-path="' + escapeHtml(d.path) +
-              '" title="' + escapeHtml(d.path) + '">' + escapeHtml(d.name) + '</button>';
-          }).join('') + (state.truncated ? '<div class="dir-more">子目录过多，仅列出前面部分</div>' : '')
-        : '<div class="empty-tip">没有子文件夹</div>';
-      box.querySelectorAll('[data-dir-path]').forEach(function (b) {
-        b.onclick = function () { load(b.getAttribute('data-dir-path')); };
-      });
-      drives.querySelectorAll('[data-dir-drive]').forEach(function (b) {
-        b.onclick = function () { load(b.getAttribute('data-dir-drive')); };
-      });
+    if (!window.A4DirPicker) {
+      layer.msg('目录选择组件未加载，请刷新页面', { icon: 2 });
+      return;
     }
-
-    function load(p) {
-      listDirs(p).then(function (data) {
-        state = data;
-        render();
-      }).catch(function (e) {
-        var cur = document.getElementById('dir-current');
-        if (cur) cur.textContent = p === '~' ? '用户主目录' : p;
-        var box = document.getElementById('dir-list');
-        if (box) box.innerHTML = '<div class="empty-tip">读取失败：' + escapeHtml(e.message) + '</div>';
-      });
-    }
-
-    layer.open({
-      type: 1,
+    window.A4DirPicker.pick({
       title: '选择工作目录',
-      area: ['620px', '520px'],
-      btn: ['选择此文件夹', '取消'],
-      content: '<div class="dir-picker">' +
-        '<div class="dir-bar">' +
-          '<button type="button" class="layui-btn layui-btn-xs layui-btn-primary" id="dir-up">上级</button>' +
-          '<button type="button" class="layui-btn layui-btn-xs layui-btn-primary" id="dir-home">主目录</button>' +
-          '<span class="dir-current" id="dir-current">加载中…</span>' +
-        '</div>' +
-        '<div class="dir-drives" id="dir-drives" hidden></div>' +
-        '<div class="dir-list" id="dir-list"></div>' +
-        '<div class="dir-tip">点文件夹进入下一级；进到目标文件夹后点「选择此文件夹」，' +
-          '该文件夹下的内容就是引擎的工作目录</div>' +
-      '</div>',
-      success: function (layero) {
-        layero.find('#dir-up').on('click', function () {
-          if (state.parent !== null) load(state.parent);
-        });
-        layero.find('#dir-home').on('click', function () { load('~'); });
-        load(workdir || '~');
-      },
-      yes: function (index) {
-        if (!state.path) { layer.msg('请先进入一个文件夹', { icon: 0 }); return; }
-        layer.close(index);
-        workdir = state.path;
-        renderWorkdir();
-      }
+      start: workdir || '~',
+      tip: '进到目标文件夹后点「选择此文件夹」，该文件夹下的内容就是引擎的工作目录'
+    }).then(function (p) {
+      if (!p) return;
+      workdir = p;
+      renderWorkdir();
     });
   }
 

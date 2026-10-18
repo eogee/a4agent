@@ -380,10 +380,10 @@ layui.use(['layer', 'form', 'element'], function () {
   });
 
   /* ---------- 卡片 ---------- */
-  // v0.5.1 起只代管 Claude Code 与 Codex。三端（dsh/ZCode/pi）自 v0.5.1
+  // v0.5.1 起只代管 Claude Code 与 Codex。三端（DSH/ZCode/Pi）自 v0.5.1
   // 起改由用户在应用内自配，旧数据里残留的值以灰色「已移交」样式呈现，
   // 告诉用户曾经配过、现在归谁管——而不是静默消失让人以为没配过。
-  var TARGET_HANDED_OVER = { dsh: 'dsh', zcode: 'ZCode', pi: 'pi' };
+  var TARGET_HANDED_OVER = { dsh: 'DSH', zcode: 'ZCode', pi: 'Pi' };
 
   function targetBadges(targets) {
     var list = (targets || 'claude').split(',');
@@ -449,7 +449,7 @@ layui.use(['layer', 'form', 'element'], function () {
     var handedNote = handedOver.length
       ? '<p style="font-size:12px;color:#8a8e94;margin-top:10px;">'
         + handedOver.map(function (t) {
-            return ({ dsh: 'dsh', zcode: 'ZCode', pi: 'pi' })[t];
+            return ({ dsh: 'DSH', zcode: 'ZCode', pi: 'Pi' })[t];
           }).join(' / ')
         + ' 的配置不再由本工具写入，请在该应用内自行配置</p>'
       : '';
@@ -527,7 +527,7 @@ layui.use(['layer', 'form', 'element'], function () {
               '<input type="checkbox" name="target_claude" title="Claude Code" lay-skin="primary" checked>' +
               '<input type="checkbox" name="target_codex" title="Codex" lay-skin="primary">' +
             '</div>' +
-            '<div class="layui-form-mid layui-word-aux" style="margin-left:110px;">dsh / ZCode / pi 已在各自应用内支持自定义供应商，请直接在那里配置</div>' +
+            '<div class="layui-form-mid layui-word-aux" style="margin-left:110px;">DSH / ZCode / Pi 已在各自应用内支持自定义供应商，请直接在那里配置</div>' +
           '</div>' +
         '</form>';
 
@@ -662,7 +662,7 @@ layui.use(['layer', 'form', 'element'], function () {
     });
   }
 
-  // v0.5.1 起 API 切换不再代管 dsh/ZCode/pi——这是破坏性变更，必须在更新弹窗里
+  // v0.5.1 起 API 切换不再代管 DSH/ZCode/Pi——这是破坏性变更，必须在更新弹窗里
   // 明确告知，不能埋在更新说明的正文里（用户多半不会点开「查看完整发布说明」）。
   // 这里按「受影响版本区间」判断是否命中，命中就把横幅提到最前面。
   //   affectedBelow：变更影响的最高版本（含）。用 <= 而非 <——紧邻上一版的用户
@@ -671,7 +671,7 @@ layui.use(['layer', 'form', 'element'], function () {
   var BREAKING_CHANGES = [{
     affectedBelow: '0.5.0',
     landedIn: '0.5.1',
-    title: 'dsh / ZCode / pi 不再由 a4agent 代管 API 配置',
+    title: 'DSH / ZCode / Pi 不再由 a4agent 代管 API 配置',
     detail: '这三端应用自带完整的供应商配置界面，由你在应用内自行配置更可靠。' +
       '你原先用 a4agent 配的条目已自动清理（清理前已做永久快照），你自己配的 provider 与 Key 一概未动。' +
       '如需继续使用，请到各应用设置里重新配置一次。'
@@ -817,7 +817,7 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   /* ---------- 技能管理 ---------- */
-  var TOOL_LABEL = { claude: 'Claude', codex: 'Codex', dsh: 'dsh', zcode: 'ZCode', pi: 'pi', qoder: 'Qoder', opencode: 'OpenCode', workbuddy: 'WorkBuddy' };
+  var TOOL_LABEL = { claude: 'Claude', codex: 'Codex', dsh: 'DSH', zcode: 'ZCode', pi: 'Pi', qoder: 'Qoder', opencode: 'OpenCode', workbuddy: 'WorkBuddy' };
   // 八端清单唯一定义处：新增/删除端只改这里（后端 TOOLS 与 schemas 闸门需同步）
   var TOOL_KEYS = ['claude', 'codex', 'dsh', 'zcode', 'pi', 'qoder', 'opencode', 'workbuddy'];
   // MCP 项目级有独立文件的端：dsh 是全局 profile 层，Qoder 复用 Claude Code 的 <repo>/.mcp.json
@@ -920,13 +920,15 @@ layui.use(['layer', 'form', 'element'], function () {
         return {
           project: p.project,
           root: p.root,
+          source: p.source,
+          sources: p.sources,
           skills: (p.skills || []).filter(function (g) { return projMatch(g, p); }),
         };
       }).filter(function (p) { return p.skills.length; });
       if (!projects.length) { box.innerHTML = noMatchTip(skillQuery, '技能'); return; }
     }
     if (!projects.length) {
-      box.innerHTML = '<div class="empty-tip">未发现任何含 skill 的项目，可点击右上角「项目根目录」调整扫描范围</div>';
+      box.innerHTML = '<div class="empty-tip">未发现任何含 skill 的项目，可点击右上角「项目来源」调整扫描范围</div>';
       return;
     }
     var html = '';
@@ -934,6 +936,7 @@ layui.use(['layer', 'form', 'element'], function () {
       html += '<div class="proj-block">' +
         '<div class="proj-head">' +
           '<span class="proj-name">' + escapeHtml(p.project) + '</span>' +
+          projectSrcBadge(p) +
           '<span class="proj-root" title="' + escapeHtml(p.root) + '">' + escapeHtml(p.root) + '</span>' +
           '<button class="layui-btn layui-btn-xs" data-sk="adapt" data-project="' + escapeHtml(p.project) + '">一键适配全部端</button>' +
         '</div>';
@@ -1048,26 +1051,14 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   /* ---- 迁移弹窗：指定源副本与任意（工具×项目/全局）目标 ---- */
-  /* 原生选文件夹：桌面端走 pywebview 原生对话框；浏览器端退化为输入框。
-   * 返回 Promise<string|null>，取消时 resolve(null)。 */
+  /* 选文件夹统一交给 A4DirPicker：桌面壳走系统原生对话框，浏览器走内置浏览。
+   * 早期这里在浏览器下退化成「手敲一层 layer.prompt」，路径写错一个字符就
+   * 迁移失败，已统一。 */
   function pickFolderAny() {
-    var wv = window.pywebview;
-    function call(api) {
-      return Promise.resolve(api.select_folder()).then(function (p) { return p || null; });
-    }
-    if (wv && wv.api) return call(wv.api);
-    if (wv) {
-      return new Promise(function (resolve) {
-        window.addEventListener('pywebviewready', function () {
-          resolve(call(window.pywebview.api));
-        }, { once: true });
-      });
-    }
-    return new Promise(function (resolve) {
-      layer.prompt({ title: '输入项目文件夹的完整路径', formType: 0 }, function (val, idx) {
-        layer.close(idx);
-        resolve((val || '').trim() || null);
-      });
+    if (!window.A4DirPicker) return Promise.resolve(null);
+    return window.A4DirPicker.pick({
+      title: '选择项目文件夹',
+      tip: '进到目标项目文件夹后点「选择此文件夹」；该文件夹下不存在 skill 也没关系，迁移会自动创建目录'
     });
   }
 
@@ -1375,23 +1366,232 @@ layui.use(['layer', 'form', 'element'], function () {
     }).catch(function (e) { layer.msg(e.message, { icon: 2 }); });
   }
 
-  /* ---- 项目根目录配置 ---- */
+  /* ---- 项目来源配置：扫描范围 + 历史线索自动发现 ---- */
+  /* 为什么不再是「一个 textarea 让人手敲路径」：
+     1) 手敲绝对路径极易写错，且写错了只会表现为「扫不到东西」，用户无从判断；
+     2) 更根本的是——项目藏得比「根的一级子目录」深得多，靠用户逐个选根等于把
+        「找到项目」的工作转嫁给他。各 AI 工具本来就记着用户打开过哪些目录，
+        读它们零操作、深度任意，所以这里把「自动发现」与「扫描范围」并列展示，
+        用户最多确认一下、删掉不要的。 */
+  function projectSrcBadge(p) {
+    if (!p || (p.source !== 'hints' && p.source !== 'both')) return '';
+    var detail = (p.sources || []).join(' · ');
+    return '<span class="proj-src" title="' + escapeHtml(detail) + '">自动发现</span>';
+  }
+
   function openRootsDialog() {
-    apiGet('/skills/project-roots').then(function (r) {
-      layer.open({
+    apiGet('/skills/project-sources').then(function (src) {
+      var st = {
+        roots: (src.roots || []).slice(),
+        defaults: (src.defaults || []).slice(),
+        ignored: (src.ignored || []).slice(),
+        projects: src.projects || [],
+        hints: src.hints || {},
+        avail: {}   /* 路径 -> true(可访问)/false(不可访问)，未探测时不存在 */
+      };
+
+      function statusCell(path) {
+        var ok = st.avail[path];
+        if (ok === undefined) return '<span class="psrc-status">检测中…</span>';
+        return ok
+          ? '<span class="psrc-status psrc-ok">可访问</span>'
+          : '<span class="psrc-status psrc-bad">不存在或无权限</span>';
+      }
+
+      function rootRows() {
+        if (!st.roots.length) {
+          return '<div class="psrc-empty">还没有任何扫描范围。点「添加文件夹」选一个，或点「恢复默认」使用本机所有盘符。</div>';
+        }
+        return st.roots.map(function (r) {
+          return '<div class="psrc-row">' +
+            '<span class="psrc-path" title="' + escapeHtml(r) + '">' + escapeHtml(r) + '</span>' +
+            statusCell(r) +
+            '<a href="javascript:;" class="psrc-act" data-psrc-del="' + escapeHtml(r) + '">删除</a>' +
+          '</div>';
+        }).join('');
+      }
+
+      function hintRows() {
+        var found = st.projects.filter(function (p) {
+          return p.source === 'hints' || p.source === 'both';
+        });
+        var ignoredRows = st.ignored.map(function (p) {
+          return '<div class="psrc-row psrc-muted">' +
+            '<span class="psrc-path" title="' + escapeHtml(p) + '">' + escapeHtml(p) + '</span>' +
+            '<span class="psrc-status">已忽略</span>' +
+            '<a href="javascript:;" class="psrc-act" data-psrc-unignore="' + escapeHtml(p) + '">恢复</a>' +
+          '</div>';
+        }).join('');
+        if (!found.length && !st.ignored.length) {
+          return '<div class="psrc-empty">没有可自动发现的项目。填过历史记录的 AI 工具（Claude Code / Codex / VS Code 系编辑器）会在下次启动后出现在这里。</div>';
+        }
+        var rows = found.map(function (p) {
+          var labels = (p.sources || []).map(function (s) {
+            return String(s).replace(/^自动发现：/, '').replace(/^扫描范围：/, '扫描 ');
+          }).join(' · ');
+          return '<div class="psrc-row">' +
+            '<span class="psrc-path" title="' + escapeHtml(p.root) + '">' +
+              '<b>' + escapeHtml(p.project) + '</b> ' +
+              '<span class="psrc-sub-path">' + escapeHtml(p.root) + '</span></span>' +
+            '<span class="psrc-src" title="' + escapeHtml(labels) + '">' + escapeHtml(labels) + '</span>' +
+            '<a href="javascript:;" class="psrc-act" data-psrc-ignore="' + escapeHtml(p.root) + '">忽略</a>' +
+          '</div>';
+        }).join('');
+        return rows + ignoredRows;
+      }
+
+      function sourceLine() {
+        var list = (st.hints && st.hints.sources) || [];
+        if (!list.length) return '尚未读到任何历史记录';
+        return list.map(function (s) {
+          return escapeHtml(s.name) + ' ' + s.count;
+        }).join(' · ');
+      }
+
+      function body() {
+        var total = (st.hints && st.hints.candidate_count) || 0;
+        var foundCount = st.projects.filter(function (p) {
+          return p.source === 'hints' || p.source === 'both';
+        }).length;
+        var ignoredTip = st.ignored.length ? (' · 已忽略 ' + st.ignored.length + ' 个') : '';
+        return '<div class="psrc">' +
+          '<div class="psrc-section">' +
+            '<div class="psrc-head">' +
+              '<span class="psrc-title">自动发现</span>' +
+              '<span class="psrc-hint">读了 ' + total + ' 条历史路径，其中 ' + foundCount + ' 个含 skill' + ignoredTip + '</span>' +
+              '<a href="javascript:;" class="psrc-link" id="psrc-rescan">重新扫描</a>' +
+            '</div>' +
+            '<div class="psrc-srcs">' + sourceLine() + '</div>' +
+            '<div class="psrc-list psrc-list-hints">' + hintRows() + '</div>' +
+          '</div>' +
+          '<div class="psrc-section">' +
+            '<div class="psrc-head">' +
+              '<span class="psrc-title">扫描范围</span>' +
+              '<span class="psrc-hint">根下的一级子目录视为项目</span>' +
+              '<a href="javascript:;" class="psrc-link" id="psrc-reset">恢复默认</a>' +
+              '<a href="javascript:;" class="psrc-link" id="psrc-add">+ 添加文件夹</a>' +
+            '</div>' +
+            '<div class="psrc-list">' + rootRows() + '</div>' +
+          '</div>' +
+          '<div class="psrc-tip">默认范围是本机所有盘符；「自动发现」来自各 AI 工具的历史记录，' +
+            '可覆盖任意深度的项目。保存后只影响扫描范围，忽略名单改动即刻生效。</div>' +
+        '</div>';
+      }
+
+      function probe(path) {
+        return fetch('/api/v1/fs/dirs?path=' + encodeURIComponent(path)).then(function (r) {
+          st.avail[path] = r.ok;
+        }).catch(function () {
+          st.avail[path] = false;
+        });
+      }
+
+      function probeAll() {
+        return Promise.all(st.roots.map(function (r) {
+          if (st.avail[r] !== undefined) return Promise.resolve();
+          return probe(r);
+        }));
+      }
+
+      var index = layer.open({
         type: 1,
-        title: '项目根目录（每行一个，一级子目录视为项目）',
-        area: ['520px', 'auto'],
-        content: '<div style="padding:16px 20px;">' +
-          '<textarea id="roots-input" class="layui-textarea" rows="5" placeholder="如 C:\\ProgramMine">' +
-          escapeHtml((r.roots || []).join('\n')) + '</textarea>' +
-          '<p style="font-size:12px;color:#8a8e94;margin-top:8px;">只收录其中含有至少一个 skill 的项目。</p></div>',
-        btn: ['保存', '取消'],
-        yes: function (index) {
-          var roots = document.getElementById('roots-input').value.split('\n')
-            .map(function (s) { return s.trim(); }).filter(Boolean);
-          apiSend('/skills/project-roots', 'PUT', { roots: roots }).then(function () {
-            layer.close(index);
+        title: '项目来源',
+        area: ['620px', 'auto'],
+        content: '<div id="psrc-body">加载中…</div>',
+        btn: ['保存', '关闭'],
+        success: function (layero) {
+          var box = layero.find('#psrc-body')[0];
+
+          function paint() { box.innerHTML = body(); }
+
+          function refreshSources() {
+            return apiGet('/skills/project-sources').then(function (data) {
+              st.projects = data.projects || [];
+              st.hints = data.hints || {};
+              st.ignored = data.ignored || [];
+              paint();
+            });
+          }
+
+          box.addEventListener('click', function (e) {
+            var del = e.target.closest('[data-psrc-del]');
+            if (del) {
+              var path = del.getAttribute('data-psrc-del');
+              st.roots = st.roots.filter(function (r) { return r !== path; });
+              paint();
+              return;
+            }
+            var ignore = e.target.closest('[data-psrc-ignore]');
+            if (ignore) {
+              var target = ignore.getAttribute('data-psrc-ignore');
+              apiSend('/skills/project-sources/ignored', 'PUT',
+                { paths: st.ignored.concat([target]) })
+                .then(function () { loadSkills(); return refreshSources(); })
+                .catch(function (err) { layer.msg(err.message, { icon: 2 }); });
+              return;
+            }
+            var unignore = e.target.closest('[data-psrc-unignore]');
+            if (unignore) {
+              var drop = unignore.getAttribute('data-psrc-unignore');
+              apiSend('/skills/project-sources/ignored', 'PUT',
+                { paths: st.ignored.filter(function (p) { return p !== drop; }) })
+                .then(function () { loadSkills(); return refreshSources(); })
+                .catch(function (err) { layer.msg(err.message, { icon: 2 }); });
+              return;
+            }
+            if (e.target.closest('#psrc-add')) {
+              if (!window.A4DirPicker) { layer.msg('目录选择组件未加载，请刷新页面', { icon: 2 }); return; }
+              window.A4DirPicker.pick({
+                title: '添加扫描范围',
+                tip: '选中一个包含多个项目的父文件夹，它下面的一级子目录会被当作项目'
+              }).then(function (p) {
+                if (!p) return;
+                var dup = st.roots.some(function (r) {
+                  return r.toLowerCase().replace(/\\+$/, '') === p.toLowerCase().replace(/\\+$/, '');
+                });
+                if (dup) { layer.msg('该目录已在扫描范围中', { icon: 0 }); return; }
+                st.roots.push(p);
+                paint();
+                probeAll().then(paint);
+              });
+              return;
+            }
+            if (e.target.closest('#psrc-reset')) {
+              st.roots = st.defaults.slice();
+              st.avail = {};
+              paint();
+              probeAll().then(paint);
+              return;
+            }
+            if (e.target.closest('#psrc-rescan')) {
+              layer.load(1);
+              fetch(API + '/skills/project-sources/refresh', { method: 'POST' })
+                .then(function (r) {
+                  if (!r.ok) return r.json().then(function (j) { throw new Error(j.detail || '重扫失败'); });
+                  return r.json();
+                })
+                .then(function (data) {
+                  st.projects = data.projects || [];
+                  st.hints = data.hints || {};
+                  st.ignored = data.ignored || [];
+                  paint();
+                  layer.msg('已重新扫描', { icon: 1 });
+                })
+                .catch(function (err) { layer.msg(err.message, { icon: 2 }); })
+                .then(function () { layer.closeAll('loading'); });
+            }
+          });
+
+          paint();
+          probeAll().then(paint);
+        },
+        yes: function (openIndex) {
+          if (!st.roots.length) {
+            layer.msg('至少需要一个扫描范围；不需要扫描范围可以点「恢复默认」', { icon: 0 });
+            return;
+          }
+          apiSend('/skills/project-roots', 'PUT', { roots: st.roots }).then(function () {
+            layer.close(openIndex);
             layer.msg('已保存', { icon: 1 });
             loadSkills();
           }).catch(function (e) { layer.msg(e.message, { icon: 2 }); });
@@ -1518,6 +1718,8 @@ layui.use(['layer', 'form', 'element'], function () {
         return {
           project: p.project,
           root: p.root,
+          source: p.source,
+          sources: p.sources,
           servers: (p.servers || []).filter(function (g) { return projMatch(g, p); }),
         };
       }).filter(function (p) { return p.servers.length; });
@@ -1532,6 +1734,7 @@ layui.use(['layer', 'form', 'element'], function () {
       html += '<div class="proj-block">' +
         '<div class="proj-head">' +
           '<span class="proj-name">' + escapeHtml(p.project) + '</span>' +
+          projectSrcBadge(p) +
           '<span class="proj-root" title="' + escapeHtml(p.root) + '">' + escapeHtml(p.root) + '</span>' +
         '</div>';
       if (!p.servers.length) {

@@ -104,6 +104,12 @@ class ProjectRootsIn(BaseModel):
     roots: list[str]
 
 
+class IgnoredProjectsIn(BaseModel):
+    """自动发现项目里的忽略名单：不想在项目视图看到的目录。"""
+
+    paths: list[str]
+
+
 class SkillSourceIn(BaseModel):
     scope: str = Field(pattern="^(global|project)$")
     tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode|workbuddy)$")

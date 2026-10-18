@@ -437,6 +437,28 @@ body {
   color: #2f6fb4;
 }
 
+/* DSH：品牌黑，八端里唯一的深底实色药丸，留作视觉锚点 */
+.target-dsh {
+  background: #1f2226;
+  color: #ffffff;
+}
+
+/* ZCode：与 DSH 凑成一对「黑」——DSH 实底、ZCode 空心描边（白底黑字黑框），
+   和所有浅底深字的药丸都不同，但又不至于像实底灰那样沉闷。
+   padding 各减 1px 抵掉边框占位，外框尺寸与其它药丸保持一致，行内不跳高 */
+.target-zcode {
+  background: transparent;
+  color: #1f2226;
+  border: 1px solid #1f2226;
+  padding: 3px 9px;
+}
+
+/* Pi：紫调，八端里唯一没被占用的色系，与暖橙 / 各档蓝 / 青绿都不撞 */
+.target-pi {
+  background: #efeafb;
+  color: #5b46a8;
+}
+
 /* 已移交应用的标记：灰调+ 虚线感，表示「曾经配过，现在归应用内自管」，
    刻意与仍生效的实色标签区分开，避免用户误以为本工具还在管它 */
 .target-handed {
@@ -1272,6 +1294,96 @@ html::-webkit-scrollbar {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* 「自动发现」徽标：标明该项目不是从扫描范围一级子目录来的，而是读各工具历史得到 */
+.proj-src {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: #eef7f4;
+  color: #1f7a63;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* 项目来源弹窗：上半自动发现、下半扫描范围 */
+.psrc { padding: 14px 18px; }
+
+.psrc-section { margin-bottom: 16px; }
+
+.psrc-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+
+.psrc-title { flex-shrink: 0; font-size: 13px; font-weight: 600; color: #1c1e21; }
+
+.psrc-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: #9aa0a6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.psrc-link { flex-shrink: 0; font-size: 12px; color: #1f7a63; }
+
+.psrc-srcs { font-size: 11.5px; color: #a4aab1; line-height: 1.7; margin-bottom: 8px; }
+
+.psrc-list { border: 1px solid #eceff3; border-radius: 8px; overflow: hidden; max-height: 200px; overflow-y: auto; }
+
+.psrc-list-hints { max-height: 152px; }
+
+.psrc-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid #f1f4f6;
+  font-size: 12.5px;
+}
+
+.psrc-row:first-child { border-top: none; }
+
+.psrc-path {
+  flex: 1;
+  min-width: 0;
+  color: #3a3a3a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.psrc-path b { font-weight: 600; }
+
+.psrc-sub-path { color: #a4aab1; }
+
+.psrc-src {
+  flex-shrink: 0;
+  max-width: 200px;
+  font-size: 11.5px;
+  color: #9aa0a6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.psrc-status { flex-shrink: 0; font-size: 11.5px; color: #a4aab1; }
+
+.psrc-ok { color: #1f7a63; }
+
+.psrc-bad { color: #c0392b; }
+
+.psrc-act { flex-shrink: 0; font-size: 12px; color: #8a8e94; }
+
+.psrc-act:hover { color: #c0392b; }
+
+.psrc-muted { opacity: .6; }
+
+.psrc-empty { padding: 16px 12px; font-size: 12px; color: #a4aab1; line-height: 1.7; }
+
+.psrc-tip { font-size: 11.5px; color: #a4aab1; line-height: 1.7; }
+
+.dir-manual { margin-left: 8px; color: #1f7a63; }
 
 .proj-grid {
   display: grid;

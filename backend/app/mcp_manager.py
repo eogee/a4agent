@@ -55,9 +55,9 @@ TOOLS = ("claude", "codex", "dsh", "zcode", "pi", "qoder", "opencode", "workbudd
 TOOL_LABELS = {
     "claude": "Claude",
     "codex": "Codex",
-    "dsh": "dsh",
+    "dsh": "DSH",
     "zcode": "ZCode",
-    "pi": "pi",
+    "pi": "Pi",
     "qoder": "Qoder",
     "opencode": "OpenCode",
     "workbuddy": "WorkBuddy",
@@ -1640,6 +1640,8 @@ def discover() -> dict:
             {
                 "project": proj["project"],
                 "root": str(proj["root"]),
+                "source": proj.get("source", "root"),
+                "sources": proj.get("sources", []),
                 "servers": _aggregate(entries, mask=True, descriptions=custom),
             }
         )

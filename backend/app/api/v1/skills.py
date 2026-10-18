@@ -20,7 +20,8 @@ def discover_skills():
 
 @router.get("/skills/project-roots")
 def get_project_roots():
-    return {"roots": skill_manager.load_project_roots()}
+    return {"roots": skill_manager.load_project_roots(),
+            "defaults": skill_manager.default_project_roots()}
 
 
 @router.put("/skills/project-roots")
@@ -30,6 +31,27 @@ def put_project_roots(body: schemas.ProjectRootsIn):
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"roots": roots}
+
+
+@router.get("/skills/project-sources")
+def get_project_sources():
+    """项目来源汇总（根目录弹窗用）：扫描范围 + 默认值 + 忽略项 + 自动发现。"""
+    return skill_manager.project_sources()
+
+
+@router.post("/skills/project-sources/refresh")
+def refresh_project_sources():
+    """强制重扫历史线索（不看缓存）。"""
+    return skill_manager.project_sources(refresh=True)
+
+
+@router.put("/skills/project-sources/ignored")
+def put_ignored_projects(body: schemas.IgnoredProjectsIn):
+    try:
+        ignored = skill_manager.save_ignored_projects(body.paths)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ignored": ignored}
 
 
 @router.post("/skills/migrate")
