@@ -3,7 +3,10 @@
 升级 llama.cpp：改 REPO_TAG、重新核对资产名与体积（release 页面）后同步更新即可；
 本文件是引擎版本的单一事实来源。
 """
+import fnmatch
+import os
 from dataclasses import dataclass
+from pathlib import Path
 
 REPO_OWNER = "ggml-org"
 REPO_NAME = "llama.cpp"
@@ -105,3 +108,52 @@ def recommend(gpu) -> EnginePack:
     pack = find(fallback)
     assert pack is not None  # 目录内建保证存在
     return pack
+
+
+# ───────────────────────── 已装引擎的后端识别 ─────────────────────────
+#
+# llama-server.exe 本身不含后端：运行时按同目录里存在的 ggml-*.dll 加载。
+# 所以「当前用的是 CUDA 还是 Vulkan」只能从文件名判断，不能从 exe 判断。
+
+BACKEND_LABELS = {"cuda": "CUDA", "vulkan": "Vulkan", "cpu": "CPU"}
+
+# 顺序即优先级：CUDA / Vulkan 包都会附带 ggml-cpu-*.dll（各 CPU 指令集变体），
+# 先匹配专用后端才不会把有显卡的引擎误判成 CPU。
+_BACKEND_PROBES = (
+    ("cuda", "ggml-cuda*.dll"),
+    ("vulkan", "ggml-vulkan*.dll"),
+    ("cpu", "ggml-cpu*.dll"),
+)
+
+
+def detect_backend(engine_dir) -> str:
+    """探测引擎目录实际使用的后端：cuda / vulkan / cpu；认不出返回空串。"""
+    d = Path(engine_dir)
+    try:
+        with os.scandir(d) as it:
+            names = [e.name.lower() for e in it if e.is_file()]
+    except OSError:
+        return ""
+    for backend, pattern in _BACKEND_PROBES:
+        if any(fnmatch.fnmatch(n, pattern) for n in names):
+            return backend
+    return ""
+
+
+def backend_label(backend: str) -> str:
+    """后端标识的展示名；未知后端给空串，由调用方决定兜底文案。"""
+    return BACKEND_LABELS.get(backend, "")
+
+
+def backend_preference(gpu) -> tuple:
+    """按显卡给出后端优先顺序，用于在多个可用引擎之间排序。"""
+    if gpu is not None and gpu.is_nvidia:
+        return ("cuda", "vulkan", "cpu")
+    if gpu is not None:
+        return ("vulkan", "cpu")
+    return ("cpu",)
+
+
+def pack_backend(pack: EnginePack) -> str:
+    """引擎包对应的后端标识：CUDA 包（needs_nvidia）→ cuda，其余包 id 本身就是后端名。"""
+    return "cuda" if pack.needs_nvidia else pack.pack_id

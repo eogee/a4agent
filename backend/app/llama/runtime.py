@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 LOG_CAPACITY = 800
 
 
+def _programs_root() -> Path:
+    """Windows 用户级程序目录（安装器默认落点）。单列出来便于测试替换。"""
+    return Path.home() / "AppData" / "Local" / "Programs"
+
+
 class _LogRing:
     """线程安全日志环形缓冲，单调 id 支持增量拉取。"""
 
@@ -74,40 +79,86 @@ class LlamaRuntime:
         return self.locate_engine() is not None
 
     def locate_engine(self) -> str | None:
-        """引擎目录自动接管：默认 engine\\ 缺失时，探测本机 a4agent / 旧版
-        a4agent 安装目录下已有的引擎，免重复下载；找不到返回 None。"""
-        if downloader.is_engine_present(self.engine_dir()):
-            return str(self.engine_dir())
-        for cand in self._candidate_engine_dirs():
-            if downloader.is_engine_present(cand):
-                return str(cand)
-        return None
+        """引擎目录自动接管：配置（或默认 engine\\）缺失时，探测本机 a4agent /
+        旧版 a4api 安装目录下已有的引擎，免重复下载；找不到返回 None。
 
-    def _candidate_engine_dirs(self) -> list:
-        """候选引擎目录：本机 %LOCALAPPDATA%\\Programs 下的 a4agent* / a4agent*，
-        按其 llama-server.exe 修改时间从新到旧排序。"""
-        out = []
-        local = Path.home() / "AppData" / "Local" / "Programs"
-        roots = [local]
-        found = []
-        for root in roots:
-            if not root.is_dir():
-                continue
+        有多个候选时按「后端是否匹配显卡」优先，再按 llama-server.exe 修改时间
+        从新到旧——NVIDIA 卡上同时存在 CUDA 与 Vulkan 引擎时选 CUDA，而不是
+        谁的文件更新选谁。
+        """
+        own = self.engine_dir()
+        if downloader.is_engine_present(own):
+            return str(own)
+        entries = self._candidate_engines()
+        if not entries:
+            return None
+        pref = catalog.backend_preference(gpu.best())
+
+        def rank(entry) -> tuple:
+            path, mtime = entry
+            backend = catalog.detect_backend(path)
+            # 认不出的后端排在所有已知后端之后，但仍可作为兜底被选中
             try:
-                dirs = [d for d in root.iterdir()
-                        if d.is_dir() and d.name.lower().startswith(("a4agent", "a4agent"))]
+                prio = pref.index(backend)
+            except ValueError:
+                prio = len(pref)
+            return (prio, -mtime)
+
+        return str(sorted(entries, key=rank)[0][0])
+
+    def _candidate_engines(self) -> list:
+        """候选引擎：(engine 目录, llama-server.exe 修改时间)。
+
+        只看 %LOCALAPPDATA%\\Programs 下 a4agent* / a4api* 的 engine 子目录；
+        改名过的旧引擎目录（engine-spark、engine-*-backup 之类）不参与接管。
+        """
+        root = _programs_root()
+        try:
+            dirs = [d for d in root.iterdir()
+                    if d.is_dir() and d.name.lower().startswith(("a4agent", "a4api"))]
+        except OSError:
+            return []
+        found = []
+        for d in dirs:
+            exe = d / "engine" / "llama-server.exe"
+            try:
+                if exe.is_file():
+                    found.append((exe.parent, exe.stat().st_mtime))
             except OSError:
                 continue
-            for d in dirs:
-                exe = d / "engine" / "llama-server.exe"
-                if exe.is_file():
-                    try:
-                        found.append((str(exe.parent), exe.stat().st_mtime))
-                    except OSError:
-                        continue
-        found.sort(key=lambda x: x[1], reverse=True)
-        out = [d for d, _ in found]
-        return out
+        return found
+
+    def engine_backend(self) -> str:
+        """当前实际会被加载的引擎后端：cuda / vulkan / cpu，未安装为空串。"""
+        found = self.locate_engine()
+        return catalog.detect_backend(found) if found else ""
+
+    def engine_dir_for(self, pack) -> Path:
+        """某个引擎包的安装目录：Programs\\a4agent-<后端>\\engine。
+
+        按后端分目录而不是全部塞进一个 engine\\：目录名即内容语义，换后端不会
+        覆盖掉正在用的那套；同时 a4agent-* + engine 的形状正好被上面的自动接管
+        逻辑认出来，多套引擎并存时按显卡后端偏好挑一套。
+        """
+        return _programs_root() / f"a4agent-{catalog.pack_backend(pack)}" / "engine"
+
+    def download_engine(self, pack) -> dict:
+        """下载引擎包到其专属目录，成功后把配置指向它（失败/取消则保持原引擎）。"""
+        target = self.engine_dir_for(pack)
+        return self.downloader.start(
+            pack, target,
+            on_done=lambda error: self._after_engine_download(target, error))
+
+    def _after_engine_download(self, target: Path, error: str) -> None:
+        """下载结束回调（下载线程内）：成功才切换，避免把配置指到半个引擎上。"""
+        if error or not downloader.is_engine_present(target):
+            return
+        self.cfg.engine_dir = str(target)
+        save_config(self.cfg)
+        backend = catalog.detect_backend(target)
+        self.logs.append(
+            f"[引擎] 已切换到 {catalog.backend_label(backend) or '未知'} 后端: {target}")
+
 
     def adopt_engine(self) -> bool:
         """把探测到的已有引擎目录写进配置（仅当默认位置没有引擎时）。"""
@@ -127,6 +178,7 @@ class LlamaRuntime:
         if self.downloader.progress()["running"]:
             return {"ok": False, "error": "引擎正在下载中，请等待完成"}
         self.adopt_engine()
+        self._log_backend_hint()
         cfg = self.cfg
         model = cfg.default_model_path
         if not model or not Path(model).is_file():
@@ -167,6 +219,19 @@ class LlamaRuntime:
                                      include_mtp, caps.mtp)
         finally:
             cfg.mmproj_path = origin
+
+    def _log_backend_hint(self) -> None:
+        """NVIDIA 卡却跑在 Vulkan / CPU 后端时提示一次。
+
+        只在启动时打日志：status() 每 1.5s 轮询一次，提示放那里会刷屏。
+        """
+        backend = self.engine_backend()
+        best = gpu.best()
+        if backend in ("", "cuda") or best is None or not best.is_nvidia:
+            return
+        self.logs.append(
+            f"[提示] 当前引擎为 {catalog.backend_label(backend)} 后端，"
+            f"NVIDIA 显卡建议改用 CUDA 引擎包（配置向导 → 获取推理引擎）")
 
     def stop(self) -> dict:
         self.engine.stop()
@@ -272,6 +337,7 @@ class LlamaRuntime:
         caps = None
         if engine_found:
             caps = server.detect_capabilities(engine_found).to_dict()
+        backend = catalog.detect_backend(engine_found) if engine_found else ""
         best_gpu = gpu.best()
         model_name = ""
         if cfg.default_model_path:
@@ -281,7 +347,8 @@ class LlamaRuntime:
             "wizard_done": cfg.wizard_done,
             "engine_present": engine_found is not None,
             "engine_dir": str(engine_found or self.engine_dir()),
-            "engine_pack_id": cfg.engine_pack_id,
+            "engine_backend": backend,
+            "engine_backend_label": catalog.backend_label(backend),
             "port": cfg.port,
             "host": cfg.host,
             "default_model_path": cfg.default_model_path,
@@ -368,7 +435,8 @@ class LlamaRuntime:
             "best_gpu": best_gpu.to_dict() if best_gpu else None,
             "preset": preset.to_dict(),
             "engine_present": downloader.is_engine_present(self.engine_dir()),
-            "packs": [p.to_dict() for p in catalog.PACKS],
+            "packs": [{**p.to_dict(), "target_dir": str(self.engine_dir_for(p))}
+                      for p in catalog.PACKS],
             "recommended_pack_id": rec.pack_id,
             "repo_tag": catalog.REPO_TAG,
         }

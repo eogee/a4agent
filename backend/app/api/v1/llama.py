@@ -61,11 +61,10 @@ def engine_download(body: dict):
     pack = catalog.find(body.get("pack_id"))
     if not pack:
         raise HTTPException(404, f"未知引擎包: {body.get('pack_id')}")
-    r = rt.runtime()
-    result = r.downloader.start(pack, r.engine_dir())
+    result = rt.runtime().download_engine(pack)
     if not result.get("ok"):
         raise HTTPException(409, result.get("error", "无法开始下载"))
-    return {"ok": True}
+    return {"ok": True, "engine_dir": str(rt.runtime().engine_dir_for(pack))}
 
 
 @router.post("/engine/offline")

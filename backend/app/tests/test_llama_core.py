@@ -95,6 +95,34 @@ def test_size_label():
     assert catalog.find("cuda124").size_label.endswith("GB")
 
 
+# ───────────────────────── 已装引擎的后端识别 ─────────────────────────
+
+def test_detect_backend(tmp_path):
+    assert catalog.detect_backend(tmp_path) == ""          # 空目录
+    assert catalog.detect_backend(tmp_path / "missing") == ""
+    (tmp_path / "llama-server.exe").write_bytes(b"x")
+    assert catalog.detect_backend(tmp_path) == ""          # exe 不体现后端
+
+    (tmp_path / "ggml-cpu-haswell.dll").write_bytes(b"x")
+    assert catalog.detect_backend(tmp_path) == "cpu"
+
+    (tmp_path / "ggml-vulkan.dll").write_bytes(b"x")
+    assert catalog.detect_backend(tmp_path) == "vulkan"
+
+    # CUDA / Vulkan 包都带 ggml-cpu-*.dll，专用后端优先于 CPU
+    (tmp_path / "ggml-cuda.dll").write_bytes(b"x")
+    assert catalog.detect_backend(tmp_path) == "cuda"
+
+
+def test_backend_preference():
+    assert catalog.backend_preference(_nvidia("591.86")) == ("cuda", "vulkan", "cpu")
+    amd = GpuInfo("AMD", "Radeon Test", 16 * 1024 ** 3, "32.0.11021")
+    assert catalog.backend_preference(amd) == ("vulkan", "cpu")
+    assert catalog.backend_preference(None) == ("cpu",)
+    assert catalog.backend_label("cuda") == "CUDA"
+    assert catalog.backend_label("") == ""
+
+
 # ───────────────────────── 局域网地址 ─────────────────────────
 
 def test_is_private_and_api_pa():
@@ -122,7 +150,6 @@ def test_config_roundtrip(tmp_path, monkeypatch):
     cfg.wizard_done = True
     cfg.port = 9090
     cfg.host = "0.0.0.0"
-    cfg.engine_pack_id = "vulkan"
     cfg.model_dirs = ["C:/models"]
     cfg.models = [ModelEntry(path="C:/models/a.gguf", alias="a").__dict__]
     cfg.default_model_path = "C:/models/a.gguf"
@@ -135,7 +162,6 @@ def test_config_roundtrip(tmp_path, monkeypatch):
     assert loaded.wizard_done
     assert loaded.port == 9090
     assert loaded.host == "0.0.0.0"
-    assert loaded.engine_pack_id == "vulkan"
     assert loaded.model_dirs == ["C:/models"]
     assert loaded.models[0]["alias"] == "a"
     assert loaded.infer.context_tokens == 65536

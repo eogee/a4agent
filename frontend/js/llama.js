@@ -172,7 +172,7 @@ layui.use(['layer', 'form', 'element'], function () {
       '  <div class="llama-topline-left">' + stateBadge(s.state) +
       '    <span class="llama-topline-model" id="llama-top-model">' + escapeHtml(s.default_model_name || '未设置默认模型') + '</span>' +
       '    <span class="llama-topline-meta">端口 ' + s.port + ' · ' + (s.host === '0.0.0.0' ? '局域网开放' : '仅本机') + '</span>' +
-      '    <span class="llama-topline-meta" id="llama-top-engine" title="' + escapeHtml(s.engine_dir) + '">引擎 ' + (s.engine_present ? '就绪' : '缺失') + '</span>' +
+      '    <span class="llama-topline-meta" id="llama-top-engine" title="' + escapeHtml(s.engine_dir) + '">引擎 ' + (s.engine_present ? (s.engine_backend_label || '就绪') : '缺失') + '</span>' +
       '  </div>' +
       '  <div class="llama-topline-actions">' +
       '    <a href="javascript:;" class="update-link" id="llama-link-wizard">配置向导</a>' +
@@ -568,7 +568,8 @@ layui.use(['layer', 'form', 'element'], function () {
       var rec = p.id === h.recommended_pack_id;
       return '<label class="llama-wizard-pack"><input type="radio" name="wiz_pack" value="' + p.id + '"' + (rec ? ' checked' : '') + '>' +
         '<b>' + escapeHtml(p.label) + '</b> — 约 ' + p.size_label +
-        '<span class="llama-wizard-pack-note">' + escapeHtml(p.note) + (rec ? ' · 推荐' : '') + '</span></label>';
+        '<span class="llama-wizard-pack-note">' + escapeHtml(p.note) + (rec ? ' · 推荐' : '') + '</span>' +
+        '<span class="llama-wizard-pack-note">装到 ' + escapeHtml(p.target_dir || '') + '</span></label>';
     }).join('');
     body.innerHTML =
       '<div class="llama-wizard-intro">轻量安装不内置推理引擎（llama-server）。下面按你的显卡列出 llama.cpp 官方发布的引擎包' +

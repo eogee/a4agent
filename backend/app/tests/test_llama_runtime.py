@@ -223,6 +223,120 @@ def test_runtime_status_and_connect(runtime, tmp_path):
     assert c2["lan_base_url"] is not None and "8080" in c2["lan_base_url"]
 
 
+def test_locate_engine_prefers_backend_over_mtime(runtime, tmp_path, monkeypatch):
+    """配置为空时，NVIDIA 卡优先 CUDA 引擎，而不是选中文件更新的 Vulkan 引擎。"""
+    import os
+    import time
+
+    from backend.app.llama.gpu import GpuInfo
+    import backend.app.llama.catalog as catalog
+
+    root = tmp_path / "Programs"
+    vulkan = root / "a4agent-vulkan" / "engine"
+    cuda = root / "a4agent-cu" / "engine"
+    for d, dll in ((vulkan, "ggml-vulkan.dll"), (cuda, "ggml-cuda.dll")):
+        d.mkdir(parents=True)
+        (d / "llama-server.exe").write_bytes(b"x")
+        (d / dll).write_bytes(b"x")
+
+    # Vulkan 的 exe 更新 → 旧逻辑（纯 mtime）会选它
+    now = time.time()
+    os.utime(cuda / "llama-server.exe", (now - 9000, now - 9000))
+
+    monkeypatch.setattr(rt_mod, "_programs_root", lambda: root)
+    runtime.cfg.engine_dir = ""  # 走数据目录（fixture 已重定向到 tmp_path/engine，不存在）
+
+    monkeypatch.setattr(rt_mod.gpu, "detect", lambda: [
+        GpuInfo("NVIDIA", "RTX Test", 22 * 1024 ** 3, "591.86")])
+    assert runtime.locate_engine() == str(cuda)
+    assert runtime.engine_backend() == "cuda"
+    assert runtime.status()["engine_backend_label"] == "CUDA"
+
+    # 非 NVIDIA 卡：Vulkan 优先
+    monkeypatch.setattr(rt_mod.gpu, "detect", lambda: [
+        GpuInfo("AMD", "Radeon Test", 16 * 1024 ** 3, "32.0.11021")])
+    assert runtime.locate_engine() == str(vulkan)
+    assert runtime.engine_backend() == "vulkan"
+
+    # 认不出后端的目录仍可兜底（排在已知后端之后）
+    (cuda / "ggml-cuda.dll").unlink()
+    monkeypatch.setattr(rt_mod.gpu, "detect", lambda: [
+        GpuInfo("NVIDIA", "RTX Test", 22 * 1024 ** 3, "591.86")])
+    assert runtime.locate_engine() == str(vulkan)
+    assert catalog.backend_preference(rt_mod.gpu.best())[0] == "cuda"
+
+
+def test_locate_engine_config_wins(runtime, tmp_path, monkeypatch):
+    """显式配置的引擎目录绝对优先，不会被后端偏好改掉。"""
+    own = tmp_path / "pinned" / "engine"
+    own.mkdir(parents=True)
+    (own / "llama-server.exe").write_bytes(b"x")
+    (own / "ggml-vulkan.dll").write_bytes(b"x")
+
+    other = tmp_path / "Programs" / "a4agent" / "engine"
+    other.mkdir(parents=True)
+    (other / "llama-server.exe").write_bytes(b"x")
+    (other / "ggml-cuda.dll").write_bytes(b"x")
+    monkeypatch.setattr(rt_mod, "_programs_root", lambda: tmp_path / "Programs")
+
+    runtime.cfg.engine_dir = str(own)
+    assert runtime.locate_engine() == str(own)
+    assert runtime.engine_backend() == "vulkan"
+
+
+def test_engine_dir_for_is_backend_named(runtime, tmp_path, monkeypatch):
+    """下载落点按后端命名，目录名即内容语义；CUDA 的两个版本共用一个目录。"""
+    from backend.app.llama import catalog
+
+    monkeypatch.setattr(rt_mod, "_programs_root", lambda: tmp_path / "Programs")
+    assert runtime.engine_dir_for(catalog.find("cuda134")).name == "engine"
+    assert runtime.engine_dir_for(catalog.find("cuda134")).parts[-2] == "a4agent-cuda"
+    assert runtime.engine_dir_for(catalog.find("cuda124")) == \
+        runtime.engine_dir_for(catalog.find("cuda134"))
+    assert runtime.engine_dir_for(catalog.find("vulkan")).parts[-2] == "a4agent-vulkan"
+    assert runtime.engine_dir_for(catalog.find("cpu")).parts[-2] == "a4agent-cpu"
+
+
+def test_after_engine_download_switches_only_on_success(runtime, tmp_path, monkeypatch):
+    """装好才切换指针；失败/取消保持原引擎目录不动。"""
+    from backend.app.llama import catalog
+
+    monkeypatch.setattr(rt_mod, "_programs_root", lambda: tmp_path / "Programs")
+    target = runtime.engine_dir_for(catalog.find("cuda134"))
+    target.mkdir(parents=True)
+    (target / "llama-server.exe").write_bytes(b"x")
+    (target / "ggml-cuda.dll").write_bytes(b"x")
+
+    # 先指向别处（模拟当前用 Vulkan）
+    old = tmp_path / "old-engine"
+    old.mkdir()
+    (old / "llama-server.exe").write_bytes(b"x")
+    runtime.cfg.engine_dir = str(old)
+
+    runtime._after_engine_download(target, "下载不完整")   # 失败：不切换
+    assert runtime.cfg.engine_dir == str(old)
+
+    runtime._after_engine_download(target, "")             # 成功：切过去
+    assert runtime.cfg.engine_dir == str(target)
+    assert runtime.engine_backend() == "cuda"
+    assert any("已切换到 CUDA" in l["text"] for l in runtime.logs.after(0))
+
+    # 目录被清空（半个引擎）时也不切换
+    (target / "llama-server.exe").unlink()
+    runtime.cfg.engine_dir = str(old)
+    runtime._after_engine_download(target, "")
+    assert runtime.cfg.engine_dir == str(old)
+
+
+def test_wizard_packs_reports_target_dir(runtime, tmp_path, monkeypatch):
+    monkeypatch.setattr(rt_mod, "_programs_root", lambda: tmp_path / "Programs")
+    monkeypatch.setattr(rt_mod.gpu, "detect", lambda: [])
+    packs = {p["id"]: p for p in runtime.wizard_packs()["packs"]}
+    assert packs["cuda134"]["target_dir"].endswith("a4agent-cuda\\engine") or \
+        packs["cuda134"]["target_dir"].endswith("a4agent-cuda/engine")
+    assert packs["vulkan"]["target_dir"] != packs["cuda134"]["target_dir"]
+
+
 def test_log_ring(runtime):
     runtime.logs.clear()
     for i in range(5):

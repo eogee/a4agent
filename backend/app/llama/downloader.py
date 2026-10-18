@@ -31,6 +31,7 @@ class EngineDownloader:
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
+        self._on_done = None  # 结束回调(error: str)，空串表示成功
         self._state = {
             "running": False,
             "stage": "",
@@ -49,11 +50,13 @@ class EngineDownloader:
         self._cancel.set()
         return self.progress()
 
-    def start(self, pack: catalog.EnginePack, engine_dir) -> dict:
+    def start(self, pack: catalog.EnginePack, engine_dir, on_done=None) -> dict:
+        """开始下载。on_done(error) 在任务结束时回调（接口线程内），error 空串表示成功。"""
         with self._lock:
             if self._state["running"]:
                 return {"ok": False, "error": "已有下载任务在进行中"}
             self._cancel.clear()
+            self._on_done = on_done
             self._state = {
                 "running": True,
                 "stage": f"准备下载：{pack.label}",
@@ -73,13 +76,22 @@ class EngineDownloader:
     # ───────────────────────── 后台执行 ─────────────────────────
 
     def _run(self, pack: catalog.EnginePack, engine_dir: str) -> None:
+        error = ""
         try:
             self._download(pack, engine_dir)
         except _Cancelled:
-            self._finish(error="已取消下载")
+            error = "已取消下载"
         except Exception as e:
             logger.warning("引擎下载失败：%s", e)
-            self._finish(error=str(e))
+            error = str(e)
+        if error:
+            self._finish(error=error)
+        callback, self._on_done = self._on_done, None
+        if callback is not None:
+            try:
+                callback(error)
+            except Exception as e:  # 回调失败不能污染下载结果
+                logger.warning("引擎下载完成回调失败：%s", e)
 
     def _download(self, pack: catalog.EnginePack, engine_dir: str) -> None:
         root = str(Path(engine_dir).parent)
