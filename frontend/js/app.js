@@ -24,9 +24,45 @@ layui.use(['layer', 'form', 'element'], function () {
     };
   }
 
-  function noMatchTip(query, label) {
+  /* 项目视图匹配器：条目名/描述 + 项目名（文件夹名）+ 根路径一起匹配。
+     项目名就是项目根下的一级文件夹名（后端 project_dirs 口径），根路径额外给一份
+     正斜杠写法，这样 "C:/ProgramMine" 与 "C:\ProgramMine" 两种输入都能命中。 */
+  function makeProjectMatcher(query) {
+    var tokens = String(query || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return null;
+    return function (g, p) {
+      var root = String((p && p.root) || '');
+      var text = [
+        g && g.name, g && g.description,
+        p && p.project,
+        root, root.replace(/\\/g, '/'),
+      ].join(' ').toLowerCase();
+      return tokens.every(function (t) { return text.indexOf(t) !== -1; });
+    };
+  }
+
+  /* 全局视图零结果时，若关键词其实命中了某个项目文件夹（或其下条目），
+     给一条「切到项目视图」的提示——省掉用户自己切页签再搜一次。 */
+  function projectJumpTip(which, query) {
+    var data = which === 'skills' ? skillData : mcpData;
+    var match = makeProjectMatcher(query);
+    if (!data || !match) return '';
+    var key = which === 'skills' ? 'skills' : 'servers';
+    var hits = (data.projects || []).map(function (p) {
+      var n = (p[key] || []).filter(function (g) { return match(g, p); }).length;
+      return { project: p.project, n: n };
+    }).filter(function (h) { return h.n; });
+    if (!hits.length) return '';
+    var total = hits.reduce(function (n, h) { return n + h.n; }, 0);
+    var names = hits.map(function (h) { return '「' + h.project + '」'; }).join('、');
+    return '<br><span style="font-size:12px;">项目视图中有 ' + total + ' 个匹配，分布在 ' + escapeHtml(names) + '，' +
+      '<a href="javascript:;" class="update-link" data-scope-jump="' + which + '">切换到项目视图</a></span>';
+  }
+
+  function noMatchTip(query, label, extra) {
     return '<div class="empty-tip">没有匹配「' + escapeHtml(String(query).trim()) + '」的' + label + '<br>' +
-      '<span style="font-size:12px;">按名称与功能描述搜索，空格分隔表示同时满足</span></div>';
+      '<span style="font-size:12px;">按名称、描述或所在项目文件夹搜索，空格分隔表示同时满足</span>' +
+      (extra || '') + '</div>';
   }
 
   /* 输入防抖 120ms 后回调；清空按钮与 Esc 立即生效 */
@@ -865,7 +901,10 @@ layui.use(['layer', 'form', 'element'], function () {
       var gs = skillData.global || [];
       if (match) gs = gs.filter(match);
       if (!gs.length) {
-        if (match) { box.innerHTML = noMatchTip(skillQuery, '技能'); return; }
+        if (match) {
+          box.innerHTML = noMatchTip(skillQuery, '技能', projectJumpTip('skills', skillQuery));
+          return;
+        }
         box.innerHTML = '<div class="empty-tip">各端的全局目录还没有任何 skill<br>' +
           '<span style="font-size:12px;">~/.claude/skills · ~/.codex/skills · ~/.dsh/skills · ~/.zcode/skills · ~/.pi/agent/skills · ~/.qoder/skills · ~/.config/opencode/skills · ~/.workbuddy/skills</span></div>';
         return;
@@ -875,12 +914,13 @@ layui.use(['layer', 'form', 'element'], function () {
     }
     var projects = skillData.projects || [];
     box.classList.remove('card-grid');
-    if (match) {
+    var projMatch = makeProjectMatcher(skillQuery);
+    if (projMatch) {
       projects = projects.map(function (p) {
         return {
           project: p.project,
           root: p.root,
-          skills: (p.skills || []).filter(match),
+          skills: (p.skills || []).filter(function (g) { return projMatch(g, p); }),
         };
       }).filter(function (p) { return p.skills.length; });
       if (!projects.length) { box.innerHTML = noMatchTip(skillQuery, '技能'); return; }
@@ -1458,7 +1498,10 @@ layui.use(['layer', 'form', 'element'], function () {
       var gs = mcpData.global || [];
       if (match) gs = gs.filter(match);
       if (!gs.length) {
-        if (match) { box.innerHTML = noMatchTip(mcpQuery, ' MCP server'); return; }
+        if (match) {
+          box.innerHTML = noMatchTip(mcpQuery, ' MCP server', projectJumpTip('mcp', mcpQuery));
+          return;
+        }
         box.innerHTML = '<div class="empty-tip">各端还未配置任何 MCP server<br>' +
           '<span style="font-size:12px;">~/.claude.json · ~/.codex/config.toml · cordis.patch.yml · ~/.zcode/cli/config.json · ~/.pi/agent/mcp.json · ~/.qoder/mcp.json · ~/.config/opencode/opencode.jsonc · ~/.workbuddy/mcp.json</span></div>';
         return;
@@ -1468,12 +1511,13 @@ layui.use(['layer', 'form', 'element'], function () {
     }
     var projects = mcpData.projects || [];
     box.classList.remove('card-grid');
-    if (match) {
+    var projMatch = makeProjectMatcher(mcpQuery);
+    if (projMatch) {
       projects = projects.map(function (p) {
         return {
           project: p.project,
           root: p.root,
-          servers: (p.servers || []).filter(match),
+          servers: (p.servers || []).filter(function (g) { return projMatch(g, p); }),
         };
       }).filter(function (p) { return p.servers.length; });
       if (!projects.length) { box.innerHTML = noMatchTip(mcpQuery, ' MCP server'); return; }
@@ -2149,6 +2193,14 @@ layui.use(['layer', 'form', 'element'], function () {
     var btn = e.target.closest('[data-mcp-trash]');
     if (!btn) return;
     mcpTrashAction(btn.getAttribute('data-mcp-trash'), Number(btn.getAttribute('data-id')));
+  });
+
+  /* 全局视图零结果提示里的「切换到项目视图」（关键词命中的是项目文件夹名） */
+  document.addEventListener('click', function (e) {
+    var link = e.target.closest('[data-scope-jump]');
+    if (!link) return;
+    if (link.getAttribute('data-scope-jump') === 'skills') setSkillView('project');
+    else setMcpView('project');
   });
 
   /* ---------- 需求与反馈 ----------
