@@ -1,4 +1,4 @@
-"""MCP 六端（Claude Code / Codex / dsh / zcode / pi / Qoder）server 发现、迁移、回收站。
+"""MCP 八端（Claude Code / Codex / dsh / zcode / pi / Qoder / OpenCode / WorkBuddy）server 发现、迁移、回收站。
 
 与 skill_manager 同构的管理骨架，差异在 MCP 配置是「配置文件内的子结构」
 而非独立目录，因此：
@@ -13,7 +13,9 @@
   保留）；Qoder 读写 ~/.qoder/mcp.json 顶层 mcpServers（与 claude 同构，
   额外有 disabled/timeout/authType 等自有键，需原样保留），项目级不托管——
   Qoder 的项目级 MCP 与 Claude Code 共用同一个 <repo>/.mcp.json，由 claude
-  端一次写入即两端同时生效。
+  端一次写入即两端同时生效；WorkBuddy 读写 ~/.workbuddy/mcp.json 顶层
+  mcpServers（与 claude / Qoder 同构，但 http 传输的 type 写作驼峰
+  streamableHttp 而非 http，另有 timeout 等自有键需原样保留），只托管全局。
 - 归一 schema（迁移中枢）：{ name, transport, command, args, env, url,
   headers, cwd, ... }，transport ∈ {stdio, sse, http}。
 - 传输能力矩阵：claude 支持 stdio/sse/http；codex 仅 stdio；dsh 支持
@@ -49,7 +51,7 @@ except ModuleNotFoundError:  # Python 3.10
 
 logger = logging.getLogger(__name__)
 
-TOOLS = ("claude", "codex", "dsh", "zcode", "pi", "qoder", "opencode")
+TOOLS = ("claude", "codex", "dsh", "zcode", "pi", "qoder", "opencode", "workbuddy")
 TOOL_LABELS = {
     "claude": "Claude",
     "codex": "Codex",
@@ -58,6 +60,7 @@ TOOL_LABELS = {
     "pi": "pi",
     "qoder": "Qoder",
     "opencode": "OpenCode",
+    "workbuddy": "WorkBuddy",
 }
 TRASH_DIR_NAME = "mcp_recycle"
 TRASH_KEEP_DAYS = 30
@@ -81,6 +84,9 @@ TRANSPORT_CAPABILITY = {
     # OpenCode 只有两种传输：type=local 走 stdio，type=remote 走 Streamable HTTP，
     # 配置里**没有 legacy sse 的位置**——迁移到它的 sse 条目整对失败，不静默降级。
     "opencode": {"stdio", "http"},
+    # WorkBuddy 支持 stdio / sse / streamable HTTP（配置里写作驼峰
+    # streamableHttp），与 Claude / Qoder 同构，三种传输都认。
+    "workbuddy": {"stdio", "sse", "http"},
 }
 
 # OpenCode 的 schema 严格（未知键会被丢弃），归一化时把规范字段收走，
@@ -102,6 +108,11 @@ DASH_SCOPE_CAPABILITY = {
     # OpenCode 全局 ~/.config/opencode/opencode.json(c)、项目 <repo>/opencode.json(c)
     # 或 <repo>/.opencode/opencode.json(c)，两端都是它自己的文件，无跨端复用问题。
     "opencode": ("global", "project"),
+    # WorkBuddy 只托管全局 ~/.workbuddy/mcp.json：它的 MCP 只认用户级配置，
+    # 没有工作区级 MCP 配置文件，托管项目级只会写出一份它读不到的文件。
+    # 注意 skill 不同——WorkBuddy 确有工作区级 <workspace>/.workbuddy/skills，
+    # 故 skill 侧项目级照常放行（见 skill_manager.project_skill_roots 的通用公式）。
+    "workbuddy": ("global",),
 }
 
 # ---------------- MCP 简介知识库 ----------------
@@ -340,6 +351,17 @@ def qoder_mcp_path() -> Path:
     return config_manager.qoder_home() / "mcp.json"
 
 
+def workbuddy_mcp_path() -> Path:
+    """WorkBuddy 用户级 MCP 配置：~/.workbuddy/mcp.json 顶层 mcpServers。
+
+    另有 A4AGENT_WORKBUDDY_MCP_PATH 可单独指向别处（测试与非标准安装用）。
+    """
+    override = os.environ.get("A4AGENT_WORKBUDDY_MCP_PATH")
+    if override:
+        return Path(override)
+    return Path.home() / ".workbuddy" / "mcp.json"
+
+
 def opencode_config_dir() -> Path:
     """OpenCode 用户级配置目录 ~/.config/opencode（与 skill 根同处）。"""
     override = os.environ.get("A4AGENT_OPENCODE_CONFIG_DIR")
@@ -405,6 +427,8 @@ def mcp_config_file(scope: str, tool: str, project: str | None) -> Path:
             return qoder_mcp_path()
         if tool == "opencode":
             return opencode_mcp_path()
+        if tool == "workbuddy":
+            return workbuddy_mcp_path()
     if scope == "project":
         if not project:
             raise ValueError("项目级位置缺少项目名")
@@ -797,6 +821,115 @@ def render_qoder(server: dict) -> dict:
     return out
 
 
+# WorkBuddy 的 mcp.json 与 Claude Code 同构（顶层 mcpServers），但有两个差异：
+# 1) http 传输的 type 写作驼峰 "streamableHttp"（不是 http，也不是 streamable-http），
+#    写回时必须还原成这个拼写，否则 WorkBuddy 认不出该条目；
+# 2) timeout 是每条目独立生效的自有键（stdio 冷启动慢的 server 常见 330000），
+#    重写整表时必须无损读回原样写回——丢掉它会让慢启动的 server 直接超时失败。
+WORKBUDDY_SERVER_OWNED_KEYS = (
+    "type",
+    "command",
+    "args",
+    "env",
+    "url",
+    "headers",
+    "cwd",
+    "description",
+)
+# 归一 transport → WorkBuddy 配置文件里的 type 字面量
+WORKBUDDY_TYPE_LITERAL = {"stdio": "stdio", "sse": "sse", "http": "streamableHttp"}
+
+
+def normalize_workbuddy(name: str, raw: dict, path: Path, tool: str, scope: str, project: str | None) -> dict:
+    """WorkBuddy mcpServers 条目归一：streamableHttp/streamable-http 记为 http，非规范键进 extra。"""
+    typ = str(raw.get("type") or "").lower().replace("streamablehttp", "streamable-http")
+    if typ == "streamable-http":
+        typ = "http"
+    if typ not in ("stdio", "sse", "http"):
+        typ = "http" if raw.get("url") else "stdio"
+    server = {
+        "name": name,
+        "transport": typ,
+        "command": raw.get("command"),
+        "args": list(raw.get("args") or []),
+        "env": dict(raw.get("env") or {}),
+        "url": raw.get("url"),
+        "headers": dict(raw.get("headers") or {}) if isinstance(raw.get("headers"), dict) else {},
+        "cwd": raw.get("cwd"),
+        "description": str(raw.get("description") or "").strip(),
+        "tool": tool,
+        "scope": scope,
+        "project": project,
+        "path": str(path),
+        "extra": {k: v for k, v in raw.items() if k not in WORKBUDDY_SERVER_OWNED_KEYS},
+    }
+    return server
+
+
+def render_workbuddy(server: dict) -> dict:
+    """输出 WorkBuddy 的 server 条目：type 写回该端认的拼写（streamableHttp / sse / stdio）。"""
+    out: dict = dict(server.get("extra") or {})
+    out["type"] = WORKBUDDY_TYPE_LITERAL.get(server["transport"], "stdio")
+    if server["transport"] == "stdio":
+        if server.get("command"):
+            out["command"] = _portable_command(server["command"])
+        if server.get("args"):
+            out["args"] = list(server["args"])
+        if server.get("env"):
+            out["env"] = dict(server["env"])
+        if server.get("cwd"):
+            out["cwd"] = server["cwd"]
+    else:  # sse / http
+        if server.get("url"):
+            out["url"] = server["url"]
+        if server.get("headers"):
+            out["headers"] = dict(server["headers"])
+    if server.get("description"):
+        out["description"] = server["description"]
+    return out
+
+
+def read_workbuddy_servers(path: Path, tool: str = "workbuddy", scope: str = "global", project: str | None = None) -> list[dict]:
+    """读取 ~/.workbuddy/mcp.json 顶层 mcpServers（归一走 normalize_workbuddy 以保留 timeout 等自有键）。"""
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as e:
+        logger.warning("读取 %s 失败：%s", path, e)
+        return []
+    mcp = data.get("mcpServers") if isinstance(data, dict) else None
+    if not isinstance(mcp, dict):
+        return []
+    servers = []
+    for name, raw in mcp.items():
+        if not isinstance(raw, dict):
+            continue
+        try:
+            servers.append(normalize_workbuddy(str(name), raw, path, tool, scope, project))
+        except Exception:
+            continue
+    return servers
+
+
+def _write_workbuddy(path: Path, servers: list[dict]) -> None:
+    """重写 WorkBuddy 的 mcp.json：只换 mcpServers，其余顶层键原样保留。
+
+    与 Qoder 同款的中止原则：WorkBuddy 自身也在写这个文件，读取失败必须中止，
+    不能按空配置重建——那会把用户已挂载的 server 全清掉。
+    """
+    data: dict = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8-sig"))
+            if isinstance(loaded, dict):
+                data = loaded
+        except (OSError, ValueError) as e:
+            raise ValueError(f"读取 {path} 失败，已中止写入：{e}")
+    data["mcpServers"] = {s["name"]: render_workbuddy(s) for s in servers}
+    _atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2))
+
+
 def loads_jsonc(text: str):
     """解析 JSON/JSONC，返回对象；失败返回 None（不抛异常）。
 
@@ -1172,6 +1305,8 @@ def read_servers(scope: str, tool: str, project: str | None = None) -> list[dict
         return read_qoder_servers(path, tool, scope, project)
     if tool == "opencode":
         return read_opencode_servers(path, tool, scope, project)
+    if tool == "workbuddy":
+        return read_workbuddy_servers(path, tool, scope, project)
     return read_dsh_servers(path, tool, scope, project)
 
 
@@ -1370,6 +1505,8 @@ def write_servers(scope: str, tool: str, project: str | None, servers: list[dict
         _write_qoder(path, servers)
     elif tool == "opencode":
         _write_opencode(path, servers)
+    elif tool == "workbuddy":
+        _write_workbuddy(path, servers)
     elif tool == "dsh":
         _write_dsh(path, servers)
     else:

@@ -1,4 +1,4 @@
-"""Skill 管理：七端（Claude Code / Codex / dsh / zcode / pi / Qoder / OpenCode）
+"""Skill 管理：八端（Claude Code / Codex / dsh / zcode / pi / Qoder / OpenCode / WorkBuddy）
 skill 发现、迁移、回收站。
 
 各端均采用「<skill-name>/SKILL.md 目录 bundle + frontmatter（name/description）」
@@ -40,7 +40,7 @@ from .env_compat import env_first
 
 logger = logging.getLogger(__name__)
 
-TOOLS = ("claude", "codex", "dsh", "zcode", "pi", "qoder", "opencode")
+TOOLS = ("claude", "codex", "dsh", "zcode", "pi", "qoder", "opencode", "workbuddy")
 TOOL_LABELS = {
     "claude": "Claude",
     "codex": "Codex",
@@ -49,6 +49,7 @@ TOOL_LABELS = {
     "pi": "pi",
     "qoder": "Qoder",
     "opencode": "OpenCode",
+    "workbuddy": "WorkBuddy",
 }
 SKILL_FILE = "SKILL.md"
 TRASH_DIR_NAME = "skills_recycle"
@@ -146,8 +147,20 @@ def opencode_compat_roots(project_path: Path | None = None) -> list[Path]:
     return [claude_skills_root(), Path.home() / ".agents" / "skills"]
 
 
+def workbuddy_skills_root() -> Path:
+    """WorkBuddy 全局 skill 根，可用环境变量 A4AGENT_WORKBUDDY_SKILLS_PATH 覆盖。
+
+    WorkBuddy 的用户级技能目录是 ~/.workbuddy/skills，项目级 <工作区>/.workbuddy/skills，
+    正好命中 project_skill_roots 的 .{tool}/skills 通用公式，无需特判。
+    """
+    override = env_first("A4AGENT_WORKBUDDY_SKILLS_PATH", "A4API_WORKBUDDY_SKILLS_PATH")
+    if override:
+        return Path(override)
+    return Path.home() / ".workbuddy" / "skills"
+
+
 def global_skill_roots() -> dict:
-    """七端全局 skill 根映射 {tool: Path}。"""
+    """八端全局 skill 根映射 {tool: Path}。"""
     return {
         "claude": claude_skills_root(),
         "codex": codex_skills_root(),
@@ -156,6 +169,7 @@ def global_skill_roots() -> dict:
         "pi": pi_skills_root(),
         "qoder": qoder_skills_root(),
         "opencode": opencode_skills_root(),
+        "workbuddy": workbuddy_skills_root(),
     }
 
 
