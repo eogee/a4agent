@@ -433,9 +433,9 @@ a4agent/
 │   ├── js/markdown.js        # 更新说明 Markdown 渲染
 │   ├── css/ · layui/         # 样式与 LayUI 组件库
 │   └── changelog.md          # 应用内更新弹窗展示的更新说明
-├── docs/                     # 设计文档、迁移对照表、实施计划
+├── docs/                     # 迁移对照表（README 引用的唯一跟踪文档；其余设计/实施记录仅本地）
 ├── resources/                # logo 与安装包图标 / dsh-hook（挂到 ~/.dsh 的 Cordis 插件源码）
-└── tools/                    # 端到端烟测脚本（e2e_task_smoke.py）
+└── tools/                    # 端到端烟测脚本（e2e_task_smoke.py）与 UI 探针（probe_selects.py）
 ```
 
 运行时数据（数据库、配置备份、llama 配置与引擎）写入 `backend/database/`（开发）或 `%APPDATA%\a4agent\`（打包后）。

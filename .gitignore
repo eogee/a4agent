@@ -12,6 +12,12 @@ build/
 dist/
 *.spec
 
+# uv 导出的依赖清单（由 pyproject.toml 生成，勿手改，不入库）
+backend/requirements.txt
+
+# 第三方 source map（仅本地调试用，不随包分发）
+frontend/layui/**/*.map
+
 # 调试过程产物（界面探针截图与抓取数据）
 .run/
 
@@ -28,10 +34,19 @@ dist/
 .impeccable/
 .zcode/
 .dsh/
+.opencode/
+.pi/
+.qoder/
+
+# 浏览器调试产物（截图、快照、控制台日志）
+.playwright-mcp/
 
 
-# 开发文档
-docs/
+# 开发文档：只保留 README / 后端 API 引用的迁移对照表（用户可见），
+# 其余调研、实施、测试记录均为维护者本地过程文档，不入库。
+docs/*
+!docs/迁移对照表-三端API配置.md
+
 开发文档.md
 
 DESIGN.md

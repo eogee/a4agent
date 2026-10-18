@@ -424,9 +424,9 @@ a4agent/
 │   ├── js/markdown.js        # markdown rendering for release notes
 │   ├── css/ · layui/         # styles and the LayUI component library
 │   └── changelog.md          # release notes shown in the in-app update dialog
-├── docs/                     # design docs, migration reference tables, implementation plans
+├── docs/                     # migration reference table (the only tracked doc; design notes stay local)
 ├── resources/                # logo and installer icons / dsh-hook (Cordis plugin deployed to ~/.dsh)
-└── tools/                    # end-to-end smoke test (e2e_task_smoke.py)
+└── tools/                    # end-to-end smoke test (e2e_task_smoke.py) and UI probe (probe_selects.py)
 ```
 
 Runtime data (database, config backups, llama config and engines) goes to `backend/database/` (development) or `%APPDATA%\a4agent\` (packaged).
