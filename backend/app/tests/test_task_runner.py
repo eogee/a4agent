@@ -251,7 +251,7 @@ def test_payload_and_tail_output(env, monkeypatch, tmp_path):
         started_at=datetime.now(), finished_at=datetime.now(),
     )
     payload = task_runner.task_payload(task, include_output=True)
-    assert payload["tool_label"] == "pi"
+    assert payload["tool_label"] == "Pi"
     assert payload["status"] == task_runner.SUCCESS
     assert payload["duration_seconds"] == 0
     assert "agent_end" in payload["output"]

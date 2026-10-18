@@ -94,7 +94,7 @@ def test_create_task_returns_immediately_and_queues(db, monkeypatch):
     assert row.status == task_runner.PENDING
     assert submitted == [row.id]
     assert out["status"] == task_runner.PENDING
-    assert out["tool_label"] == "pi"
+    assert out["tool_label"] == "Pi"
     assert out["precheck"]["ok"] is True
     assert out["timeout_seconds"] == task_runner.DEFAULT_TIMEOUT_SECONDS
 

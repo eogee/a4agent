@@ -544,7 +544,7 @@ def test_migrate_to_project_target_writes_project_files(env, db):
 def test_migrate_dsh_project_scope_rejected(env, db):
     make_claude_global(env, "deploy")
     make_project(env, "real-proj")
-    with pytest.raises(ValueError, match="dsh 端不支持项目级"):
+    with pytest.raises(ValueError, match="DSH 端不支持项目级"):
         mcp_manager.migrate(
             db,
             [{"scope": "global", "tool": "claude", "project": None, "name": "deploy"}],

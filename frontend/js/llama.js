@@ -374,7 +374,7 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   /* 接入配置方案：勾选要写入的应用（本地服务讲 OpenAI Chat Completions，
-   * Claude Code / Codex 经本地翻译代理）。v0.5.1 起不再代管 dsh / ZCode / pi
+   * Claude Code / Codex 经本地翻译代理）。v0.5.1 起不再代管 DSH / ZCode / Pi
    * 的 API 配置，后端会丢弃这三个目标，勾选项同步收窄 */
   var INTEGRATE_TARGETS = [
     { key: 'claude', label: 'Claude Code', on: true },

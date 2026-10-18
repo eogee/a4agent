@@ -43,8 +43,8 @@ ENGINE_LABELS = {
     "codex": "Codex",
     "zcode": "ZCode",
     "qoder": "Qoder",
-    "dsh": "dsh",
-    "pi": "pi",
+    "dsh": "DSH",
+    "pi": "Pi",
     "opencode": "OpenCode",
 }
 
