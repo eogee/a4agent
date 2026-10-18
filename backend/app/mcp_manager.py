@@ -108,9 +108,10 @@ DASH_SCOPE_CAPABILITY = {
     # OpenCode 全局 ~/.config/opencode/opencode.json(c)、项目 <repo>/opencode.json(c)
     # 或 <repo>/.opencode/opencode.json(c)，两端都是它自己的文件，无跨端复用问题。
     "opencode": ("global", "project"),
-    # WorkBuddy 只托管全局 ~/.workbuddy/mcp.json：它的 MCP 挂载以用户级
-    # 配置为准，项目级目录会随工作区切换而变，a4agent 的项目根列表与之
-    # 不是同一套，托管项目级只会写出一份当前工作区读不到的文件。
+    # WorkBuddy 只托管全局 ~/.workbuddy/mcp.json：它的 MCP 只认用户级配置，
+    # 没有工作区级 MCP 配置文件，托管项目级只会写出一份它读不到的文件。
+    # 注意 skill 不同——WorkBuddy 确有工作区级 <workspace>/.workbuddy/skills，
+    # 故 skill 侧项目级照常放行（见 skill_manager.project_skill_roots 的通用公式）。
     "workbuddy": ("global",),
 }
 

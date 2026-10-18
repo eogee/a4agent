@@ -192,7 +192,7 @@ class McpImportIn(BaseModel):
 
 class TaskCreate(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
-    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode|workbuddy)$", description="无头引擎")
+    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode)$", description="无头引擎")
     working_dir: Optional[str] = None
     timeout_seconds: Optional[int] = Field(default=None, ge=30, le=3600)
 
