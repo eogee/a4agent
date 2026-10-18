@@ -2,13 +2,13 @@
 
 English | [简体中文](README.zh-CN.md)
 
-**A management console for seven AI coding tools + a local LLM inference console**: unified **skill management** and **MCP management** across all seven tools — **Claude Code, Codex, dsh (DeepSeek Harness), ZCode (Zhipu Agentic Dev Environment), pi (local pi coding agent), Qoder (AI IDE), and OpenCode** — plus API provider switching for the two CLI tools without a graphical config UI (Claude Code, Codex), and a built-in llama.cpp local model inference console. Everything is done through a visual interface; no manual config-file editing required.
+**A management console for eight AI coding tools + a local LLM inference console**: unified **skill management** and **MCP management** across all eight tools — **Claude Code, Codex, dsh (DeepSeek Harness), ZCode (Zhipu Agentic Dev Environment), pi (local pi coding agent), Qoder (AI IDE), OpenCode, and WorkBuddy** — plus API provider switching for the two CLI tools without a graphical config UI (Claude Code, Codex), and a built-in llama.cpp local model inference console. Everything is done through a visual interface; no manual config-file editing required.
 
 | Capability | Description |
 |---|---|
-| **Skill Management** | Auto-discovery of global/project-level skills on all seven tools, aggregation badges, cross-tool migration, recycle-bin restore, one-click sync of a project's skills to every missing tool |
-| **MCP Management** | Auto-discovery and **one-click install** of MCP servers on all seven tools, cross-tool migration (validated by a transport capability matrix), snapshot recycle bin, automatic/custom **descriptions**; secrets are masked/encrypted throughout |
-| **API Switching** | One-click provider / model / API-key switching for the two CLI tools without a graphical UI (Claude Code, Codex), with automatic backup, atomic writes, and DPAPI-encrypted key storage; the other four tools have their own provider UIs and are configured by the user in-app |
+| **Skill Management** | Auto-discovery of global/project-level skills on all eight tools, aggregation badges, cross-tool migration, recycle-bin restore, one-click sync of a project's skills to every missing tool |
+| **MCP Management** | Auto-discovery and **one-click install** of MCP servers on all eight tools, cross-tool migration (validated by a transport capability matrix), snapshot recycle bin, automatic/custom **descriptions**; secrets are masked/encrypted throughout |
+| **API Switching** | One-click provider / model / API-key switching for the two CLI tools without a graphical UI (Claude Code, Codex), with automatic backup, atomic writes, and DPAPI-encrypted key storage; the other six tools have their own provider UIs and are configured by the user in-app |
 | **Local Models** | Turn any `.gguf` model into an OpenAI-compatible local/LAN API service in one click: engine auto-download by GPU, model library scanning, VRAM risk assessment, one-click profile creation for Claude Code / Codex |
 | **Task Dispatch** | Run any of the seven tools in **headless mode** as background tasks: dispatch-and-return, automatic pre-flight checks (engine ready / config ready / real connectivity), queue polling, output archiving, cancel & timeout, and tasks survive closing the window. Uses the config you already set up in each app |
 | **Notifications** | Two independent channels so you are not tied to the desk, in **one unified format** across every channel — topic name / notification type / app name, plain text without emoji: **phone push** (ntfy) delivers task and session outcomes (completion / failure / timeout) always carrying the **agent's last output**; **desktop toasts** (source badge: logo + a4agent) cover completions, failures, permission requests and questions, and wake the window on click. Session hooks for **Claude Code / Codex / ZCode / Qoder / WorkBuddy / dsh** let you answer the agent's questions and approve permissions from your phone |
@@ -17,7 +17,7 @@ English | [简体中文](README.zh-CN.md)
 
 ## OpenCode Integration (since v0.6.0)
 
-OpenCode gets exactly the same treatment as the other six tools — no dedicated UI anywhere:
+OpenCode gets exactly the same treatment as the other seven tools — no dedicated UI anywhere:
 
 - **Skills / MCP**: managed as the seventh tool like any other (works out of the box — the service password and default port `49374` are discovered automatically).
 - **Task dispatch**: an OpenCode engine that runs tasks as sessions against the live service instead of spawning a fresh CLI process each time. Approval-free execution uses **session-scoped permission rules**, so your global config is left untouched; cost, usage, and outcome come back structured; deprecated models are automatically retried with a working one.
@@ -27,11 +27,11 @@ OpenCode gets exactly the same treatment as the other six tools — no dedicated
 
 ## Skill Management
 
-All seven targets use the same skill format (a `<skill-name>/SKILL.md` directory with `name` and `description` frontmatter), so a4agent can manage them as one kind of resource.
+All eight targets use the same skill format (a `<skill-name>/SKILL.md` directory with `name` and `description` frontmatter), so a4agent can manage them as one kind of resource.
 
 ### Discovery & Aggregation
 
-- Scans the **global** and **project-level** skill directories of all seven tools, and aggregates by frontmatter `name`: when a skill with the same name exists on several tools, it is badged as "already on N tools".
+- Scans the **global** and **project-level** skill directories of all eight tools, and aggregates by frontmatter `name`: when a skill with the same name exists on several tools, it is badged as "already on N tools".
 - The project root list is configurable (default scan root: `C:\ProgramMine`); only projects containing at least one skill are listed.
 - Codex's reserved global directories (`.system/` and other dot-prefixed dirs) are skipped automatically and not treated as user skills.
 
@@ -59,6 +59,7 @@ All seven targets use the same skill format (a `<skill-name>/SKILL.md` directory
 | pi | `~/.pi/agent/skills/` (overridable via `$PI_CODING_AGENT_DIR`) | `<project>/.pi/skills/` |
 | Qoder | `~/.qoder/skills/` (overridable via `$A4AGENT_QODER_HOME`) | `<project>/.qoder/skills/` |
 | OpenCode | `~/.config/opencode/skills/` | `<project>/.opencode/skills/` |
+| WorkBuddy | `~/.workbuddy/skills/` (overridable via `$A4AGENT_WORKBUDDY_SKILLS_PATH`) | `<project>/.workbuddy/skills/` |
 
 **ZCode**: the official client also recognizes the cross-tool directories `~/.agents/skills` and `<project>/.agents/skills`; a4agent standardizes on the `.zcode` prefix for consistency with the other tools. Skills migrated to ZCode are really loaded by the ZCode client.
 
@@ -75,18 +76,18 @@ All seven targets use the same skill format (a `<skill-name>/SKILL.md` directory
 
 ## MCP Management
 
-Each of the seven tools stores its MCP servers in its own config file; a4agent normalizes them into one view (`name` / `transport` / `command` / `args` / `env` / `url` / `headers`).
+Each of the eight tools stores its MCP servers in its own config file; a4agent normalizes them into one view (`name` / `transport` / `command` / `args` / `env` / `url` / `headers`).
 
 ### Discovery & Aggregation
 
-- Auto-discovers global and project-level MCP servers on all seven tools and aggregates same-name servers across tools ("already on N tools").
+- Auto-discovers global and project-level MCP servers on all eight tools and aggregates same-name servers across tools ("already on N tools").
 - `env` / `headers` are always **masked** in detail views (key names only); the API never returns plaintext secrets.
 - Every server card shows a **description**: common servers are recognized automatically (a built-in digest library plus live npm registry lookups for npx packages, both cached with failure fallbacks), and you can also click "Describe" to write your own (stored locally, shared across tools, cleared when left empty).
-- Project-level files are recognized automatically: Claude Code `.mcp.json`, Codex `.codex/config.toml`, ZCode `.zcode/config.json`, pi `.pi/mcp.json` (Qoder's project level *is* Claude Code's `.mcp.json`, managed under the Claude tool and not discovered twice).
+- Project-level files are recognized automatically: Claude Code `.mcp.json`, Codex `.codex/config.toml`, ZCode `.zcode/config.json`, pi `.pi/mcp.json` (Qoder's project level *is* Claude Code's `.mcp.json`, managed under the Claude tool and not discovered twice). WorkBuddy is global-only — it has no workspace-level MCP file.
 
 ### Installing MCP Servers
 
-- Click "Install MCP" to create a server from scratch on any app: pick a target app (Claude Code / Codex / dsh / ZCode / pi / Qoder / OpenCode — written to that app's global config) and a transport (stdio / http / sse, filtered by the target's capabilities — e.g. Codex is stdio-only, pi and OpenCode have no sse), then fill in command/args/env or URL/headers.
+- Click "Install MCP" to create a server from scratch on any app: pick a target app (Claude Code / Codex / dsh / ZCode / pi / Qoder / OpenCode / WorkBuddy — written to that app's global config) and a transport (stdio / http / sse, filtered by the target's capabilities — e.g. Codex is stdio-only, pi and OpenCode have no sse), then fill in command/args/env or URL/headers.
 - You can also **paste JSON to import in bulk**: paste an existing MCP config snippet (three formats supported: a top-level "mcpServers" object, a name-keyed server dictionary, or a single server object) and install many at once — each entry is independent, so one failure (name conflict, unsupported transport, etc.) doesn't abort the rest, and each reports success/failure.
 - Installation uses each tool's native rendering and atomic writes (a same-name server on the target is explicitly rejected — use migration or delete first); existing servers and unrelated config keys are preserved. Installed servers appear in the card list immediately with descriptions auto-matched.
 
@@ -104,6 +105,7 @@ Each of the seven tools stores its MCP servers in its own config file; a4agent n
 | pi | stdio / streamable-http | `~/.pi/agent/mcp.json` (global), `<project>/.pi/mcp.json` (project; the project must be trusted by pi) |
 | Qoder | stdio / sse / http | `~/.qoder/mcp.json` (global; project level reuses Claude Code's `<project>/.mcp.json`) |
 | OpenCode | stdio / streamable-http | `~/.config/opencode/opencode.json(c)`, `<project>/.opencode/opencode.json(c)` (`mcp.servers`) |
+| WorkBuddy | stdio / sse / http (written as `streamableHttp`) | `~/.workbuddy/mcp.json` (global only) |
 
 **dsh**: MCP servers hang off the `@deepseek-ai/dsh-mcp-client` plugin entry; rewrites preserve other non-managed entries. No project-level MCP.
 
@@ -118,6 +120,8 @@ Each of the seven tools stores its MCP servers in its own config file; a4agent n
 **OpenCode**: servers live under `mcp.servers` with exactly two transports — `local` (stdio) and `remote` (Streamable HTTP). There is **no place for legacy SSE**, so sse sources fail as a whole and are logged. Three shape differences are smoothed over by a4agent: the command is a **single array** (executable and arguments merged; split only when writing back), the environment key is `environment` (not `env`), and the on/off switch is `disabled`. Its own keys `codemode` / `timeout` / `protocol` / `oauth` are **preserved losslessly**.
 
 > OpenCode's config file is JSONC (comments and trailing commas allowed). a4agent writes standard JSON (which is valid JSONC) and reads existing files with comments correctly, but **hand-written comments in that file are lost on write** — an inherent trade-off of whole-subtree replacement. If comments matter to you, configure it in OpenCode's own UI instead. If reading the config fails, a4agent aborts the write rather than rebuilding from an empty config (which would wipe your model / agents / permissions).
+
+**WorkBuddy**: `mcp.json` is structurally identical to Claude Code's (top-level `mcpServers`), with two differences. The http transport literal is camelCase **`streamableHttp`** (neither `http` nor `streamable-http`): a4agent normalizes it to `http` internally and writes the camelCase form back, because an entry written as `http` is simply not recognized by WorkBuddy. And `timeout` is a **per-entry** key (a slow-starting stdio server such as a Ghidra bridge needs `330000`), so unrecognized keys are read into `extra` and written back losslessly — dropping them would make those servers time out on startup. Only the global file is managed: WorkBuddy has **no workspace-level MCP config file**, so install and migration targeting project level fail explicitly instead of writing a file nothing reads. Skills are different — WorkBuddy does have `<workspace>/.workbuddy/skills`, so project-level skill discovery and migration work as usual.
 
 ### Recycle Bin & Data Protection
 
@@ -390,8 +394,8 @@ a4agent/
 │   ├── responses_translator.py  # OpenAI Responses protocol translation
 │   ├── proxy_standalone.py   # standalone-process form of the translation proxy
 │   ├── crypto.py             # Windows DPAPI key encryption
-│   ├── skill_manager.py      # seven-tool skill discovery, aggregation, migration, recycle bin
-│   ├── mcp_manager.py        # seven-tool MCP discovery, installation, migration, snapshots
+│   ├── skill_manager.py      # eight-tool skill discovery, aggregation, migration, recycle bin
+│   ├── mcp_manager.py        # eight-tool MCP discovery, installation, migration, snapshots
 │   ├── removal.py            # cleanup of managed entries handed to the three tools (only self-written ones)
 │   ├── removal_backup.py     # permanent snapshots taken before cleanup
 │   ├── task_engines.py       # headless task engine adapters (commands & output parsing)
