@@ -387,6 +387,7 @@ a4agent/
 ├── build.py                  # 打包脚本（PyInstaller onedir + Inno Setup 安装包）
 ├── installer.iss             # Inno Setup 安装脚本（每用户安装、免 UAC）
 ├── dev_server.py             # 开发态后端启动脚本（浏览器访问调试）
+├── dev_server.bat            # Windows 双击启动 dev_server.py 的批处理
 ├── pyproject.toml            # 依赖清单与版本号单一来源
 ├── backend/app/              # FastAPI 后端
 │   ├── main.py               # 应用入口、生命周期与路由挂载

@@ -379,6 +379,7 @@ a4agent/
 ├── build.py                  # packaging script (PyInstaller onedir + Inno Setup installer)
 ├── installer.iss             # Inno Setup script (per-user install, no UAC)
 ├── dev_server.py             # dev-mode backend launcher (browser debugging)
+├── dev_server.bat            # Windows double-click wrapper for dev_server.py
 ├── pyproject.toml            # dependencies; single source of the version number
 ├── backend/app/              # FastAPI backend
 │   ├── main.py               # app entry, lifespan, router mounting
