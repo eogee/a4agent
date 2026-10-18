@@ -443,14 +443,11 @@ body {
   color: #ffffff;
 }
 
-/* ZCode：与 DSH 凑成一对「黑」——DSH 实底、ZCode 空心描边（白底黑字黑框），
-   和所有浅底深字的药丸都不同，但又不至于像实底灰那样沉闷。
-   padding 各减 1px 抵掉边框占位，外框尺寸与其它药丸保持一致，行内不跳高 */
+/* ZCode：中灰实底 + 白字（无边框）。与 OpenCode 同属灰系，靠深浅区分：
+   ZCode 深灰配白字、OpenCode 浅灰配黑字，两枚放一起也不会认错 */
 .target-zcode {
-  background: transparent;
-  color: #1f2226;
-  border: 1px solid #1f2226;
-  padding: 3px 9px;
+  background: #5f6875;
+  color: #ffffff;
 }
 
 /* Pi：紫调，八端里唯一没被占用的色系，与暖橙 / 各档蓝 / 青绿都不撞 */
@@ -473,10 +470,10 @@ body {
   color: #2b6f8f;
 }
 
-/* OpenCode 徽章：沿用 Codex 蓝的同一色系但更冷一档，与既有标签拉开辨识度 */
+/* OpenCode 徽章：浅灰底 + 黑字（无边框），与 ZCode 的深灰白字构成同色系深浅对 */
 .target-opencode {
-  background: #eaf0fb;
-  color: #3f5f9e;
+  background: #e2e5ea;
+  color: #1f2226;
 }
 
 /* WorkBuddy 徽章：青绿调，与上面所有冷色/暖色标签都不撞色 */
