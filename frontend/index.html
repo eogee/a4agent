@@ -6,7 +6,8 @@
   <title>a4agent</title>
   <link rel="icon" type="image/png" href="logo.png?v=20261007">
   <link rel="stylesheet" href="layui/css/layui.css">
-  <link rel="stylesheet" href="css/style.css?v=20261009d">
+  <link rel="stylesheet" href="css/style.css?v=20261021c">
+  <script src="js/i18n.js?v=20261021c"></script>
 </head>
 <body>
   <!--
@@ -24,6 +25,10 @@
       <span id="status-text" class="status-text">加载中…</span>
     </div>
     <div class="header-actions layui-form">
+      <div class="seg-control lang-seg" id="lang-seg" role="group" aria-label="Language / 语言" data-i18n-skip>
+        <button type="button" class="seg-btn" data-lang="zh" title="中文">中</button>
+        <button type="button" class="seg-btn" data-lang="en" title="English">EN</button>
+      </div>
       <span class="proxy-label" id="proxy-label">代理服务</span>
       <input type="checkbox" id="proxy-switch" lay-skin="switch" lay-filter="proxy-switch" disabled>
       <a href="javascript:;" class="update-link" id="btn-check-update">检查更新</a>
@@ -159,8 +164,8 @@
   <script src="js/markdown.js"></script>
   <script src="js/dirpicker.js?v=20261018a"></script>
   <script src="js/app.js?v=20261018a"></script>
-  <script src="js/llama.js?v=20261009d"></script>
-  <script src="js/tasks.js?v=20261018a"></script>
+  <script src="js/llama.js?v=20261021c"></script>
+  <script src="js/tasks.js?v=20261020a"></script>
   <script src="js/qrcode.min.js"></script>
   <script src="js/phone.js?v=20261009d"></script>
 </body>

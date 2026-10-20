@@ -1642,8 +1642,7 @@ layui.use(['layer', 'form', 'element'], function () {
   var mcpQuery = ''; // 搜索关键词，仅前端过滤已缓存的 mcpData
 
   function transportBadge(t) {
-    var cls = t === 'stdio' ? 'target-claude' : (t === 'sse' ? 'target-codex' : 'target-dsh');
-    return '<span class="target-badge ' + cls + '">' + escapeHtml(t) + '</span>';
+    return '<span class="target-badge transport-badge">' + escapeHtml(t) + '</span>';
   }
 
   function mcpCopyLine(c) {

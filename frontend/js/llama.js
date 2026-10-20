@@ -433,40 +433,124 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   /* ---------- 推理设置 ---------- */
-  /* 引擎后端选择行：已安装的可勾选，未安装的置灰并给下载入口。
-   * CUDA 13.4/12.4 共用同一目录，按后端勾选；下载包按驱动版本取后端推荐。 */
+  /* 引擎后端对比表：自动 / CUDA / Vulkan / CPU 横排成一张表，一行看状态、
+   * 一行看适配、一行看操作——比原来挤在一行的单选 + 追加下载链接清楚得多。
+   * 已安装的直接「使用」；未安装的给下载入口（下载完成由轮询触发重绘）。
+   * CUDA 13.4/12.4 共用同一后端目录，按后端成列；下载包按驱动版本取推荐包。 */
   var ENGINE_BACKEND_LABELS = { cuda: 'CUDA', vulkan: 'Vulkan', cpu: 'CPU' };
+  var engineState = null;   // { st, ep }：点「使用」后据此即时重绘高亮列
 
-  function engineBackendRow(st, ep) {
-    var installed = ep.installed_backends || [];
+  function engineTable(st, ep) {
     var packs = ep.packs || [];
+    var installed = ep.installed_backends || [];
+    var mode = st.engine_mode || 'auto';
     var recPack = packs.filter(function (p) { return p.id === ep.recommended_pack_id; })[0] || null;
     var recBackend = recPack ? (recPack.needs_nvidia ? 'cuda' : recPack.id) : '';
-    var defs = [
-      { key: 'auto', label: '自动（跟随显卡推荐' +
-          (st.engine_backend ? '，当前 ' + (ENGINE_BACKEND_LABELS[st.engine_backend] || st.engine_backend) : '') + '）' },
-      { key: 'cuda', label: 'CUDA' },
-      { key: 'vulkan', label: 'Vulkan' },
-      { key: 'cpu', label: 'CPU' }
-    ];
-    var radios = defs.map(function (b) {
-      var has = b.key === 'auto' || installed.indexOf(b.key) !== -1;
-      return '<label class="llama-check"><input type="radio" name="llm_engine" value="' + b.key + '"' +
-        (st.engine_mode === b.key ? ' checked' : '') + (has ? '' : ' disabled') + '>' + b.label +
-        (b.key === recBackend && b.key !== st.engine_mode ? ' · 推荐' : '') +
-        (has ? '' : '（未安装）') + '</label>';
+
+    function packFor(backend) {
+      if (backend === 'cuda') {
+        return recPack && recPack.needs_nvidia
+          ? recPack
+          : (packs.filter(function (p) { return p.needs_nvidia; })[0] || null);
+      }
+      return packs.filter(function (p) { return p.id === backend; })[0] || null;
+    }
+
+    var cols = [{
+      key: 'auto', label: '自动', notes: ['跟随显卡推荐'],
+      tip: '按当前显卡自动挑选引擎，换显卡后无需改设置'
+    }];
+    ['cuda', 'vulkan', 'cpu'].forEach(function (b) {
+      var pack = packFor(b);
+      cols.push({
+        key: b,
+        label: ENGINE_BACKEND_LABELS[b] || b,
+        // 适配说明固定拆两行（首行定性、次行条件），窄列里不会出现孤零零一个「580」
+        notes: b === 'cuda'
+          ? (pack && pack.min_nvidia_driver ? ['NVIDIA 显卡', '驱动 ≥ ' + pack.min_nvidia_driver] : ['NVIDIA 显卡'])
+          : (b === 'vulkan' ? ['通用后端', '各品牌显卡'] : ['兜底方案', '无显卡时使用']),
+        tip: pack ? (pack.label + '：' + pack.note) : '',
+        pack: pack,
+        installed: installed.indexOf(b) !== -1,
+        rec: b === recBackend
+      });
+    });
+
+    function statusOf(c) {
+      if (c.key === mode) return ['使用中', 'on'];
+      // 自动列不写「跟随显卡推荐」长句：英文会撑破窄列（nowrap 的 chip 会压到邻列），
+      // 直接给解析结果「→ CUDA」，既短又比一句说明更有用
+      if (c.key === 'auto') {
+        var cur = st.engine_backend ? (ENGINE_BACKEND_LABELS[st.engine_backend] || st.engine_backend) : '';
+        return cur ? ['→ ' + cur, 'auto-on'] : ['跟随推荐', 'soft'];
+      }
+      if (mode === 'auto' && c.key === st.engine_backend) return ['自动选用', 'auto-on'];
+      return c.installed ? ['已安装', 'soft'] : ['未安装', 'off'];
+    }
+
+    function actionOf(c) {
+      if (c.key === mode) return '<span class="llama-et-cur">✓ 当前</span>';
+      if (c.key === 'auto' || c.installed) {
+        return '<button type="button" class="llama-et-use" data-backend="' + c.key + '">使用</button>';
+      }
+      if (!c.pack) return '<span class="llama-et-size">暂不可用</span>';
+      return '<a href="javascript:;" class="llama-et-dl" data-pack="' + escapeHtml(c.pack.id) + '" title="' +
+        escapeHtml('下载 ' + c.pack.label + ' 引擎包（约 ' + c.pack.size_label + '）') + '">下载' +
+        '<span class="llama-et-size">' + escapeHtml(c.pack.size_label) + '</span></a>';
+    }
+
+    function cls(c) { return 'llama-et-col' + (c.key === mode ? ' is-on' : ''); }
+    function cell(c, inner) {
+      return '<td class="' + cls(c) + '" data-col="' + c.key + '">' + inner + '</td>';
+    }
+    function line(label, cells) {
+      return '<tr><th class="llama-et-rowhead">' + label + '</th>' + cells + '</tr>';
+    }
+
+    var head = cols.map(function (c) {
+      return '<th class="' + cls(c) + '" data-col="' + c.key + '" title="' + escapeHtml(c.tip) + '">' +
+        '<input type="radio" name="llm_engine" value="' + c.key + '"' + (c.key === mode ? ' checked' : '') + ' hidden>' +
+        '<span class="llama-et-name">' + escapeHtml(c.label) + '</span>' +
+        (c.rec && c.key !== mode ? '<span class="llama-et-rec">推荐</span>' : '') + '</th>';
     }).join('');
-    var dls = defs.filter(function (b) {
-      return b.key !== 'auto' && installed.indexOf(b.key) === -1;
-    }).map(function (b) {
-      var pack = b.key === 'cuda'
-        ? recPack || packs.filter(function (p) { return p.needs_nvidia; })[0]
-        : packs.filter(function (p) { return p.id === b.key; })[0];
-      if (!pack) return '';
-      return '<a href="javascript:;" class="update-link llama-engine-dl" data-pack="' + pack.id + '">' +
-        '下载 ' + b.label + ' 引擎包（约 ' + pack.size_label + '）</a>';
-    }).filter(Boolean).join('　');
-    return radios + (dls ? '<div class="llama-form-hint" style="margin-top:4px">' + dls + '</div>' : '');
+
+    var statusRow = cols.map(function (c) {
+      var s = statusOf(c);
+      return cell(c, '<span class="llama-et-chip llama-et-chip-' + s[1] + '">' + s[0] + '</span>');
+    }).join('');
+    var noteRow = cols.map(function (c) {
+      return cell(c, '<span class="llama-et-note">' +
+        c.notes.map(escapeHtml).join('<br>') + '</span>');
+    }).join('');
+    var actionRow = cols.map(function (c) { return cell(c, actionOf(c)); }).join('');
+
+    return '<table class="llama-engine-table">' +
+      '<thead><tr><th class="llama-et-corner">引擎</th>' + head + '</tr></thead>' +
+      '<tbody>' + line('状态', statusRow) + line('适配', noteRow) + line('操作', actionRow) + '</tbody></table>';
+  }
+
+  /* 表内交互：切换后立即高亮该列（保存仍由「保存设置」统一提交） */
+  function drawEngineTable() {
+    var host = document.getElementById('llama-engine-table');
+    if (!host || !engineState) return;
+    host.innerHTML = engineTable(engineState.st, engineState.ep);
+    host.querySelectorAll('.llama-et-use').forEach(function (btn) {
+      btn.onclick = function () {
+        engineState.st.engine_mode = btn.getAttribute('data-backend');
+        drawEngineTable();
+      };
+    });
+    // 未安装后端的下载入口：进度由主界面顶部进度条展示，完成后自动切换
+    host.querySelectorAll('.llama-et-dl').forEach(function (a) {
+      a.onclick = function () {
+        apiSend('/engine/download', 'POST', { pack_id: a.getAttribute('data-pack') })
+          .then(function () {
+            layer.msg('开始下载，完成后将自动切换到该引擎', { icon: 1 });
+            refreshStatus();
+          })
+          .catch(function (e) { layer.msg(e.message, { icon: 2 }); });
+      };
+    });
   }
 
   function loadSettings() {
@@ -476,6 +560,7 @@ layui.use(['layer', 'form', 'element'], function () {
       if (!box) return;
       var i = st.infer;
       settingsEngineBackend = st.engine_mode || 'auto';
+      engineState = { st: st, ep: ep };
       var kvOptions = ['f16', 'q8_0', 'q4_0'].map(function (v) {
         return '<option value="' + v + '"' + (i.kv_level === v ? ' selected' : '') + '>' + v + '</option>';
       }).join('');
@@ -483,7 +568,12 @@ layui.use(['layer', 'form', 'element'], function () {
         return '<div class="llama-form-row"><label class="llama-form-label">' + label + '</label>' + input + '</div>';
       }
       box.innerHTML =
-        row('引擎后端', engineBackendRow(st, ep)) +
+        '<div class="llama-engine-block">' +
+          '<div class="llama-engine-title">引擎后端' +
+            '<span class="llama-form-hint">点「使用」选中后按「保存设置」生效；未安装的点「下载」，装好即自动切换</span>' +
+          '</div>' +
+          '<div id="llama-engine-table"></div>' +
+        '</div>' +
         row('监听', '<label class="llama-check"><input type="radio" name="llm_host" value="127.0.0.1"' + (st.host !== '0.0.0.0' ? ' checked' : '') + '>仅本机 127.0.0.1</label>' +
           '<label class="llama-check"><input type="radio" name="llm_host" value="0.0.0.0"' + (st.host === '0.0.0.0' ? ' checked' : '') + '>允许局域网 0.0.0.0</label>') +
         row('端口', '<input class="layui-input llama-input-sm" id="llm_port" type="number" min="1024" max="65535" value="' + st.port + '">') +
@@ -503,17 +593,7 @@ layui.use(['layer', 'form', 'element'], function () {
       document.getElementById('llama-btn-save-settings').onclick = saveSettings;
       form.render('checkbox');
       form.render('select', 'llm-kv-form');
-      // 未安装后端的下载入口：下载进度由主界面顶部进度条展示，完成后自动切换
-      box.querySelectorAll('.llama-engine-dl').forEach(function (a) {
-        a.onclick = function () {
-          apiSend('/engine/download', 'POST', { pack_id: a.getAttribute('data-pack') })
-            .then(function () {
-              layer.msg('开始下载，完成后将自动切换到该引擎', { icon: 1 });
-              refreshStatus();
-            })
-            .catch(function (e) { layer.msg(e.message, { icon: 2 }); });
-        };
-      });
+      drawEngineTable();
       var mmprojBrowse = document.getElementById('llm-mmproj-browse');
       if (mmprojBrowse) {
         mmprojBrowse.onclick = function () {

@@ -427,6 +427,15 @@ body {
   font-weight: 500;
 }
 
+/* 传输协议标签（stdio / sse / http）：中性灰阶。
+   它标记的是连接方式而非哪个 CLI，所以刻意与上面的工具彩色药丸分离，
+   也不再借用工具色板（原先 http 借用 DSH 的深墨底，会和卡片主按钮撞成一片） */
+.transport-badge {
+  background: #eff1f4;
+  color: #5b6169;
+  font-weight: 400;
+}
+
 .target-claude {
   background: #f8ede8;
   color: #b0563a;
@@ -437,17 +446,19 @@ body {
   color: #2f6fb4;
 }
 
-/* DSH：品牌黑，八端里唯一的深底实色药丸，留作视觉锚点 */
+/* DSH：玫红调（Rose）。曾经是品牌黑实底，但那让卡片里出现第二枚深色药丸，
+   与卡片底部的深墨主按钮（Migrate / Preview）抢焦点，故改为软色。
+   玫红是全站唯一没被占用的色系，和砖橙(Claude)/紫(Pi)/青绿(WorkBuddy)都能一眼分开 */
 .target-dsh {
-  background: #1f2226;
-  color: #ffffff;
+  background: #fbe8ef;
+  color: #a83168;
 }
 
-/* ZCode：中灰实底 + 白字（无边框）。与 OpenCode 同属灰系，靠深浅区分：
-   ZCode 深灰配白字、OpenCode 浅灰配黑字，两枚放一起也不会认错 */
+/* ZCode：琥珀调（Amber）。原为中灰实底白字，同样属于深色一档，一并改软。
+   与 OpenCode 的关系从「同灰系深浅对」改为「暖黄 vs 冷灰」，对比反而更强 */
 .target-zcode {
-  background: #5f6875;
-  color: #ffffff;
+  background: #fdf2d8;
+  color: #8a6316;
 }
 
 /* Pi：紫调，八端里唯一没被占用的色系，与暖橙 / 各档蓝 / 青绿都不撞 */
@@ -470,7 +481,7 @@ body {
   color: #2b6f8f;
 }
 
-/* OpenCode 徽章：浅灰底 + 黑字（无边框），与 ZCode 的深灰白字构成同色系深浅对 */
+/* OpenCode 徽章：浅灰底 + 黑字（无边框） */
 .target-opencode {
   background: #e2e5ea;
   color: #1f2226;
@@ -1678,6 +1689,34 @@ html::-webkit-scrollbar {
 .llama-form-label { width: 120px; color: #6b7280; font-size: 12px; flex-shrink: 0; text-align: right; }
 .llama-form-hint { color: #c0c4cc; font-size: 11px; }
 
+/* 推理设置 · 引擎后端对比表（自动 / CUDA / Vulkan / CPU 横排） */
+.llama-engine-block { margin-bottom: 12px; }
+.llama-engine-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; font-size: 12px; color: #6b7280; }
+.llama-engine-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 12px; border: 1px solid #eef1f5; border-radius: 8px; overflow: hidden; }
+.llama-engine-table th,
+.llama-engine-table td { padding: 5px 4px; text-align: center; border-bottom: 1px solid #f3f4f6; border-left: 1px solid #f6f8fa; }
+.llama-engine-table tr > *:first-child { border-left: 0; }
+.llama-engine-table tbody tr:last-child > * { border-bottom: 0; }
+.llama-engine-table thead th { background: #f8fafc; color: #1f2329; font-weight: 600; padding: 7px 4px; }
+.llama-engine-table .llama-et-corner { width: 46px; background: #f8fafc; color: #9ca3af; font-weight: 400; font-size: 11px; }
+.llama-engine-table .llama-et-rowhead { width: 46px; background: #fcfdfe; color: #9ca3af; font-weight: 400; font-size: 11px; text-align: left; padding-left: 8px; }
+.llama-engine-table .is-on { background: #f1fbf8; }
+.llama-engine-table thead th.is-on { color: #0f766e; }
+.llama-et-name { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+.llama-et-rec { display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 999px; background: #e6f7f4; color: #0f766e; font-size: 10px; font-weight: 400; line-height: 15px; vertical-align: 1px; }
+.llama-et-chip { display: inline-block; max-width: 100%; padding: 1px 7px; border-radius: 999px; font-size: 11px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.llama-et-chip-on { background: #dcfce7; color: #15803d; }
+.llama-et-chip-auto-on { background: #e6f7f4; color: #0f766e; }
+.llama-et-chip-soft { background: #f1f3f6; color: #6b7280; }
+.llama-et-chip-off { background: #fff3e8; color: #c2410c; }
+.llama-et-note { display: block; color: #9ca3af; font-size: 11px; line-height: 1.45; word-break: break-word; }
+.llama-et-use { padding: 1px 10px; border: 1px solid #d9e0e8; border-radius: 6px; background: #fff; color: #374151; font-size: 12px; line-height: 18px; cursor: pointer; }
+.llama-et-use:hover { border-color: #16baaa; color: #0f766e; }
+.llama-et-dl { display: inline-block; color: #2563eb; font-size: 12px; line-height: 18px; text-decoration: none; }
+.llama-et-dl:hover { text-decoration: underline; }
+.llama-et-size { display: block; color: #9ca3af; font-size: 11px; line-height: 14px; }
+.llama-et-cur { color: #15803d; font-size: 12px; line-height: 18px; white-space: nowrap; }
+
 .llama-wizard { padding: 16px 20px; display: flex; flex-direction: column; height: calc(100% - 20px); }
 .llama-wizard-title { font-size: 15px; font-weight: 600; color: #1f2329; margin-bottom: 12px; }
 .llama-wizard-body { flex: 1; overflow-y: auto; }
@@ -2189,3 +2228,76 @@ html::-webkit-scrollbar {
   border-radius: 100px; background: #f3f4f6;
 }
 .phone-engine-state.is-on { color: #1f7a63; background: #e6f4f0; }
+
+/* ---------- 语言切换 ---------- */
+
+/* 英文模式首屏防闪烁：翻译完成前先不显示，i18n.js 应用后移除该类 */
+html.i18n-pending body { visibility: hidden; }
+
+.lang-seg { flex: none; }
+
+.lang-seg .seg-btn {
+  height: 26px;
+  line-height: 24px;
+  padding: 0 9px;
+  font-size: 12px;
+  letter-spacing: .02em;
+}
+
+.lang-seg .seg-btn[data-lang="en"] { font-weight: 500; }
+
+@media (max-width: 760px) {
+  .lang-seg .seg-btn { padding: 0 7px; }
+}
+
+/* 英文态：卡片操作行（迁移 / 介绍 / 预览）改成图标 + 悬停 tooltip。
+   文字仍在 DOM 里（font-size:0 视觉隐藏），切回中文去掉类名即复原。 */
+.i18n-icon-only {
+  padding: 0 !important;
+  width: 34px;
+  min-width: 34px;
+  font-size: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.i18n-icon-only::before {
+  content: "";
+  width: 15px;
+  height: 15px;
+  background-color: currentColor;
+  -webkit-mask: var(--i18n-icon) center / 16px 16px no-repeat;
+  mask: var(--i18n-icon) center / 16px 16px no-repeat;
+}
+
+.i18n-icon-migrate {
+  --i18n-icon: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M2.2 5.7h9.3'/><path d='M9.2 3.3l2.5 2.4-2.5 2.4'/><path d='M13.8 10.3H4.5'/><path d='M6.8 7.9L4.3 10.3l2.5 2.4'/></svg>");
+}
+
+.i18n-icon-notes {
+  --i18n-icon: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M4.2 2h4.5l3 3v9H4.2z'/><path d='M8.7 2v3h3'/><path d='M6.2 8.4h3.6M6.2 10.8h3.6'/></svg>");
+}
+
+.i18n-icon-preview {
+  --i18n-icon: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M1.5 8S4 3.9 8 3.9 14.5 8 14.5 8 12 12.1 8 12.1 1.5 8 1.5 8Z'/><circle cx='8' cy='8' r='2.1'/></svg>");
+}
+
+/* 图标态下按钮内边距已归零，操作行的 8px 间距仍保留；再收一点更紧凑 */
+.card-actions .i18n-icon-only + .i18n-icon-only { margin-left: 0; }
+
+/* 英文态：配置卡片操作行（Switch / Edit / Delete）。
+   layui 给相邻按钮额外加了 10px margin-left，叠上操作行的 8px gap 后实际间距是 18px；
+   而英文单词又比中文双字宽，三个按钮按内容宽度排会顶破卡片内容区（实测溢出 24px），
+   右侧的呼吸位被吃掉，左右不再对称。
+   这里去掉那 10px margin、间距收到 6px，并让三枚按钮等分撑满内容区——
+   行宽严格等于卡片内容宽度，左右留白恒等于卡片自身的 22px 内边距。 */
+html[lang="en"] .card-actions { gap: 6px; }
+
+html[lang="en"] .card-actions .layui-btn + .layui-btn { margin-left: 0; }
+
+html[lang="en"] .card-actions .layui-btn:not(.i18n-icon-only) {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 10px;
+}

@@ -14,6 +14,7 @@ English | [简体中文](README.zh-CN.md)
 | **Local Models** | Turn any `.gguf` model into an OpenAI-compatible local/LAN API service in one click: engine auto-download by GPU, model library scanning, VRAM risk assessment, one-click profile creation for Claude Code / Codex |
 | **Task Dispatch** | Run any of the seven tools in **headless mode** as background tasks: dispatch-and-return, automatic pre-flight checks (engine ready / config ready / real connectivity), queue polling, output archiving, cancel & timeout, and tasks survive closing the window. Uses the config you already set up in each app |
 | **Notifications** | Two independent channels so you are not tied to the desk, in **one unified format** across every channel — topic name / notification type / app name, plain text without emoji: **phone push** (ntfy) delivers task and session outcomes (completion / failure / timeout) always carrying the **agent's last output**; **desktop toasts** (source badge: logo + a4agent) cover completions, failures, permission requests and questions, and wake the window on click. Session hooks for **Claude Code / Codex / ZCode / Qoder / WorkBuddy / dsh** let you answer the agent's questions and approve permissions from your phone |
+| **Interface language** | Switch the UI between Chinese and English from the `中 / EN` control in the top-right corner; the choice is persisted locally and defaults to your system language on first launch. All UI strings live in `frontend/js/i18n.js` — call `i18n.t()` or add one dictionary entry for new screens |
 
 ---
 
@@ -199,7 +200,7 @@ Five steps: "Get engine → Detect hardware → Pick model directories → Pick 
   | CPU | Fallback when no usable GPU | 18 MB | none |
 
   Downloads are pinned-version official prebuilt binaries (reproducible); **offline install** (point to a directory containing `llama-server.exe`) or skip-for-now are also supported; a CUDA engine = main package + cudart runtime package, auto-merged after download
-- **One engine per backend, switchable in Settings**: engines install into `%LOCALAPPDATA%\Programs\a4agent-<backend>\engine`, so re-downloading one backend never overwrites an engine another backend is using. The backend actually running is detected from the DLLs present (`ggml-cuda` > `ggml-vulkan` > `ggml-cpu`) and shown in the title bar; the Local Models settings gain an **Engine backend** row (Auto / CUDA / Vulkan / CPU) where only installed backends are selectable, and switching takes effect on the next service start
+- **One engine per backend, switchable in Settings**: engines install into `%LOCALAPPDATA%\Programs\a4agent-<backend>\engine`, so re-downloading one backend never overwrites an engine another backend is using. The backend actually running is detected from the DLLs present (`ggml-cuda` > `ggml-vulkan` > `ggml-cpu`) and shown in the title bar; the Local Models settings show an **Engine backend** comparison table (Auto / CUDA / Vulkan / CPU side by side with status, fit and action per column) — installed engines get a "Use" button, missing ones a download entry, and switching takes effect on the next service start
 - If an older a4agent installation exists, its engine directory is **adopted** automatically — no re-download
 
 ### Model Library & Running the Service

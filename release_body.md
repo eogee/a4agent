@@ -12,9 +12,9 @@ Windows: a4agent-setup-0.6.4.exe — the eight-tool AI coding console with a loc
 
 Engines install per backend — one engine per backend directory under `Programs\a4agent-<backend>\engine`, so re-downloading one never overwrites an engine another backend is using; the running backend is detected from the DLLs present (`ggml-cuda` > `ggml-vulkan` > `ggml-cpu`) and shown in the title bar
 
-设置页可切换引擎后端——新增「引擎后端」行（自动 / CUDA / Vulkan / CPU），只列已安装的后端；切换只改配置指针、不动引擎文件，服务运行中也能切、下次启动生效，下载进行中禁止切换
+设置页可切换引擎后端——「引擎后端」改成一张横向对比表，自动 / CUDA / Vulkan / CPU 并排显示状态、适配与操作；已装的点「使用」，未装的直接给下载入口（带体积），装好自动切换。切换只改配置指针、不动引擎文件，服务运行中也能切、下次启动生效，下载进行中禁止切换
 
-Engine backend switchable in Settings — a new "Engine backend" row (Auto / CUDA / Vulkan / CPU) lists only installed backends; switching only rewrites the config pointer, works while the service is running and takes effect on the next start, and is refused during a download
+Engine backend switchable in Settings — the "Engine backend" control is now a horizontal comparison table: Auto / CUDA / Vulkan / CPU side by side with status, fit and action per column. Installed engines get a "Use" button, missing ones get a download entry with its size and switch over automatically once installed. Switching only rewrites the config pointer, works while the service is running and takes effect on the next start, and is refused during a download
 
 引擎升级到 llama.cpp b11719（2026-10-18 nightly）——四套引擎包的资产名与体积按 GitHub API 重新核对
 

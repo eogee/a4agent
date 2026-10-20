@@ -101,7 +101,7 @@ layui.use(['layer', 'form', 'element'], function () {
           '<span id="task-workdir-text"></span>' +
         '</div>' +
         '<div class="task-form-row">' +
-          '<label>超时</label>' +
+          '<label>超时时间</label>' +
           '<div class="layui-form task-timeout-wrap" lay-filter="task-timeout-form">' +
             '<select id="task-timeout">' +
               '<option value="300">5 分钟</option>' +

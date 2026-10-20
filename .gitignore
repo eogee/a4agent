@@ -78,3 +78,6 @@ backend/app/mail_secrets.py
 
 # 工作区记忆目录（本地运行时数据，不入库）
 .workbuddy/
+
+# AI 工作区数据（记忆、临时截图与调试脚本，不入库）
+.workbuddy-ai/
