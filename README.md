@@ -193,12 +193,13 @@ Five steps: "Get engine → Detect hardware → Pick model directories → Pick 
 - **Engine auto-download**: downloads official prebuilt llama.cpp **engines** matched to your GPU — four options:
   | Engine | For | Size | Min driver |
   |---|---|---|---|
-  | CUDA 13.4 | NVIDIA (performance-first) | 525 MB | 580 |
-  | CUDA 12.4 | NVIDIA (older drivers) | 597 MB | 550 |
-  | Vulkan | NVIDIA / AMD / Intel discrete & integrated | 32 MB | none |
+  | CUDA 13.4 | NVIDIA (performance-first) | 552 MB | 580 |
+  | CUDA 12.4 | NVIDIA (older drivers) | 628 MB | 550 |
+  | Vulkan | NVIDIA / AMD / Intel discrete & integrated | 31 MB | none |
   | CPU | Fallback when no usable GPU | 18 MB | none |
 
   Downloads are pinned-version official prebuilt binaries (reproducible); **offline install** (point to a directory containing `llama-server.exe`) or skip-for-now are also supported; a CUDA engine = main package + cudart runtime package, auto-merged after download
+- **One engine per backend, switchable in Settings**: engines install into `%LOCALAPPDATA%\Programs\a4agent-<backend>\engine`, so re-downloading one backend never overwrites an engine another backend is using. The backend actually running is detected from the DLLs present (`ggml-cuda` > `ggml-vulkan` > `ggml-cpu`) and shown in the title bar; the Local Models settings gain an **Engine backend** row (Auto / CUDA / Vulkan / CPU) where only installed backends are selectable, and switching takes effect on the next service start
 - If an older a4agent installation exists, its engine directory is **adopted** automatically — no re-download
 
 ### Model Library & Running the Service
@@ -270,6 +271,8 @@ A blocked task still leaves a `precheck_failed` record, visible in the queue wit
 ### Closing the Window Doesn't Kill Tasks
 
 - **Closing the main window = moving to the background**: tasks keep running; starting a4agent again reactivates the original instance's window instead of spawning a new process
+- A **tray icon** stays resident: left-click brings the window back, the context menu exits directly. Shutdown collects the tray first, then the local inference engine and headless task child processes, so no orphans are left behind
+- If a second launch cannot take the single-instance lock, it no longer stops at a bare "already running" box: it first tries to wake the hidden window, then falls back to a clean restart, and only then tells you what to do in Task Manager
 - The real exit is the "**Exit**" button in the top bar, which tells you how many tasks are running and asks twice; on exit, running tasks are honestly marked "app exited" and their process trees terminated
 - When a task reaches a final state: an in-page notice if the window is open; otherwise a **native system toast** (with sound; the source badge shows the a4agent logo and name; clicking it wakes the window) plus a flashing taskbar icon
 

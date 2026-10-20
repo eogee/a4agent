@@ -1,86 +1,69 @@
 # a4agent v0.6.4
 
-## 项目发现：不用再手填路径
+## English
 
-以前「项目根目录」只有一个预置值 `C:\ProgramMine`——那是开发机的目录布局，普通用户装完等于什么都没扫到；想加目录还得在一行行的文本框里手敲绝对路径，敲错一个字符只会表现为「扫不到东西」，无从排查。
+### Engine management: one engine per backend, switchable from Settings
 
-现在改成两条腿走路：
+- Engines now install into `%LOCALAPPDATA%\Programs\a4agent-<backend>\engine`, one directory per backend. Re-downloading a backend only replaces its own copy and never overwrites an engine another backend is using.
+- The backend actually running is detected from the DLLs present in the directory (`ggml-cuda` > `ggml-vulkan` > `ggml-cpu`), instead of being inferred from the package you once downloaded.
+- When several engines coexist, an NVIDIA card prefers the CUDA one — backend-vs-GPU match first, then modification time — rather than whichever files are newest. The title bar shows the backend that is really running.
+- Changing the backend only rewrites the pointer in the config, never touches engine files: you can switch while the service is running, and it takes effect on the next start. Switching is refused while a download is in progress, so it cannot race the download callback.
+- Engines are pinned to llama.cpp **b11719** (2026-10-18 nightly); asset names and sizes of the four packs were re-checked against the GitHub API.
 
-- **扫描范围默认是本机所有盘符**（含网络盘），一级子目录视为项目；不再有写死的预置路径
-- **自动发现**：直接读各 AI 工具本来就记着的历史——Claude Code 的项目表与历史记录、Codex 会话的工作目录、VS Code 系编辑器最近打开的工作区——所以**任意深度**的项目都会自己出现，无需手动指认
-- 弹窗从「一个文本框」改成两个分区：上面是自动发现了什么（标明来自哪个工具，可逐条忽略），下面是扫描范围（可增删、可恢复默认）
-- 增删目录一律走**目录选择器**（桌面端系统对话框 / 浏览器端内置逐级浏览），迁移弹窗与任务下发也统一到同一个组件
+### Tray and startup recovery
 
-顺带修掉的几个坑：
+- Closing the window no longer means quitting: a4agent stays resident in the tray, left-click brings the window back, and the context menu can exit directly.
+- A second launch that cannot take the single-instance lock no longer dies with a bare "already running" box. It tries to wake the hidden window first, then falls back to a clean restart; if even that instance cannot take the lock, it tells you what to do in Task Manager instead of two instances pulling at each other.
+- Shutdown now collects the tray first, then the local inference engine and headless task child processes, so nothing is left running in the background.
 
-- 同一个目录的 `C:/x`、`c:\x`、`"C:\x"`、`file:///c%3A/x` 四种写法现在认作同一处，不再重复扫描、重复显示
-- 断开的网络映射盘不再卡死技能页：远程路径的单次扫描有 3 秒上限，超时就跳过
-- 两个盘下同名项目（比如都叫 `mlj`）会自动加父目录后缀，避免「点了 A 的项目写进 B 的目录」
-- 默认范围内有空格符但没有介质的盘符（空光驱）会在保存时被排除，不再出现「一按保存就报路径不存在」
+### Project discovery, search and UI
 
-# a4agent v0.6.3
+- The default scan range is now every visible drive letter on the machine, instead of a folder hard-coded at build time. Projects also surface from the history the tools already keep — Claude Code's project list, Codex session working directories, recent VS Code workspaces — so projects at any depth appear with no setup.
+- "Project root" is replaced by a "Project sources" dialog: auto-discovered entries can be ignored one by one or restored to defaults, and scan ranges can still be added by hand. Same-name projects in different paths get a parent-folder suffix so migration can never write into the wrong directory, and disconnected network drives no longer stall discovery (3s timeout per scan).
+- Skill and MCP search in the project view now also matches the project folder name and root path. When a global search returns nothing but the keyword does hit a project folder, it reports how many and offers a one-click switch to the project view.
+- Progress bars now use the same layui style as the download dialog, and the 45° stripe animation is gone. DSH / Pi display names are uppercased, the ZCode and OpenCode badges became a grey light/dark pair, and the README gains an XERJ Corpus Hub contributor badge.
 
-## 新增：WorkBuddy 成为第八端（技能与 MCP 管理）
+### Compatibility
 
-「技能」与「MCP」两个页签现在都覆盖 WorkBuddy，和前七端同权：在界面上迁移、编辑、开关一个 skill 或一个 MCP server，落到 WorkBuddy 的就是它会去读的那份文件。
+- Windows 10/11 64-bit.
+- Engines already installed in older directories are still detected, so nothing has to be re-downloaded; pick which one to use from the new "Engine backend" row in Settings.
+- Config and data stay in `%APPDATA%\a4agent` and survive the upgrade.
 
-| | 用户级 | 项目级 |
-|---|---|---|
-| 技能 | `~/.workbuddy/skills` | `<工作区>/.workbuddy/skills` |
-| MCP | `~/.workbuddy/mcp.json`（顶层 `mcpServers`） | 无 |
+### Upgrade
 
-- MCP 侧只托管全局：WorkBuddy 没有工作区级 MCP 配置文件，能力矩阵里标为仅 `global`，界面不会给出「写进一个它永远不读的文件」这种选项；技能侧项目级照常可用
-- 传输方式支持 stdio / sse / http，写回时按 WorkBuddy 的驼峰拼写 `streamableHttp`
-- WorkBuddy 的 MCP 条目自带 `timeout` 等自有键，读写往返无损保留
-- 「一键适配全部端」与跨端迁移已把 WorkBuddy 计入目标，适配完成后不再重复迁移一份
+Run `a4agent-setup-0.6.4.exe` over the existing installation.
 
-本版来自社区 PR（作者 forcert），合并时收窄了范围。无头任务下发仍是七端——WorkBuddy 的 CLI 无头执行是独立特性，未接入引擎列表。
+---
 
-## 修复：通知话题名不再是标签汤
+## 中文
 
-WorkBuddy 与 Codex 会把 `system-reminder`、`AGENTS.md` 等上下文块注入到会话首条用户消息，桌面横幅和手机推送的话题名称此前直接抓成了这些标签本身，一眼看不出这个会话在做什么。
+### 引擎管理：一个后端一套引擎，设置页可切换
 
-现在 `extract_first_prompt` 按白名单剥离注入块：配对注入块整段移除，WorkBuddy 的 `<user_query>` 外壳只剥标签、保留内容；剥完为空则跳到下一条真实消息，取到的就是用户真正打的那句话。用户自己贴进对话的 XML 不受影响；ZCode / OpenCode / DSH 与任务下发链路不走这个函数，行为不变。
+- 引擎改为装进 `%LOCALAPPDATA%\Programs\a4agent-<后端>\engine`，一个后端一个目录。重下某个后端只替换它自己那份，不再覆盖另一个后端正在用的引擎。
+- 实际在跑哪个后端，改成按目录里真实存在的 DLL 识别（`ggml-cuda` > `ggml-vulkan` > `ggml-cpu`），不再靠「你当初下的是哪个包」去猜。
+- 多套引擎共存时，NVIDIA 卡按「后端与显卡匹配优先、其次修改时间」排序，CUDA 排在 Vulkan 之前，不再是谁的文件新就用谁。顶栏显示真正在跑的后端。
+- 切换后端只改写配置里的指针，不动引擎文件：服务运行中也能切，下次启动生效；下载进行中禁止切换，避免和下载完成的回调互相覆盖。
+- 引擎钉到 llama.cpp **b11719**（2026-10-18 nightly），四个引擎包的资产名与体积按 GitHub API 重新核对。
 
-## 修复：全库审查，二十余处高危问题
+### 托盘常驻与启动自恢复
 
-凭证与崩溃：
+- 关窗不再等于退出：应用常驻托盘，左键唤回窗口，右键菜单可直接退出。
+- 二次启动抢不到单例锁时，不再只弹一句「a4agent 已在运行」把用户晾在门口：先尝试唤回被隐藏的窗口，唤不到就清障重启；连兜底实例都抢不到锁时，明确告诉你去任务管理器结束进程，而不是两个实例互相唤醒。
+- 退出顺序改为先收托盘，再回收本地推理引擎与无头任务子进程，后台不留残留。
 
-- MCP 回收站恢复解密失败时不再静默清空凭证，改为立即中止并报错
-- 第二条桌面横幅不会再崩掉进程（此前 legacy toast 回调会残留）
-- 更新安装包路径加约束，离线且缺校验值时拒绝 apply
-- `/v1/proxy/refresh` 补上 token 校验
-- 退出时补齐任务子进程与 llama-server 回收，不再留孤儿进程占着 8080
+### 项目发现、搜索与界面
 
-竞态：
+- 默认扫描范围改为本机所有可见盘符，不再是打包时写死的那个目录。项目还会从各工具本来就记着的历史里自动浮现：Claude Code 的项目表、Codex 会话的工作目录、VS Code 最近工作区——任意深度的项目零操作出现。
+- 「项目根目录」改为「项目来源」弹窗：自动发现的部分可逐条忽略或恢复默认，扫描范围仍可手动添加。同名不同路径的项目会加父目录后缀消歧，迁移目标不可能再写错目录；断开的网络盘不再拖死发现接口（单次扫描 3 秒超时）。
+- 项目视图的技能与 MCP 搜索扩展为同时匹配项目文件夹名与根路径；全局搜索零结果、但关键词其实命中了项目文件夹时，直接告诉你命中几个并可一键切过去。
+- 进度条统一为「下载更新」弹窗那套 layui 样式，45° 斜纹动画移除。DSH / Pi 显示名统一大写，ZCode 与 OpenCode 徽章改为灰系深浅对，README 增加 XERJ Corpus Hub 贡献者徽章。
 
-- 任务取消后复查补杀，RUNNING 落库后再复查，防止「取消后复活」
-- OpenCode 的 SSE stop 主动关连接并 join，堵住线程与连接泄漏
-- 预检加 300 秒总预算，不再无上限等待
+### 兼容性
 
-健壮性：
+- Windows 10/11 64 位。
+- 旧目录里的引擎仍会被识别，不必重新下载；想换用哪个后端，在设置页的「引擎后端」里选。
+- 配置与数据仍在 `%APPDATA%\a4agent`，升级全程保留。
 
-- 损坏的 yaml 不再穿透成 500（`read_doc` 兜底放宽）
-- 日志滚动清理恢复生效（前缀改从模板取）
-- MCP 配置备份加秒级碰撞防护；下载器校验 `Content-Length`；旧引擎改名时保底换入
-- 技能迁移改 staging 换入并跳过 junction / symlink；移除操作一旦部分快照失败即中止，并按端回滚
-- 代理退出给孤儿 120 秒宽限；`--api-key` 在日志中脱敏
+### 升级
 
-llama：
-
-- GPU 检测加 60 秒缓存，1.5 秒一次的轮询不再反复 spawn `nvidia-smi`
-- 截断、崩溃重启三个运行设置真正接线
-- 接入目标收窄为 Claude Code 与 Codex，与 v0.5.1 起的三端移交策略对齐
-
-## 兼容性说明
-
-- Windows 10/11 64 位
-- 技能与 MCP 的第八端支持默认生效、无开关；没装 WorkBuddy 时对应目录不存在，界面不显示其条目
-- 新增的校验与回滚只让异常路径更早停下，正常流程行为不变
-- 配置与数据仍存于 `%APPDATA%\a4agent`，升级全程保留
-
-## 升级说明
-
-直接运行 `a4agent-setup-0.6.3.exe` 覆盖安装即可。
-
-如果你还停在 0.6.2，并且遇到过桌面横幅标题是一堆 `<system-reminder ...>` 的情况：那一版安装包早于修复（10-10 打包，修复在 10-11 提交），本版安装包已包含。
+直接运行 `a4agent-setup-0.6.4.exe` 覆盖安装即可。
