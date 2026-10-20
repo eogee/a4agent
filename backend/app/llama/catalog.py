@@ -10,7 +10,7 @@ from pathlib import Path
 
 REPO_OWNER = "ggml-org"
 REPO_NAME = "llama.cpp"
-REPO_TAG = "b11370"  # 2026-10-03 发布，llama-server 含 /v1/systemone 决策模型端点
+REPO_TAG = "b11719"  # 2026-10-18 nightly，资产名与体积已按 GitHub API 核对
 
 
 @dataclass(frozen=True)
@@ -46,23 +46,23 @@ PACKS = [
     EnginePack(
         "cuda134", "CUDA 13.4",
         "NVIDIA 显卡，驱动 ≥ 580（较新驱动，性能优先）",
-        ("llama-b11370-bin-win-cuda-13.4-x64.zip", "cudart-llama-bin-win-cuda-13.4-x64.zip"),
-        int((145.8 + 403.9) * 1024 * 1024), "580", True),
+        ("llama-b11719-bin-win-cuda-13.4-x64.zip", "cudart-llama-bin-win-cuda-13.4-x64.zip"),
+        int((147.9 + 403.9) * 1024 * 1024), "580", True),
     EnginePack(
         "cuda124", "CUDA 12.4",
         "NVIDIA 显卡，驱动 ≥ 550（兼容旧驱动）",
-        ("llama-b11370-bin-win-cuda-12.4-x64.zip", "cudart-llama-bin-win-cuda-12.4-x64.zip"),
-        int((251.3 + 373.3) * 1024 * 1024), "550", True),
+        ("llama-b11719-bin-win-cuda-12.4-x64.zip", "cudart-llama-bin-win-cuda-12.4-x64.zip"),
+        int((255.1 + 373.3) * 1024 * 1024), "550", True),
     EnginePack(
         "vulkan", "Vulkan",
         "通用后端：NVIDIA / AMD / Intel 独显与核显均可",
-        ("llama-b11370-bin-win-vulkan-x64.zip",),
-        int(31.7 * 1024 * 1024), "", False),
+        ("llama-b11719-bin-win-vulkan-x64.zip",),
+        int(30.8 * 1024 * 1024), "", False),
     EnginePack(
         "cpu", "CPU",
         "无可用显卡时的兜底方案，速度受限",
-        ("llama-b11370-bin-win-cpu-x64.zip",),
-        int(18.4 * 1024 * 1024), "", False),
+        ("llama-b11719-bin-win-cpu-x64.zip",),
+        int(18.8 * 1024 * 1024), "", False),
 ]
 
 

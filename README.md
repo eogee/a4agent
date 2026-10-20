@@ -179,7 +179,7 @@ Config freedom stays entirely with you: whatever you configured in the app's UI,
 
 The "Local Models" tab wraps llama.cpp's `llama-server` into a one-click **OpenAI-compatible API service**: which engine to install, which model to serve, and with what parameters — all through the UI.
 
-**Engine version**: llama.cpp **b11370** (released 2026-10-03, pinned in `backend/app/llama/catalog.py` as the single source of truth). This version's `llama-server` includes the decision-model endpoint, which enables the capability below.
+**Engine version**: llama.cpp **b11719** (nightly, 2026-10-18, pinned in `backend/app/llama/catalog.py` as the single source of truth). This version's `llama-server` includes the decision-model endpoint, which enables the capability below.
 
 ### Decision Model (System One)
 

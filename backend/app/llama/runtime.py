@@ -133,6 +133,18 @@ class LlamaRuntime:
         found = self.locate_engine()
         return catalog.detect_backend(found) if found else ""
 
+    def installed_backends(self) -> list:
+        """本机已安装的引擎后端（含旧版命名目录），按 cuda/vulkan/cpu 固定排序。
+
+        供设置页渲染后端选择：已安装的可直接切换，未安装的置灰并给下载入口。
+        """
+        found = set()
+        for d, _mt in self._candidate_engines():
+            b = catalog.detect_backend(d)
+            if b:
+                found.add(b)
+        return [b for b in ("cuda", "vulkan", "cpu") if b in found]
+
     def engine_dir_for(self, pack) -> Path:
         """某个引擎包的安装目录：Programs\\a4agent-<后端>\\engine。
 
@@ -158,6 +170,34 @@ class LlamaRuntime:
         backend = catalog.detect_backend(target)
         self.logs.append(
             f"[引擎] 已切换到 {catalog.backend_label(backend) or '未知'} 后端: {target}")
+
+    def switch_backend(self, backend: str) -> dict:
+        """设置页切换引擎后端：auto 恢复自动接管，具体后端要求本机已装。
+
+        只改写 engine_dir 指针、不触碰引擎文件：服务运行中允许切换，下次启动
+        生效；下载进行中禁止——下载完成回调也会改写配置，两者不能互相覆盖。
+        标准目录（a4agent-<后端>\\engine）缺失时从旧命名候选目录兜底，如
+        a4agent-cu12.4。
+        """
+        if self.downloader.progress()["running"]:
+            return {"ok": False, "error": "引擎正在下载中，请等待完成"}
+        if backend == "auto":
+            self.cfg.engine_dir = ""
+        elif backend in catalog.BACKEND_LABELS:
+            target = _programs_root() / f"a4agent-{backend}" / "engine"
+            if not downloader.is_engine_present(target):
+                for d, _mt in self._candidate_engines():
+                    if catalog.detect_backend(d) == backend:
+                        target = d
+                        break
+                else:
+                    return {"ok": False, "error":
+                            f"{catalog.backend_label(backend)} 引擎尚未安装，请先下载引擎包"}
+            self.cfg.engine_dir = str(target)
+        else:
+            return {"ok": False, "error": f"未知后端: {backend}"}
+        save_config(self.cfg)
+        return {"ok": True}
 
 
     def adopt_engine(self) -> bool:
@@ -231,7 +271,7 @@ class LlamaRuntime:
             return
         self.logs.append(
             f"[提示] 当前引擎为 {catalog.backend_label(backend)} 后端，"
-            f"NVIDIA 显卡建议改用 CUDA 引擎包（配置向导 → 获取推理引擎）")
+            f"NVIDIA 显卡建议改用 CUDA 引擎包（推理设置 → 引擎后端）")
 
     def stop(self) -> dict:
         self.engine.stop()
@@ -349,6 +389,7 @@ class LlamaRuntime:
             "engine_dir": str(engine_found or self.engine_dir()),
             "engine_backend": backend,
             "engine_backend_label": catalog.backend_label(backend),
+            "installed_backends": self.installed_backends(),
             "port": cfg.port,
             "host": cfg.host,
             "default_model_path": cfg.default_model_path,
@@ -481,10 +522,17 @@ class LlamaRuntime:
 
     def settings_payload(self) -> dict:
         cfg = self.cfg
+        # engine_mode：设置页「引擎后端」勾选值（auto / cuda / vulkan / cpu）。
+        # 指针指向的目录里真有引擎才算钉定；目录缺失时实际行为已是自动接管，
+        # 如实标 auto，保存时顺便把死指针清掉。
+        pinned = bool(cfg.engine_dir) and downloader.is_engine_present(cfg.engine_dir)
+        found = self.locate_engine()
         return {
             "port": cfg.port,
             "host": cfg.host,
             "engine_dir": cfg.engine_dir,
+            "engine_mode": catalog.detect_backend(cfg.engine_dir) if pinned else "auto",
+            "engine_backend": catalog.detect_backend(found) if found else "",
             "default_model_path": cfg.default_model_path,
             "mmproj_path": cfg.mmproj_path,
             "infer": {
@@ -512,6 +560,13 @@ class LlamaRuntime:
         if busy and (data.get("port") not in (None, cfg.port)
                      or data.get("host") not in (None, cfg.host)):
             return {"ok": False, "error": "服务运行中不能修改监听地址/端口，请先停止服务"}
+
+        # 引擎后端切换（auto / cuda / vulkan / cpu）：只改指针，重启服务生效
+        backend = data.get("engine_backend")
+        if backend:
+            result = self.switch_backend(str(backend))
+            if not result.get("ok"):
+                return result
 
         if "port" in data and data["port"] is not None:
             if not (1024 <= int(data["port"]) <= 65535):

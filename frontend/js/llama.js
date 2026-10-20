@@ -13,6 +13,8 @@ layui.use(['layer', 'form', 'element'], function () {
   var pollTimer = null;        // 状态/日志轮询
   var lastLogId = 0;
   var lastStatus = null;
+  var settingsEngineBackend = '';  // 设置页渲染时的引擎后端勾选（判断保存是否改了引擎）
+  var wasDownloading = false;      // 引擎下载状态沿：下载结束后刷新设置页勾选
 
   /* ---------- 工具 ---------- */
   function escapeHtml(s) {
@@ -277,6 +279,18 @@ layui.use(['layer', 'form', 'element'], function () {
           prog.style.display = 'none';
         }
       }
+      // 顶栏引擎标签跟随状态（下载完成自动切后端后无需重绘整页）
+      var topEng = document.getElementById('llama-top-engine');
+      if (topEng) {
+        var engLabel = '引擎 ' + (s.engine_present ? (s.engine_backend_label || '就绪') : '缺失');
+        if (topEng.textContent !== engLabel) {
+          topEng.textContent = engLabel;
+          topEng.title = s.engine_dir || '';
+        }
+      }
+      // 下载结束（成功/失败/取消）后刷新设置页：后端勾选与下载入口随之更新
+      if (wasDownloading && !s.downloading) loadSettings();
+      wasDownloading = !!s.downloading;
     }).catch(function () { /* 服务未起等场景静默 */ });
   }
 
@@ -419,11 +433,49 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   /* ---------- 推理设置 ---------- */
+  /* 引擎后端选择行：已安装的可勾选，未安装的置灰并给下载入口。
+   * CUDA 13.4/12.4 共用同一目录，按后端勾选；下载包按驱动版本取后端推荐。 */
+  var ENGINE_BACKEND_LABELS = { cuda: 'CUDA', vulkan: 'Vulkan', cpu: 'CPU' };
+
+  function engineBackendRow(st, ep) {
+    var installed = ep.installed_backends || [];
+    var packs = ep.packs || [];
+    var recPack = packs.filter(function (p) { return p.id === ep.recommended_pack_id; })[0] || null;
+    var recBackend = recPack ? (recPack.needs_nvidia ? 'cuda' : recPack.id) : '';
+    var defs = [
+      { key: 'auto', label: '自动（跟随显卡推荐' +
+          (st.engine_backend ? '，当前 ' + (ENGINE_BACKEND_LABELS[st.engine_backend] || st.engine_backend) : '') + '）' },
+      { key: 'cuda', label: 'CUDA' },
+      { key: 'vulkan', label: 'Vulkan' },
+      { key: 'cpu', label: 'CPU' }
+    ];
+    var radios = defs.map(function (b) {
+      var has = b.key === 'auto' || installed.indexOf(b.key) !== -1;
+      return '<label class="llama-check"><input type="radio" name="llm_engine" value="' + b.key + '"' +
+        (st.engine_mode === b.key ? ' checked' : '') + (has ? '' : ' disabled') + '>' + b.label +
+        (b.key === recBackend && b.key !== st.engine_mode ? ' · 推荐' : '') +
+        (has ? '' : '（未安装）') + '</label>';
+    }).join('');
+    var dls = defs.filter(function (b) {
+      return b.key !== 'auto' && installed.indexOf(b.key) === -1;
+    }).map(function (b) {
+      var pack = b.key === 'cuda'
+        ? recPack || packs.filter(function (p) { return p.needs_nvidia; })[0]
+        : packs.filter(function (p) { return p.id === b.key; })[0];
+      if (!pack) return '';
+      return '<a href="javascript:;" class="update-link llama-engine-dl" data-pack="' + pack.id + '">' +
+        '下载 ' + b.label + ' 引擎包（约 ' + pack.size_label + '）</a>';
+    }).filter(Boolean).join('　');
+    return radios + (dls ? '<div class="llama-form-hint" style="margin-top:4px">' + dls + '</div>' : '');
+  }
+
   function loadSettings() {
-    apiGet('/settings').then(function (st) {
+    Promise.all([apiGet('/settings'), apiGet('/engine/packs')]).then(function (arr) {
+      var st = arr[0], ep = arr[1];
       var box = document.getElementById('llama-settings');
       if (!box) return;
       var i = st.infer;
+      settingsEngineBackend = st.engine_mode || 'auto';
       var kvOptions = ['f16', 'q8_0', 'q4_0'].map(function (v) {
         return '<option value="' + v + '"' + (i.kv_level === v ? ' selected' : '') + '>' + v + '</option>';
       }).join('');
@@ -431,6 +483,7 @@ layui.use(['layer', 'form', 'element'], function () {
         return '<div class="llama-form-row"><label class="llama-form-label">' + label + '</label>' + input + '</div>';
       }
       box.innerHTML =
+        row('引擎后端', engineBackendRow(st, ep)) +
         row('监听', '<label class="llama-check"><input type="radio" name="llm_host" value="127.0.0.1"' + (st.host !== '0.0.0.0' ? ' checked' : '') + '>仅本机 127.0.0.1</label>' +
           '<label class="llama-check"><input type="radio" name="llm_host" value="0.0.0.0"' + (st.host === '0.0.0.0' ? ' checked' : '') + '>允许局域网 0.0.0.0</label>') +
         row('端口', '<input class="layui-input llama-input-sm" id="llm_port" type="number" min="1024" max="65535" value="' + st.port + '">') +
@@ -450,6 +503,17 @@ layui.use(['layer', 'form', 'element'], function () {
       document.getElementById('llama-btn-save-settings').onclick = saveSettings;
       form.render('checkbox');
       form.render('select', 'llm-kv-form');
+      // 未安装后端的下载入口：下载进度由主界面顶部进度条展示，完成后自动切换
+      box.querySelectorAll('.llama-engine-dl').forEach(function (a) {
+        a.onclick = function () {
+          apiSend('/engine/download', 'POST', { pack_id: a.getAttribute('data-pack') })
+            .then(function () {
+              layer.msg('开始下载，完成后将自动切换到该引擎', { icon: 1 });
+              refreshStatus();
+            })
+            .catch(function (e) { layer.msg(e.message, { icon: 2 }); });
+        };
+      });
       var mmprojBrowse = document.getElementById('llm-mmproj-browse');
       if (mmprojBrowse) {
         mmprojBrowse.onclick = function () {
@@ -481,7 +545,9 @@ layui.use(['layer', 'form', 'element'], function () {
     function val(id) { return document.getElementById(id).value.trim(); }
     function checked(id) { return document.getElementById(id).checked; }
     var host = (document.querySelector('input[name="llm_host"]:checked') || {}).value || '127.0.0.1';
+    var engine = (document.querySelector('input[name="llm_engine"]:checked') || {}).value || '';
     apiSend('/settings', 'POST', {
+      engine_backend: engine || null,
       host: host,
       port: Number(val('llm_port')) || 8080,
       mmproj_path: val('llm_mmproj'),
@@ -497,7 +563,9 @@ layui.use(['layer', 'form', 'element'], function () {
       },
       run: { auto_trim_ram: checked('llm_trim') }
     }).then(function () {
-      layer.msg('设置已保存', { icon: 1, time: 1200 });
+      var engineChanged = engine && settingsEngineBackend && engine !== settingsEngineBackend;
+      layer.msg(engineChanged ? '设置已保存，引擎切换将在重启服务后生效' : '设置已保存',
+        { icon: 1, time: engineChanged ? 2500 : 1200 });
       refreshStatus();
       loadConnect();
     }).catch(function (e) { layer.msg(e.message, { icon: 2 }); });

@@ -328,6 +328,100 @@ def test_after_engine_download_switches_only_on_success(runtime, tmp_path, monke
     assert runtime.cfg.engine_dir == str(old)
 
 
+# ───────────────────────── 设置页切换引擎后端 ─────────────────────────
+
+def _install_engine(root, dirname, dll):
+    d = root / dirname / "engine"
+    d.mkdir(parents=True)
+    (d / "llama-server.exe").write_bytes(b"x")
+    (d / dll).write_bytes(b"x")
+    return d
+
+
+def test_installed_backends_and_switch(runtime, tmp_path, monkeypatch):
+    """已装后端固定排序；标准目录缺失时旧命名目录兜底。"""
+    root = tmp_path / "Programs"
+    legacy_cuda = _install_engine(root, "a4agent-cu12.4", "ggml-cuda.dll")
+    vulkan = _install_engine(root, "a4agent-vulkan", "ggml-vulkan.dll")
+    monkeypatch.setattr(rt_mod, "_programs_root", lambda: root)
+
+    assert runtime.installed_backends() == ["cuda", "vulkan"]
+
+    ok = runtime.switch_backend("cuda")
+    assert ok["ok"]
+    assert runtime.cfg.engine_dir == str(legacy_cuda)
+    assert runtime.engine_backend() == "cuda"
+
+    ok = runtime.switch_backend("vulkan")
+    assert ok["ok"]
+    assert runtime.cfg.engine_dir == str(vulkan)
+
+    assert not runtime.switch_backend("tpu")["ok"]
+
+
+def test_switch_backend_requires_installed(runtime, tmp_path, monkeypatch):
+    """未安装的后端拒绝切换且不动配置；下载中拒绝；auto 清空指针。"""
+    root = tmp_path / "Programs"
+    vulkan = _install_engine(root, "a4agent-vulkan", "ggml-vulkan.dll")
+    monkeypatch.setattr(rt_mod, "_programs_root", lambda: root)
+
+    bad = runtime.switch_backend("cuda")
+    assert not bad["ok"] and "尚未安装" in bad["error"]
+    assert runtime.cfg.engine_dir == ""
+
+    assert runtime.switch_backend("vulkan")["ok"]
+
+    monkeypatch.setattr(runtime.downloader, "progress", lambda: {"running": True})
+    blocked = runtime.switch_backend("auto")
+    assert not blocked["ok"] and "下载" in blocked["error"]
+    assert runtime.cfg.engine_dir == str(vulkan)
+
+    monkeypatch.setattr(runtime.downloader, "progress", lambda: {"running": False})
+    assert runtime.switch_backend("auto")["ok"]
+    assert runtime.cfg.engine_dir == ""
+    assert runtime.settings_payload()["engine_mode"] == "auto"
+
+
+def test_settings_payload_engine_mode(runtime, tmp_path, monkeypatch):
+    """指针指向的目录里真有引擎才算钉定；死指针如实标 auto。"""
+    root = tmp_path / "Programs"
+    vulkan = _install_engine(root, "a4agent-vulkan", "ggml-vulkan.dll")
+    monkeypatch.setattr(rt_mod, "_programs_root", lambda: root)
+
+    runtime.cfg.engine_dir = str(vulkan)
+    st = runtime.settings_payload()
+    assert st["engine_mode"] == "vulkan"
+    assert st["engine_backend"] == "vulkan"
+
+    dead = tmp_path / "gone" / "engine"          # 指针还挂着但目录已空
+    dead.mkdir(parents=True)
+    runtime.cfg.engine_dir = str(dead)
+    st = runtime.settings_payload()
+    assert st["engine_mode"] == "auto"
+    assert st["engine_backend"] == "vulkan"      # 实际会被自动接管到 vulkan
+
+
+def test_save_settings_engine_backend(runtime, tmp_path, monkeypatch):
+    """save_settings 路由 engine_backend：成功落盘，失败保持原状。"""
+    root = tmp_path / "Programs"
+    vulkan = _install_engine(root, "a4agent-vulkan", "ggml-vulkan.dll")
+    monkeypatch.setattr(rt_mod, "_programs_root", lambda: root)
+
+    ok = runtime.save_settings({"engine_backend": "vulkan", "port": 8081})
+    assert ok["ok"]
+    assert runtime.cfg.engine_dir == str(vulkan)
+    assert runtime.cfg.port == 8081
+
+    bad = runtime.save_settings({"engine_backend": "cuda"})
+    assert not bad["ok"]
+    assert runtime.cfg.engine_dir == str(vulkan)   # 失败不落盘
+
+    # engine_backend 缺省/为空时忽略，其余设置照常保存（旧前端兼容）
+    assert runtime.save_settings({})["ok"]
+    assert runtime.save_settings({"engine_backend": "", "port": 8082})["ok"]
+    assert runtime.cfg.port == 8082
+
+
 def test_wizard_packs_reports_target_dir(runtime, tmp_path, monkeypatch):
     monkeypatch.setattr(rt_mod, "_programs_root", lambda: tmp_path / "Programs")
     monkeypatch.setattr(rt_mod.gpu, "detect", lambda: [])

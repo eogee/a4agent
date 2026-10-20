@@ -187,7 +187,7 @@ a4agent 为**没有图形配置界面的 CLI 工具**提供一键切换：目前
 
 「本地模型」页签把 llama.cpp 的 `llama-server` 封装为一键启动的 **OpenAI 兼容 API 服务**：装哪个引擎、选哪个模型、给什么参数，全程可视化操作。
 
-**引擎版本**：llama.cpp **b11370**（2026-10-03 发布，钉死在 `backend/app/llama/catalog.py`，为单一事实来源）。该版本的 `llama-server` 包含决策模型端点，因此下面这项能力可用。
+**引擎版本**：llama.cpp **b11719**（2026-10-18 nightly，钉死在 `backend/app/llama/catalog.py`，为单一事实来源）。该版本的 `llama-server` 包含决策模型端点，因此下面这项能力可用。
 
 ### 决策模型（System One）
 

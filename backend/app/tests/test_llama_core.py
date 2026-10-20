@@ -77,7 +77,7 @@ def test_engine_recommend_non_nvidia():
 def test_engine_catalog_pinned_tag():
     assert catalog.REPO_OWNER == "ggml-org"
     assert catalog.REPO_NAME == "llama.cpp"
-    assert catalog.find("vulkan").zips == ("llama-b11370-bin-win-vulkan-x64.zip",)
+    assert catalog.find("vulkan").zips == ("llama-b11719-bin-win-vulkan-x64.zip",)
     url = catalog.pack_url(catalog.find("vulkan"), 0)
     assert url.startswith("https://github.com/ggml-org/llama.cpp/releases/download/")
 

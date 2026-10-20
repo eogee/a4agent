@@ -51,6 +51,7 @@ def engine_packs():
         "repo_tag": catalog.REPO_TAG,
         "packs": [p.to_dict() for p in catalog.PACKS],
         "recommended_pack_id": rec.pack_id,
+        "installed_backends": r.installed_backends(),
         "engine_present": r.engine_present(),
         "progress": r.downloader.progress(),
     }
@@ -83,6 +84,15 @@ def engine_cancel():
 @router.get("/engine/progress")
 def engine_progress():
     return rt.runtime().downloader.progress()
+
+
+@router.post("/engine/switch")
+def engine_switch(body: dict):
+    """设置页切换引擎后端（auto / cuda / vulkan / cpu），下次启动服务生效。"""
+    result = rt.runtime().switch_backend(str(body.get("backend", "")))
+    if not result.get("ok"):
+        raise HTTPException(409, result.get("error", "切换失败"))
+    return result
 
 
 # ───────────────────────── 硬件检测 ─────────────────────────
