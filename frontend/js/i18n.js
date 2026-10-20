@@ -532,7 +532,7 @@
     "话题": "Topic",
     "换一个": "Rotate",
     "访问令牌": "Access token",
-    "可选；自建 ntfy 服务开启鉴权时填写": "Optional; fill in when your self-hosted ntfy requires authentication",
+    "可选；自建 ntfy 服务开启鉴权时填写": "Optional; only for self-hosted ntfy with auth",
     "推送时机": "When to push",
     "发送测试通知": "Send a test notification",
     "测试桌面横幅": "Test the desktop toast",

@@ -1808,6 +1808,10 @@ html::-webkit-scrollbar {
   color: #6b7280;
 }
 
+/* 英文标签比中文长（Enable notifications ≈ 77px），68px 会把字顶到勾选框上 */
+html[lang="en"] .task-form-row > label { width: 86px; }
+html[lang="en"] .phone-hint-block { padding-left: 96px; }
+
 .task-form-row .layui-input { flex: 1; min-width: 0; }
 
 .task-engine-radios { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -2078,7 +2082,14 @@ html::-webkit-scrollbar {
   margin-right: 18px;
 }
 
-.phone-actions { gap: 8px; margin-top: 16px; }
+.phone-actions { gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+
+/* 推送时机：四个勾选项单独成一列可换行的容器。
+   英文态 Success / Failed / Timed out / Cancelled 比中文长得多，
+   直接排在 .task-form-row 里（不换行）会顶出卡片右边界 */
+.phone-events { align-items: flex-start; }
+.phone-event-checks { display: flex; flex-wrap: wrap; gap: 6px 16px; flex: 1; min-width: 0; }
+.phone-event-checks .phone-check { margin-right: 0; }
 
 .phone-qr-area {
   display: flex;

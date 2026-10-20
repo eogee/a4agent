@@ -88,12 +88,14 @@ layui.use(['layer', 'form', 'element'], function () {
           '<input type="password" id="phone-token" class="layui-input phone-input" autocomplete="new-password" ' +
             'placeholder="可选；自建 ntfy 服务开启鉴权时填写">' +
         '</div>' +
-        '<div class="task-form-row">' +
+        '<div class="task-form-row phone-events">' +
           '<label>推送时机</label>' +
-          '<label class="phone-check"><input type="checkbox" id="phone-ev-success">成功</label>' +
-          '<label class="phone-check"><input type="checkbox" id="phone-ev-failed">失败</label>' +
-          '<label class="phone-check"><input type="checkbox" id="phone-ev-timeout">超时</label>' +
-          '<label class="phone-check"><input type="checkbox" id="phone-ev-cancelled">已取消</label>' +
+          '<div class="phone-event-checks">' +
+            '<label class="phone-check"><input type="checkbox" id="phone-ev-success">成功</label>' +
+            '<label class="phone-check"><input type="checkbox" id="phone-ev-failed">失败</label>' +
+            '<label class="phone-check"><input type="checkbox" id="phone-ev-timeout">超时</label>' +
+            '<label class="phone-check"><input type="checkbox" id="phone-ev-cancelled">已取消</label>' +
+          '</div>' +
         '</div>' +
         '<div class="task-form-row phone-actions">' +
           '<button class="layui-btn layui-btn-normal layui-btn-sm" id="phone-save">保存</button>' +
