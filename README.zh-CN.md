@@ -2,6 +2,8 @@
 
 [English](README.md) | 简体中文
 
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/eogee/badge.svg)](https://hub.xerj.org/contributors/eogee)
+
 **八端 AI 编程工具管理台 + 本地大模型推理控制台**：为 **Claude Code、Codex、dsh（DeepSeek Harness）、ZCode（智谱 Agentic 开发环境）、pi（本地 pi coding agent）、Qoder（AI IDE）、OpenCode 与 WorkBuddy** 提供统一的技能管理与 MCP 管理（八端全覆盖），并为其中没有图形配置界面的两个 CLI 工具（Claude Code、Codex）提供 API 服务商切换，同时内置 llama.cpp 本地模型推理。所有操作通过可视化界面完成，无需手动编辑配置文件。
 
 | 能力 | 说明 |

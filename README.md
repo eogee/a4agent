@@ -2,6 +2,8 @@
 
 English | [简体中文](README.zh-CN.md)
 
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/eogee/badge.svg)](https://hub.xerj.org/contributors/eogee)
+
 **A management console for eight AI coding tools + a local LLM inference console**: unified **skill management** and **MCP management** across all eight tools — **Claude Code, Codex, dsh (DeepSeek Harness), ZCode (Zhipu Agentic Dev Environment), pi (local pi coding agent), Qoder (AI IDE), OpenCode, and WorkBuddy** — plus API provider switching for the two CLI tools without a graphical config UI (Claude Code, Codex), and a built-in llama.cpp local model inference console. Everything is done through a visual interface; no manual config-file editing required.
 
 | Capability | Description |
