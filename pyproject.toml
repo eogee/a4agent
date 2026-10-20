@@ -9,6 +9,8 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "sqlalchemy>=2.0",
     "pywebview>=5.0",
+    "pystray>=0.19",
+    "pillow>=10.0",
     "tomli>=2.0; python_version < '3.11'",
     "tomli_w>=1.0",
     "cryptography>=42",
@@ -21,7 +23,6 @@ dev = [
     "pyinstaller>=6.0",
     "mypy>=1.0",
     "pytest>=8.0",
-    "pillow>=12.3.0",
 ]
 
 [tool.pytest.ini_options]

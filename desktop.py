@@ -110,11 +110,17 @@ import webview  # noqa: E402
 
 from backend.app.main import app  # noqa: E402
 from backend.app.singleton import acquire  # noqa: E402
+from backend.app.desktop_recovery import (  # noqa: E402
+    clear_instance,
+    recover_or_restart,
+    wake_running_instance,
+    write_instance,
+)
 
 
 _WINDOW = None
 # pywebview 的 Window 没有 visible 属性，可见性由关窗/唤回事件自己记
-_STATE = {"quitting": False, "visible": True}
+_STATE = {"quitting": False, "visible": True, "tray": None}
 
 
 class DesktopApi:
@@ -175,56 +181,6 @@ def find_free_port() -> int:
     port = s.getsockname()[1]
     s.close()
     return port
-
-
-def instance_file() -> "os.PathLike":
-    """记录运行实例的端口，供二次启动唤回隐藏窗口。"""
-    from pathlib import Path
-
-    from backend.app.database import get_data_dir
-
-    return Path(get_data_dir()) / "desktop.json"
-
-
-def write_instance(port: int) -> None:
-    import json
-
-    try:
-        instance_file().write_text(json.dumps({"port": port, "pid": os.getpid()}), encoding="utf-8")
-    except OSError:
-        pass
-
-
-def clear_instance() -> None:
-    try:
-        instance_file().unlink(missing_ok=True)
-    except OSError:
-        pass
-
-
-def wake_running_instance() -> bool:
-    """已有实例在跑（可能是隐藏常驻）时，唤回它的窗口；成功返回 True。"""
-    import json
-    import urllib.request
-    from pathlib import Path
-
-    path = Path(instance_file())
-    if not path.exists():
-        return False
-    try:
-        port = int(json.loads(path.read_text(encoding="utf-8")).get("port"))
-    except (OSError, ValueError):
-        return False
-    try:
-        req = urllib.request.Request(
-            f"http://127.0.0.1:{port}/api/v1/desktop/wake", method="POST", data=b"{}",
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            body = json.loads(resp.read().decode("utf-8", "replace") or "{}")
-        return bool(body.get("restored"))
-    except Exception:
-        return False
 
 
 def start_server(port: int) -> None:
@@ -305,8 +261,20 @@ def main() -> None:
 
     if not acquire():
         # 已有实例可能是「关窗后隐藏常驻」的状态：先尝试唤回它的窗口，
-        # 唤不到（老实例即将退出等）才提示已在运行。
+        # 唤不到再走兜底（清障重启），绝不只弹一个提示把用户晾死
         if wake_running_instance():
+            return
+        if "--recover" in sys.argv:
+            # 已经是兜底重启出来的实例仍抢不到锁：不再互拉，给出可操作指引
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(
+                None,
+                "a4agent 已在运行中，但窗口无法唤回。\n"
+                "请在任务管理器中结束 a4agent 进程后重新启动。",
+                "提示", 0x40,
+            )
+            return
+        if recover_or_restart():
             return
         import ctypes
         ctypes.windll.user32.MessageBoxW(None, "a4agent 已在运行中。", "提示", 0x40)
@@ -331,10 +299,17 @@ def main() -> None:
     _apply_closing_policy(win, _STATE)
     _register_desktop_hooks(win)
     _subscribe_task_notifications(win)
+    _start_tray(win)
 
     webview.start()
-    # 窗口关闭后先回收本地推理引擎（llama-server 子进程）与无头任务子进程，
-    # 再强制退出，避免后台线程/子进程挂住进程
+    # 窗口关闭后先回收托盘、本地推理引擎（llama-server 子进程）与无头任务
+    # 子进程，再强制退出，避免后台线程/子进程挂住进程
+    tray = _STATE.get("tray")
+    if tray is not None:
+        try:
+            tray.stop()
+        except Exception:  # noqa: BLE001 - 托盘收尾失败不影响退出
+            pass
     try:
         from backend.app import task_runner
 
@@ -396,6 +371,73 @@ def _subscribe_task_notifications(win) -> None:
         win_toast.show(title, message, on_click=lambda: _wake(win))
 
     task_notify.subscribe(on_event)
+
+
+def _logo_path() -> "str | None":
+    """托盘图标素材：打包后取 _MEIPASS/resources，开发态取仓库 resources。"""
+    from pathlib import Path
+
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", "."))
+    else:
+        base = Path(__file__).resolve().parent
+    for name in ("logo.png", "logo.ico"):
+        candidate = base / "resources" / name
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def _quit_from_tray(win) -> None:
+    """托盘「退出」：放行关窗策略后投递 WM_CLOSE，走 UI 线程消息泵正常收尾。
+
+    不直接 destroy()——WinForms 控件操作跨线程无保证，PostMessage 让关闭
+    在窗口自己的消息循环里发生，与点标题栏 X 等价（quitting 已放行）。
+    """
+    _STATE["quitting"] = True
+    hwnd = _hwnd_of(win)
+    if hwnd and sys.platform == "win32":
+        import ctypes
+
+        ctypes.windll.user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+        return
+    try:
+        win.destroy()
+    except Exception:  # noqa: BLE001 - 兜底：销毁失败则关闭
+        try:
+            win.close()
+        except Exception:
+            pass
+
+
+def _start_tray(win) -> None:
+    """常驻托盘图标：单击/双击唤回主窗口，右键菜单可显式退出。
+
+    「关窗即隐藏」的设计里，托盘是隐藏实例唯一常驻的可视入口——唤醒链路
+    （desktop.json）断裂时用户仍能从托盘把窗口找回来。回调跑在托盘线程：
+    show/restore 跨线程调用已由 wake 接口实证可行；退出走 PostMessage。
+    """
+    try:
+        import pystray
+    except ImportError:
+        return  # 依赖缺失不阻塞主流程（老环境兼容）
+    from PIL import Image
+
+    icon_path = _logo_path()
+    if not icon_path:
+        return
+    try:
+        with Image.open(icon_path) as im:
+            image = im.convert("RGBA")
+    except Exception:  # noqa: BLE001 - 图标加载失败仅损失托盘，不挡主窗口
+        return
+    menu = pystray.Menu(
+        pystray.MenuItem("显示主窗口", lambda icon, item: _wake(win), default=True),
+        pystray.MenuItem("退出", lambda icon, item: _quit_from_tray(win)),
+    )
+    icon = pystray.Icon("a4agent", image, "a4agent", menu)
+    threading.Thread(target=icon.run, daemon=True).start()
+    _STATE["tray"] = icon
 
 
 if __name__ == "__main__":

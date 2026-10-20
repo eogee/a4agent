@@ -32,6 +32,9 @@ HIDDEN_IMPORTS = [
     "clr_loader",
     "webview",
     "webview.platforms.winforms",
+    # 托盘图标（pystray 按平台动态选后端，静态分析可能漏掉 _win32）
+    "pystray",
+    "pystray._win32",
 ]
 
 DEFAULT_VERSION = "0.1.0"
