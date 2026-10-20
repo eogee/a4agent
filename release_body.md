@@ -1,72 +1,46 @@
-# a4agent v0.6.4
+# a4agent v0.6.4（引擎后端可选与托盘常驻 / Switchable engine backends and a resident tray）
 
-## English
+**下载对应平台的安装包 / Download for your platform：**
 
-### Engine management: one engine per backend, switchable from Settings
+Windows：a4agent-setup-0.6.4.exe——八端 AI 编程工具管理台 + 本地大模型推理控制台，双击安装（per-user 免管理员；SmartScreen 提示时选「更多信息 → 仍要运行」）
 
-- Engines now install into `%LOCALAPPDATA%\Programs\a4agent-<backend>\engine`, one directory per backend. Re-downloading a backend only replaces its own copy and never overwrites an engine another backend is using.
-- The backend actually running is detected from the DLLs present in the directory (`ggml-cuda` > `ggml-vulkan` > `ggml-cpu`), instead of being inferred from the package you once downloaded.
-- When several engines coexist, an NVIDIA card prefers the CUDA one — backend-vs-GPU match first, then modification time — rather than whichever files are newest. The title bar shows the backend that is really running.
-- Changing the backend only rewrites the pointer in the config, never touches engine files: you can switch while the service is running, and it takes effect on the next start. Switching is refused while a download is in progress, so it cannot race the download callback.
-- Engines are pinned to llama.cpp **b11719** (2026-10-18 nightly); asset names and sizes of the four packs were re-checked against the GitHub API.
+Windows: a4agent-setup-0.6.4.exe — the eight-tool AI coding console with a local LLM inference panel. Double-click to install (per-user, no admin; if SmartScreen prompts, choose "More info → Run anyway").
 
-### Tray and startup recovery
+**v0.6.4 更新内容 / What's new in v0.6.4：**
 
-- Closing the window no longer means quitting: a4agent stays resident in the tray, left-click brings the window back, and the context menu can exit directly.
-- A second launch that cannot take the single-instance lock no longer dies with a bare "already running" box. It tries to wake the hidden window first, then falls back to a clean restart; if even that instance cannot take the lock, it tells you what to do in Task Manager instead of two instances pulling at each other.
-- Shutdown now collects the tray first, then the local inference engine and headless task child processes, so nothing is left running in the background.
+引擎按后端分目录安装——一个后端一套引擎（`Programs\a4agent-<后端>\engine`），重下某个后端不再覆盖另一个后端正在用的引擎；实际在跑哪个后端按目录里的 DLL 实测识别（`ggml-cuda` > `ggml-vulkan` > `ggml-cpu`），顶栏显示真实后端
 
-### Project discovery, search and UI
+Engines install per backend — one engine per backend directory under `Programs\a4agent-<backend>\engine`, so re-downloading one never overwrites an engine another backend is using; the running backend is detected from the DLLs present (`ggml-cuda` > `ggml-vulkan` > `ggml-cpu`) and shown in the title bar
 
-- The default scan range is now every visible drive letter on the machine, instead of a folder hard-coded at build time. Projects also surface from the history the tools already keep — Claude Code's project list, Codex session working directories, recent VS Code workspaces — so projects at any depth appear with no setup.
-- "Project root" is replaced by a "Project sources" dialog: auto-discovered entries can be ignored one by one or restored to defaults, and scan ranges can still be added by hand. Same-name projects in different paths get a parent-folder suffix so migration can never write into the wrong directory, and disconnected network drives no longer stall discovery (3s timeout per scan).
-- Skill and MCP search in the project view now also matches the project folder name and root path. When a global search returns nothing but the keyword does hit a project folder, it reports how many and offers a one-click switch to the project view.
-- Progress bars now use the same layui style as the download dialog, and the 45° stripe animation is gone. DSH / Pi display names are uppercased, the ZCode and OpenCode badges became a grey light/dark pair, and the README gains an XERJ Corpus Hub contributor badge.
+设置页可切换引擎后端——新增「引擎后端」行（自动 / CUDA / Vulkan / CPU），只列已安装的后端；切换只改配置指针、不动引擎文件，服务运行中也能切、下次启动生效，下载进行中禁止切换
 
-### Compatibility
+Engine backend switchable in Settings — a new "Engine backend" row (Auto / CUDA / Vulkan / CPU) lists only installed backends; switching only rewrites the config pointer, works while the service is running and takes effect on the next start, and is refused during a download
 
-- Windows 10/11 64-bit.
-- Engines already installed in older directories are still detected, so nothing has to be re-downloaded; pick which one to use from the new "Engine backend" row in Settings.
-- Config and data stay in `%APPDATA%\a4agent` and survive the upgrade.
+引擎升级到 llama.cpp b11719（2026-10-18 nightly）——四套引擎包的资产名与体积按 GitHub API 重新核对
 
-### Upgrade
+Engines bumped to llama.cpp b11719 (2026-10-18 nightly) — asset names and sizes of the four packs were re-checked against the GitHub API
 
-Run `a4agent-setup-0.6.4.exe` over the existing installation.
+托盘常驻——关窗不再等于退出，托盘图标常驻，左键唤回窗口，右键菜单直接退出；退出时先收托盘，再回收引擎与任务子进程
 
----
+Tray residency — closing the window no longer quits; the tray icon stays, left-click brings the window back, the menu exits directly, and shutdown collects the tray before the engine and task child processes
 
-## 中文
+启动自恢复——二次启动抢不到单例锁时先唤回隐藏窗口，唤不到就清障重启，兜底实例仍失败才提示到任务管理器结束进程，不再只弹一句「已在运行」
 
-### 引擎管理：一个后端一套引擎，设置页可切换
+Startup recovery — a second launch that cannot take the single-instance lock wakes the hidden window first, then falls back to a clean restart, and only then tells you what to do in Task Manager
 
-- 引擎改为装进 `%LOCALAPPDATA%\Programs\a4agent-<后端>\engine`，一个后端一个目录。重下某个后端只替换它自己那份，不再覆盖另一个后端正在用的引擎。
-- 实际在跑哪个后端，改成按目录里真实存在的 DLL 识别（`ggml-cuda` > `ggml-vulkan` > `ggml-cpu`），不再靠「你当初下的是哪个包」去猜。
-- 多套引擎共存时，NVIDIA 卡按「后端与显卡匹配优先、其次修改时间」排序，CUDA 排在 Vulkan 之前，不再是谁的文件新就用谁。顶栏显示真正在跑的后端。
-- 切换后端只改写配置里的指针，不动引擎文件：服务运行中也能切，下次启动生效；下载进行中禁止切换，避免和下载完成的回调互相覆盖。
-- 引擎钉到 llama.cpp **b11719**（2026-10-18 nightly），四个引擎包的资产名与体积按 GitHub API 重新核对。
+项目自动发现——默认扫描本机所有盘符，并读取 Claude Code 项目表、Codex 会话工作目录、VS Code 最近工作区，任意深度的项目零操作出现；「项目根目录」改为「项目来源」弹窗，可逐条忽略或恢复默认
 
-### 托盘常驻与启动自恢复
+Automatic project discovery — scans every drive letter and reads the history the tools already keep (Claude Code's project list, Codex session directories, recent VS Code workspaces), so projects at any depth appear with no setup; the old root-folder dialog becomes a "Project sources" dialog you can prune or reset
 
-- 关窗不再等于退出：应用常驻托盘，左键唤回窗口，右键菜单可直接退出。
-- 二次启动抢不到单例锁时，不再只弹一句「a4agent 已在运行」把用户晾在门口：先尝试唤回被隐藏的窗口，唤不到就清障重启；连兜底实例都抢不到锁时，明确告诉你去任务管理器结束进程，而不是两个实例互相唤醒。
-- 退出顺序改为先收托盘，再回收本地推理引擎与无头任务子进程，后台不留残留。
+搜索与界面——项目视图搜索同时匹配项目文件夹名与根路径，全局零结果时可一键切到项目视图；进度条统一为下载弹窗样式，DSH / Pi 显示名统一大写，ZCode 与 OpenCode 徽章改为灰系深浅对
 
-### 项目发现、搜索与界面
+Search and UI — project-view search matches project folder names and root paths too, with a one-click switch when a global search finds nothing; progress bars use the download-dialog style, DSH / Pi names are uppercased, and the ZCode / OpenCode badges became a grey light/dark pair
 
-- 默认扫描范围改为本机所有可见盘符，不再是打包时写死的那个目录。项目还会从各工具本来就记着的历史里自动浮现：Claude Code 的项目表、Codex 会话的工作目录、VS Code 最近工作区——任意深度的项目零操作出现。
-- 「项目根目录」改为「项目来源」弹窗：自动发现的部分可逐条忽略或恢复默认，扫描范围仍可手动添加。同名不同路径的项目会加父目录后缀消歧，迁移目标不可能再写错目录；断开的网络盘不再拖死发现接口（单次扫描 3 秒超时）。
-- 项目视图的技能与 MCP 搜索扩展为同时匹配项目文件夹名与根路径；全局搜索零结果、但关键词其实命中了项目文件夹时，直接告诉你命中几个并可一键切过去。
-- 进度条统一为「下载更新」弹窗那套 layui 样式，45° 斜纹动画移除。DSH / Pi 显示名统一大写，ZCode 与 OpenCode 徽章改为灰系深浅对，README 增加 XERJ Corpus Hub 贡献者徽章。
+兼容性——Windows 10/11 64 位；旧目录里的引擎仍会被识别，无需重下；配置与数据仍在 `%APPDATA%\a4agent`，升级全程保留
 
-### 兼容性
+Compatibility — Windows 10/11 64-bit; engines in older directories are still detected so nothing needs re-downloading; config and data stay in `%APPDATA%\a4agent` and survive the upgrade
 
-- Windows 10/11 64 位。
-- 旧目录里的引擎仍会被识别，不必重新下载；想换用哪个后端，在设置页的「引擎后端」里选。
-- 配置与数据仍在 `%APPDATA%\a4agent`，升级全程保留。
-
-### 升级
-
-直接运行 `a4agent-setup-0.6.4.exe` 覆盖安装即可。
+**源码与说明 / Source and docs：** https://github.com/eogee/a4agent ｜ https://eogee.com/article/94
 
 ## 校验 / Checksum
 
