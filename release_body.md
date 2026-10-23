@@ -12,13 +12,17 @@ Windows: a4agent-setup-0.6.4.exe — the eight-tool AI coding console with a loc
 
 Engines install per backend — one engine per backend directory under `Programs\a4agent-<backend>\engine`, so re-downloading one never overwrites an engine another backend is using; the running backend is detected from the DLLs present (`ggml-cuda` > `ggml-vulkan` > `ggml-cpu`) and shown in the title bar
 
-设置页可切换引擎后端——「引擎后端」改成一张横向对比表，自动 / CUDA / Vulkan / CPU 并排显示状态、适配与操作；已装的点「使用」，未装的直接给下载入口（带体积），装好自动切换。切换只改配置指针、不动引擎文件，服务运行中也能切、下次启动生效，下载进行中禁止切换
+设置页可切换引擎后端——新增「引擎后端」行（自动 / CUDA / Vulkan / CPU），只列已安装的后端；切换只改配置指针、不动引擎文件，服务运行中也能切、下次启动生效，下载进行中禁止切换
 
-Engine backend switchable in Settings — the "Engine backend" control is now a horizontal comparison table: Auto / CUDA / Vulkan / CPU side by side with status, fit and action per column. Installed engines get a "Use" button, missing ones get a download entry with its size and switch over automatically once installed. Switching only rewrites the config pointer, works while the service is running and takes effect on the next start, and is refused during a download
+Engine backend switchable in Settings — a new "Engine backend" row (Auto / CUDA / Vulkan / CPU) lists only installed backends; switching only rewrites the config pointer, works while the service is running and takes effect on the next start, and is refused during a download
 
 引擎升级到 llama.cpp b11719（2026-10-18 nightly）——四套引擎包的资产名与体积按 GitHub API 重新核对
 
 Engines bumped to llama.cpp b11719 (2026-10-18 nightly) — asset names and sizes of the four packs were re-checked against the GitHub API
+
+修复投影模型（mmproj）不生效——设置页填了多模态投影路径后，启动命令从未携带 `--mmproj`，发图请求一直按纯文本跑；现在校验过的路径会真实注入 llama-server，路径无效仍会提示跳过
+
+Fixed the multimodal projector (mmproj) not taking effect — even with a projector path set in Settings, the startup command never carried `--mmproj`, so image requests silently ran text-only; the validated path is now really passed to llama-server, and an invalid path still logs a skip notice
 
 托盘常驻——关窗不再等于退出，托盘图标常驻，左键唤回窗口，右键菜单直接退出；退出时先收托盘，再回收引擎与任务子进程
 
@@ -45,5 +49,5 @@ Compatibility — Windows 10/11 64-bit; engines in older directories are still d
 ## 校验 / Checksum
 
 ```
-CA62D00C7E68CEBCD8B9B3D0963AFF83C559FEF64570D6E2356CDDAA7B5D6693  a4agent-setup-0.6.4.exe
+2CB479D3BD8D23D3B9E46A8F43F7B84C137127CC4EFF03316651B1FDECF7F840  a4agent-setup-0.6.4.exe
 ```
