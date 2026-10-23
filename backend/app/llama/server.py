@@ -304,8 +304,11 @@ def detect_capabilities(engine_dir) -> BackendCapabilities:
 
 
 def build_args(infer, model_path: str, host: str, port: int,
-               include_mtp: bool, mtp_style: str) -> list:
-    """把配置拼装成 llama-server 命令行参数（与 a4agent CommandLineBuilder 对齐）。"""
+               include_mtp: bool, mtp_style: str, mmproj: str = "") -> list:
+    """把配置拼装成 llama-server 命令行参数（与 a4agent CommandLineBuilder 对齐）。
+
+    mmproj 为经 runtime 校验过的投影模型路径，空 = 纯文本不加载。
+    """
     args = [
         "-m", str(model_path),
         "--host", host,
@@ -334,6 +337,8 @@ def build_args(infer, model_path: str, host: str, port: int,
             # --spec-draft-n-max 控制每步草稿 token 数（即 MTP 步数）
             args += ["--spec-type", "draft-mtp"]
             args += ["--spec-draft-n-max", str(infer.mtp_steps)]
+    if mmproj:
+        args += ["--mmproj", mmproj]
     args += [a for a in infer.extra_args.split(" ") if a]
     return args
 

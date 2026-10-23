@@ -236,3 +236,15 @@ def test_build_args_extra():
     args = build_args(_infer(extra_args="--no-mmap  --mlock"), "m.gguf",
                       "127.0.0.1", 8080, include_mtp=False, mtp_style=MTP_NONE)
     assert "--no-mmap" in args and "--mlock" in args
+
+
+def test_build_args_mmproj():
+    args = build_args(_infer(), "m.gguf", "127.0.0.1", 8080,
+                      include_mtp=False, mtp_style=MTP_NONE,
+                      mmproj="C:/m/mmproj-f16.gguf")
+    assert args[args.index("--mmproj") + 1] == "C:/m/mmproj-f16.gguf"
+
+    # 空路径 = 纯文本，不出现 --mmproj
+    args = build_args(_infer(), "m.gguf", "127.0.0.1", 8080,
+                      include_mtp=False, mtp_style=MTP_NONE)
+    assert "--mmproj" not in args

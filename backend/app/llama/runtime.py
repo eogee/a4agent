@@ -250,15 +250,9 @@ class LlamaRuntime:
         return {"ok": True}
 
     def _build_args(self, model: str, include_mtp: bool, caps, mmproj: str) -> list:
-        """build_args 组装；mmproj 由 runtime 先行校验后注入。"""
-        cfg = self.cfg
-        origin = cfg.mmproj_path
-        try:
-            cfg.mmproj_path = mmproj
-            return server.build_args(cfg.infer, model, cfg.host, cfg.port,
-                                     include_mtp, caps.mtp)
-        finally:
-            cfg.mmproj_path = origin
+        """build_args 组装；mmproj 由 runtime 先行校验后传入。"""
+        return server.build_args(self.cfg.infer, model, self.cfg.host,
+                                 self.cfg.port, include_mtp, caps.mtp, mmproj)
 
     def _log_backend_hint(self) -> None:
         """NVIDIA 卡却跑在 Vulkan / CPU 后端时提示一次。
