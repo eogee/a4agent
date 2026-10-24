@@ -51,7 +51,10 @@ def dispatch(input: dict, agent: str, cfg: dict | None = None) -> dict | None:
         # Claude Code 的提问工具叫 AskUserQuestion；Codex 的叫 request_user_input
         is_ask = tool_name == "AskUserQuestion" or (agent == "codex" and tool_name == "request_user_input")
         if is_ask:
-            if desktop_on:
+            # WorkBuddy 的提问面板不在这里：实测面板挂着时不调 hook、不写 stdin 载荷，
+            # 直到用户点完才 spawn 本进程——此刻再弹「问题作答」纯属噪音（人已经答了）。
+            # 该端的提问提醒由 workbuddy_listen 直接读会话 jsonl，在面板出现时发出。
+            if desktop_on and agent != "workbuddy":
                 deskqueue.queue_notify(*format_notice(
                     handlers.session_topic(input), "问题作答", name))
             if not is_out:

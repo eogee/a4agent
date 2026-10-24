@@ -73,6 +73,10 @@ def create_app() -> FastAPI:
     from . import opencode_listen
     opencode_listen.start()
 
+    # WorkBuddy 会话雷达：该端的提问面板不触发 hook（作答后才调），改读会话记录
+    from . import workbuddy_listen
+    workbuddy_listen.start()
+
     # 前端静态资源：开发/桌面运行时由后端统一托管
     frontend_dir = _frontend_dir()
     if frontend_dir.exists():
@@ -83,7 +87,11 @@ def create_app() -> FastAPI:
 
 def _start_notify_queue_consumer() -> None:
     """桌面弹窗请求队列消费：会话 hook 只写请求文件（ZCode 会在 hook 退出时
-    杀进程树，hook 内弹窗来不及渲染），由本常驻进程周期代发。"""
+    杀进程树，hook 内弹窗来不及渲染），由本常驻进程周期代发。
+
+    轮询 0.4s：空目录 iterdir 开销可忽略，但这是提醒链路的固定延迟之一，
+    原先 2s 会把「信号产生 → 横幅出现」硬拖两秒以上（提问类提醒尤其明显）。
+    """
     import logging
     import threading
     import time
@@ -97,7 +105,7 @@ def _start_notify_queue_consumer() -> None:
                 deskqueue.process_queue(toast_show)
             except Exception:  # noqa: BLE001 - 队列消费失败不影响主服务
                 logging.getLogger(__name__).exception("桌面通知队列消费异常")
-            time.sleep(2)
+            time.sleep(0.4)
 
     threading.Thread(target=_loop, daemon=True, name="a4agent-notify-queue").start()
 

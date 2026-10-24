@@ -378,6 +378,19 @@ def test_dispatch_zcode_asku_permission_skips_queue(data_dir, monkeypatch):
     assert queued == []  # 提问的提醒归 PreToolUse，此处不重复
 
 
+def test_dispatch_workbuddy_ask_skips_desktop_queue(hook_cfg, data_dir, monkeypatch):
+    """WorkBuddy 面板期间不调 hook（作答后才到），这条迟到的提醒由会话雷达负责，
+    分发器不再重复弹——否则用户答完还会收到一条「问题作答」。"""
+    from backend.app.phone import config as phone_config
+    phone_config.save({"hook": {"mode": "home"}})
+    queued = []
+    monkeypatch.setattr(dispatch.deskqueue, "queue_notify", lambda t, m: queued.append(m))
+    out = dispatch.dispatch({"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion",
+                             "tool_input": {"questions": [{"question": "Q"}]}}, "workbuddy")
+    assert out is None
+    assert queued == []
+
+
 def test_dispatch_workbuddy_wait_clamped(hook_cfg, monkeypatch):
     from backend.app.phone import config as phone_config
     phone_config.save({"hook": {"mode": "out", "timeout": 120}})

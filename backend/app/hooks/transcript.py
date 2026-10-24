@@ -136,20 +136,27 @@ def strip_injected(text: str) -> str:
     return _USER_QUERY_SHELL.sub("", text).strip()
 
 
-def extract_first_prompt(transcript_path: str | None, max_length: int = 80) -> str | None:
+def extract_first_prompt(transcript_path: str | None, max_length: int = 80,
+                         max_bytes: int | None = None) -> str | None:
     """transcript 里第一条用户消息——hook 侧会话没有标题，拿它当「话题名称」。
 
     工具结果也挂在 user 名下（tool_result 块无 text），按块类型自然滤掉；
     WorkBuddy/Codex 会在首条消息注入上下文（system-reminder/AGENTS.md 等），
     剥离后为空说明整条都是注入（真话在后面几条），继续往下找；
     ZCode 的合成伪 transcript 只有 assistant 消息，抽不到返回 None，由调用方退回目录名。
+
+    max_bytes 限定只读文件头：会话雷达在提醒热路径上按需取标题，不能整份读大文件
+    （首条用户消息必然在文件最前面，读 256KB 足够；半行会被 JSON 解析丢弃，不影响结果）。
+    解码用 replace：宿主日志可能出现被截断的 UTF-8 字节，宁可少一个字也不要整条失败。
     """
     if not transcript_path:
         return None
     try:
-        content = Path(transcript_path).read_text(encoding="utf-8")
+        with Path(transcript_path).open("rb") as fh:
+            raw = fh.read(max_bytes) if max_bytes else fh.read()
     except OSError:
         return None
+    content = raw.decode("utf-8", errors="replace")
     for line in content.splitlines():
         if not line.strip():
             continue

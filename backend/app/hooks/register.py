@@ -458,6 +458,11 @@ def unregister_engine(engine: str) -> dict:
     return {"unregistered": unregister_json_hooks(_engine_paths()[engine])}
 
 
+def workbuddy_registered() -> bool:
+    """单端轻量探测：会话雷达每 60s 复查一次，不能每次都读七端状态。"""
+    return _json_hooks_registered(_engine_paths()["workbuddy"])
+
+
 def registration_status() -> dict:
     """七端注册状态 + 配置文件路径，供 GUI 展示。"""
     paths = _engine_paths()
