@@ -36,6 +36,8 @@ OpenCode 与其他七端完全同权，没有任何专属界面：
 
 ## 技能管理
 
+![技能管理：全局视图、聚合徽章与跨端迁移](assets/screenshots/skills-zh.png)
+
 八个目标使用同一套技能格式（`<skill-name>/SKILL.md` 目录 + frontmatter 的 `name` 与 `description`），因此 a4agent 可以把它们当作一种资源统一管理。
 
 ### 发现与聚合
@@ -87,6 +89,8 @@ OpenCode 与其他七端完全同权，没有任何专属界面：
 ---
 
 ## MCP 管理
+
+![MCP 管理：八端服务聚合与一键安装](assets/screenshots/mcp-zh.png)
 
 八端的 MCP server 都写在各自的配置文件里，a4agent 把它们归一为统一视图（`name` / `transport` / `command` / `args` / `env` / `url` / `headers`）管理。
 
@@ -144,6 +148,8 @@ OpenCode 与其他七端完全同权，没有任何专属界面：
 
 ## API 服务商切换
 
+![配置方案：一键切换 Claude Code / Codex 的服务商与模型](assets/screenshots/profiles-zh.png)
+
 a4agent 为**没有图形配置界面的 CLI 工具**提供一键切换：目前是 **Claude Code** 与 **Codex** 两端。
 
 - **Claude Code**：Anthropic 协议直连，或经内置**本地翻译代理**把请求实时翻译为 OpenAI Chat Completions 转发给 OpenAI 兼容服务商（代理仅监听 `127.0.0.1`、随机 token 鉴权，工具退出后仍存活）。
@@ -186,6 +192,8 @@ a4agent 为**没有图形配置界面的 CLI 工具**提供一键切换：目前
 
 ## 本地模型（llama.cpp 推理控制台）
 
+![本地模型：接入信息、模型库与推理设置](assets/screenshots/local-models-zh.png)
+
 「本地模型」页签把 llama.cpp 的 `llama-server` 封装为一键启动的 **OpenAI 兼容 API 服务**：装哪个引擎、选哪个模型、给什么参数，全程可视化操作。
 
 **引擎版本**：llama.cpp **b11719**（2026-10-18 nightly，钉死在 `backend/app/llama/catalog.py`，为单一事实来源）。该版本的 `llama-server` 包含决策模型端点，因此下面这项能力可用。
@@ -226,6 +234,8 @@ a4agent 为**没有图形配置界面的 CLI 工具**提供一键切换：目前
 ---
 
 ## 任务下发（无头 Agent 任务）
+
+![任务下发：下发表单与任务队列](assets/screenshots/tasks-zh.png)
 
 「任务下发」页签把各端的**无头（headless）模式**产品化：在界面里写一句任务描述、选一个引擎，a4agent 就在后台把 CLI 拉起来跑完、把产出留档，你可以继续干别的事（机制见使用文档《让 Agent 后台自主执行任务》）。
 
@@ -284,6 +294,14 @@ a4agent 为**没有图形配置界面的 CLI 工具**提供一键切换：目前
 - 二次启动抢不到单例锁时不再只弹一句「已在运行」：先尝试唤回被隐藏的窗口，唤不到则清障重启，兜底实例仍失败才告诉你去任务管理器结束进程
 - 真正的退出入口是顶栏「**退出**」，会先告知还有几个任务在跑并二次确认；退出时如实把运行中任务标记为「应用退出」并终止其进程树
 - 任务到终态时：窗口开着就在页面内提示；窗口已隐藏则弹**原生系统通知**（带提示音，来源区显示 a4agent logo 与应用名，点击唤回窗口）并闪烁任务栏图标
+
+---
+
+## 通知提醒（手机推送与桌面横幅）
+
+![通知提醒：手机推送配置与会话交互宿主表格](assets/screenshots/notifications-zh.png)
+
+两条独立通道让你不必守在电脑前：**手机推送**（ntfy）在任务与会话终局（成功 / 失败 / 超时）送达，始终带 **Agent 最后一段输出**；**桌面横幅**（来源区 logo + a4agent）覆盖完成 / 失败 / 权限申请 / 提问，点击唤回窗口。两通道**全端一个样式**——话题名称 / 通知类型 / 应用名称三行制，纯文字无 Emoji。会话 hook 覆盖 **Claude Code / Codex / ZCode / Qoder / WorkBuddy / dsh**（OpenCode 由服务事件监听同权接入），Agent 的提问与权限请求可推到手机上直接作答、批办；「外出·手机优先」模式下手机超时未回复，自动切回终端继续。
 
 ---
 

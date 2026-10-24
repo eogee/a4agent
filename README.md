@@ -30,6 +30,8 @@ OpenCode gets exactly the same treatment as the other seven tools — no dedicat
 
 ## Skill Management
 
+![Skill management — global view, aggregation badges and cross-tool migration](assets/screenshots/skills-en.png)
+
 All eight targets use the same skill format (a `<skill-name>/SKILL.md` directory with `name` and `description` frontmatter), so a4agent can manage them as one kind of resource.
 
 ### Discovery & Aggregation
@@ -79,6 +81,8 @@ All eight targets use the same skill format (a `<skill-name>/SKILL.md` directory
 ---
 
 ## MCP Management
+
+![MCP management — servers across all eight tools with one-click install](assets/screenshots/mcp-en.png)
 
 Each of the eight tools stores its MCP servers in its own config file; a4agent normalizes them into one view (`name` / `transport` / `command` / `args` / `env` / `url` / `headers`).
 
@@ -136,6 +140,8 @@ Each of the eight tools stores its MCP servers in its own config file; a4agent n
 
 ## API Provider Switching
 
+![Configurations — one-click provider & model switching for Claude Code / Codex](assets/screenshots/profiles-en.png)
+
 a4agent provides one-click switching for **CLI tools without a graphical config UI**: currently **Claude Code** and **Codex**.
 
 - **Claude Code**: direct Anthropic protocol, or through the built-in **local translation proxy** that translates requests in real time to OpenAI Chat Completions for OpenAI-compatible providers (the proxy listens on `127.0.0.1` only, authenticates with a random token, and survives after the app exits).
@@ -178,6 +184,8 @@ Config freedom stays entirely with you: whatever you configured in the app's UI,
 
 ## Local Models (llama.cpp Inference Console)
 
+![Local models — connection info, model library and inference settings](assets/screenshots/local-models-en.png)
+
 The "Local Models" tab wraps llama.cpp's `llama-server` into a one-click **OpenAI-compatible API service**: which engine to install, which model to serve, and with what parameters — all through the UI.
 
 **Engine version**: llama.cpp **b11719** (nightly, 2026-10-18, pinned in `backend/app/llama/catalog.py` as the single source of truth). This version's `llama-server` includes the decision-model endpoint, which enables the capability below.
@@ -218,6 +226,8 @@ Five steps: "Get engine → Detect hardware → Pick model directories → Pick 
 ---
 
 ## Task Dispatch (Headless Agent Tasks)
+
+![Task dispatch — the dispatch form and task queue](assets/screenshots/tasks-en.png)
 
 The "Task Dispatch" tab productizes each tool's **headless mode**: write a one-line task description, pick an engine, and a4agent launches the CLI in the background, waits for it to finish, and archives the output while you do other things (mechanics documented in the usage article "Let Agents Run Tasks Autonomously in the Background").
 
@@ -276,6 +286,14 @@ A blocked task still leaves a `precheck_failed` record, visible in the queue wit
 - If a second launch cannot take the single-instance lock, it no longer stops at a bare "already running" box: it first tries to wake the hidden window, then falls back to a clean restart, and only then tells you what to do in Task Manager
 - The real exit is the "**Exit**" button in the top bar, which tells you how many tasks are running and asks twice; on exit, running tasks are honestly marked "app exited" and their process trees terminated
 - When a task reaches a final state: an in-page notice if the window is open; otherwise a **native system toast** (with sound; the source badge shows the a4agent logo and name; clicking it wakes the window) plus a flashing taskbar icon
+
+---
+
+## Notifications (Phone Push & Desktop Toasts)
+
+![Notifications — phone push configuration and the session-interaction host table](assets/screenshots/notifications-en.png)
+
+Two independent channels keep you off the desk: **phone push** (ntfy) delivers task and session outcomes (success / failure / timeout), always carrying the **agent's last output**; **desktop toasts** (source badge: logo + a4agent) cover completions, failures, permission requests and questions, and wake the window on click. Both channels share **one unified format** — topic name / notification type / app name in three lines, plain text without emoji. Session hooks for **Claude Code / Codex / ZCode / Qoder / WorkBuddy / dsh** (OpenCode joins through its service event listener, same treatment) push the agent's questions and permission requests to your phone for remote answering and approval; in "away · phone-first" mode an unanswered prompt falls back to the terminal automatically.
 
 ---
 
