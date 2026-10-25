@@ -9,8 +9,9 @@
 """
 import json
 import logging
-import re
 from pathlib import Path
+
+from ..textclean import one_line, strip_host_markup
 
 logger = logging.getLogger(__name__)
 
@@ -108,32 +109,13 @@ def _user_text(o: dict) -> str | None:
     return None
 
 
-# 宿主注入上下文块白名单：配对标签整段移除（各家实测样本见下）。
-# 不做通用 XML 剥离——用户第一条消息贴代码/贴 XML 很常见，白名单只认
-# 宿主保留名，避免把用户自己的内容当注入误吃。
-_INJECTED_TAG_BLOCKS = (
-    "system-reminder",      # WorkBuddy / Claude Code：<system-reminder data-role=...>
-    "user_instructions",    # Codex
-    "environment_context",  # Codex：<environment_context>…日期/文件系统…
-    "INSTRUCTIONS",         # Codex：# AGENTS.md instructions 标题下的 <INSTRUCTIONS> 块
-)
-# 无正文语义的注入行（标题/告示），整行移除
-_INJECTED_LINE_PATTERNS = (
-    re.compile(r"^# AGENTS\.md instructions[^\n]*\n", re.MULTILINE),  # Codex 标题行
-    re.compile(r"^Caveat:[^\n]*\n", re.MULTILINE),  # Claude Code 本地命令告示前缀
-)
-# WorkBuddy 把真实提问包在 <user_query> 壳里挂在注入块之后：只剥壳留内容
-_USER_QUERY_SHELL = re.compile(r"</?user_query\b[^>]*>")
-
-
 def strip_injected(text: str) -> str:
-    """剥掉宿主注入的上下文块，剩真实用户输入；整条都是注入时返回空串。"""
-    for tag in _INJECTED_TAG_BLOCKS:
-        text = re.sub(rf"<{tag}\b[^>]*>.*?</{tag}>", "", text,
-                      flags=re.DOTALL | re.IGNORECASE)
-    for pat in _INJECTED_LINE_PATTERNS:
-        text = pat.sub("", text)
-    return _USER_QUERY_SHELL.sub("", text).strip()
+    """剥掉宿主注入的上下文块与 @ 占位符，剩真实用户输入（空串=整条都是注入）。
+
+    规则本身在 app.textclean：通知链的任务侧（phone.notifier）也要用同一份，
+    放这里会被反向 import 打环。
+    """
+    return strip_host_markup(text)
 
 
 def extract_first_prompt(transcript_path: str | None, max_length: int = 80,
@@ -143,11 +125,15 @@ def extract_first_prompt(transcript_path: str | None, max_length: int = 80,
     工具结果也挂在 user 名下（tool_result 块无 text），按块类型自然滤掉；
     WorkBuddy/Codex 会在首条消息注入上下文（system-reminder/AGENTS.md 等），
     剥离后为空说明整条都是注入（真话在后面几条），继续往下找；
+    WorkBuddy 前端的附件/技能/长文本占位符（@image#1:…、@skill:"…"、
+    @long-text:"…"）同样剥掉——它们不是用户原话，进通知标题就是一堆标签；
     ZCode 的合成伪 transcript 只有 assistant 消息，抽不到返回 None，由调用方退回目录名。
 
     max_bytes 限定只读文件头：会话雷达在提醒热路径上按需取标题，不能整份读大文件
     （首条用户消息必然在文件最前面，读 256KB 足够；半行会被 JSON 解析丢弃，不影响结果）。
     解码用 replace：宿主日志可能出现被截断的 UTF-8 字节，宁可少一个字也不要整条失败。
+
+    返回前压成单行（标题带换行会在 toast/推送里断成几行）。
     """
     if not transcript_path:
         return None
@@ -169,8 +155,8 @@ def extract_first_prompt(transcript_path: str | None, max_length: int = 80,
         text = _user_text(o)
         if not text or not text.strip():
             continue
-        cleaned = strip_injected(text)
-        if not cleaned:
+        title = one_line(strip_injected(text), max_length)
+        if not title:
             continue
-        return cleaned[:max_length] + ("..." if len(cleaned) > max_length else "")
+        return title
     return None

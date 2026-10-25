@@ -153,6 +153,38 @@ def test_extract_first_prompt_keeps_user_xml(tmp_path):
     assert extract_first_prompt(str(f)) == "<html><body>帮我看看这个页面布局</body></html>"
 
 
+def test_extract_first_prompt_strips_workbuddy_placeholders(tmp_path):
+    """WorkBuddy 前端的附件/技能/长文本占位符不是用户原话，不能进话题名
+    （真实样本：`@long-text:"开工 M5(B6 主..." <long_text_quote>数千字</long_text_quote>继续吧`）。"""
+    msg = ('@image#1:"局部截取_20261025_180000.png" '
+           '@skill:"C:\\proj\\.workbuddy\\skills\\video-cover\\SKILL.md" '
+           '@long-text:"开工 M5(B6 主..." <long_text_quote>数千字历史摘要</long_text_quote>'
+           "继续吧\n<image_local_path>C:\\Users\\me\\shot.png</image_local_path>")
+    f = tmp_path / "wb.jsonl"
+    f.write_text(json.dumps({"type": "message", "role": "user", "content": [
+        {"type": "text", "text": f"<user_query>{msg}</user_query>"}]}), encoding="utf-8")
+    assert extract_first_prompt(str(f)) == "video-cover 开工 M5(B6 主 继续吧"
+
+
+def test_extract_first_prompt_skips_background_task_event(tmp_path):
+    """后台任务事件整条都是宿主注入（<task-notification> + 英文告示），
+    剥完为空要跳过，取后面的真实提问。"""
+    event = ('\n<task-notification>\n<task-id>1MPqWL</task-id>\n'
+             '<status>completed</status>\n<summary>Background command "pip install"'
+             ' completed</summary>\n</task-notification>\n\n'
+             'Use the TaskOutput tool with task_id="1MPqWL" to retrieve unread output.\n'
+             '[SYSTEM NOTIFICATION - NOT USER INPUT] This is an automated background-task event.')
+    lines = [
+        json.dumps({"type": "message", "role": "user",
+                    "content": [{"type": "input_text", "text": event}]}),
+        json.dumps({"type": "message", "role": "user",
+                    "content": [{"type": "input_text", "text": "接着说正事"}]}),
+    ]
+    f = tmp_path / "wb.jsonl"
+    f.write_text("\n".join(lines), encoding="utf-8")
+    assert extract_first_prompt(str(f)) == "接着说正事"
+
+
 def test_strip_injected_partial_cases():
     """零散注入形态：注入块夹在正文中间、user_query 壳只出现半边、Caveat 前缀。"""
     assert strip_injected(
@@ -161,6 +193,15 @@ def test_strip_injected_partial_cases():
     assert strip_injected("Caveat: 本地命令生成\n\n真实提问") == "真实提问"
     assert strip_injected("<USER_INSTRUCTIONS>\n大写也能剥\n</USER_INSTRUCTIONS>") == ""
     assert strip_injected("普通消息原样保留") == "普通消息原样保留"
+
+
+def test_strip_injected_host_tokens():
+    """@ 占位符只认宿主保留形态；正文里普通以 @ 开头的说法不能误吃。"""
+    assert strip_injected(
+        '这句去掉；@image#2:chrome.exe_20261023_193858.png') == "这句去掉；"
+    assert strip_injected('@"C:/Users/me/录音 (3).txt" 形成一篇教程') == "形成一篇教程"
+    assert strip_injected("@skill:\"C:\\p\\skills\\bili-news-index\\SKILL.md\"") == "bili-news-index"
+    assert strip_injected("正文里 @某人:你好 照原样") == "正文里 @某人:你好 照原样"
 
 
 # ---------------- 桌面队列 ----------------

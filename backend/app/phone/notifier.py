@@ -7,6 +7,7 @@ import logging
 import threading
 
 from .. import task_engines, task_notify
+from ..textclean import clean_title
 from . import config, ntfy
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,8 @@ _STATUS_META = {
     "cancelled": "已取消",
 }
 
+# 标题上限：与 hooks.transcript 的话题名同限，桌面 toast 与 ntfy 都只有一两行
+_TITLE_MAX = 80
 _ERROR_MAX = 200
 # 「AI 最后输出」推送截断，与 hooks.transcript.MAX_LENGTH 同限
 _LAST_OUTPUT_MAX = 1000
@@ -36,7 +39,7 @@ def format_notice(topic: str, type_word: str, app: str, last_output: str = "",
     include_last_output 只给手机推送开：追加「AI 最后输出」段，桌面横幅
     短版不带——1000 字会把系统 toast 撑爆。
     """
-    title = (topic or "").strip() or "a4agent 通知"
+    title = clean_title(topic, _TITLE_MAX) or "a4agent 通知"
     message = f"{type_word}\n{app}"
     last = (last_output or "").strip()
     if include_last_output and last:
@@ -50,6 +53,8 @@ def compose(event: dict, include_last_output: bool = False) -> tuple[str, str]:
 
     下发任务第三行带任务编号（用户决议保留）：任务 #7 · Claude Code；
     OpenCode 会话事件没有编号，第三行就是 OpenCode。
+    标题过一遍 textclean：把 WorkBuddy 里带 @ 占位符的文本粘进下发任务框时，
+    脏标签不会跟着进通知（同时压单行并限长，prompt 可能是一整段）。
     """
     status = str(event.get("status") or "")
     type_word = _STATUS_META.get(status, status or "通知")
@@ -58,7 +63,7 @@ def compose(event: dict, include_last_output: bool = False) -> tuple[str, str]:
         app = label
     else:
         app = f"任务 #{event.get('id')} · {label}"
-    title = str(event.get("prompt") or "").strip() or "a4agent 通知"
+    title = clean_title(str(event.get("prompt") or ""), _TITLE_MAX) or "a4agent 通知"
     message = f"{type_word}\n{app}"
     error = (event.get("error") or "").strip()
     if error and status != "success":

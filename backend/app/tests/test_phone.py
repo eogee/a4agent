@@ -203,6 +203,20 @@ def test_format_notice_fallback_title():
     assert message == "权限申请\nOpenCode"
 
 
+def test_titles_strip_host_markup_and_fit_one_line():
+    """标题来源（会话首条消息 / 下发任务 prompt）可能带宿主占位符，
+    统一过 textclean 压成单行并限长——toast 与 ntfy 标题都只有一两行。"""
+    title, _ = notifier.compose({"id": 3, "tool": "claude", "status": "success",
+                                 "prompt": "@image#1:shot.png 修一下登录页", "error": ""})
+    assert title == "修一下登录页"
+    title, _ = notifier.format_notice(
+        '@long-text:"开工 M5..." <long_text_quote>历史摘要</long_text_quote>继续吧',
+        "已完成", "WorkBuddy")
+    assert title == "开工 M5 继续吧"
+    title, _ = notifier.format_notice("字" * 200, "已完成", "Claude Code")
+    assert len(title) == 83 and title.endswith("...")
+
+
 def test_on_event_disabled_skips(data_dir, monkeypatch):
     delivered = []
     monkeypatch.setattr(notifier, "_deliver", lambda cfg, ev: delivered.append(ev))
