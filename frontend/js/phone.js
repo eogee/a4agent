@@ -355,7 +355,8 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   window.addEventListener('main-tab-changed', function (e) {
-    active = e.detail.index === 6;
+    // 索引 7：循环管理插在「任务下发」之后，通知提醒整体后移一位
+    active = e.detail.index === 7;
     if (active && !loaded) { loaded = true; boot(); }
   });
 });

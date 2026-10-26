@@ -29,7 +29,9 @@ PRECHECK_FAILED = "precheck_failed"
 TERMINAL_STATUSES = {SUCCESS, FAILED, TIMEOUT, CANCELLED, PRECHECK_FAILED}
 
 DEFAULT_TIMEOUT_SECONDS = 600
-MAX_TIMEOUT_SECONDS = 3600
+# 执行层钳制上限 4 小时：循环任务需求（FR-3.3）允许 5 分钟 ~ 4 小时；
+# 手动任务仍由 TaskCreate.timeout_seconds 的 schema（le=3600）压在 1 小时
+MAX_TIMEOUT_SECONDS = 14400
 # 详情接口回传的产出尾部字节上限（全文始终完整落盘）
 OUTPUT_TAIL_BYTES = 200_000
 
@@ -526,6 +528,8 @@ def task_payload(task, include_output: bool = False) -> dict:
         "started_at": _fmt(task.started_at),
         "finished_at": _fmt(task.finished_at),
         "duration_seconds": _duration(task),
+        "loop_id": task.loop_id,
+        "trigger_type": task.trigger_type or "",
     }
     if include_output:
         text = _read_tail(Path(task.output_path)) if task.output_path else ""

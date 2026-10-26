@@ -2312,3 +2312,240 @@ html[lang="en"] .card-actions .layui-btn:not(.i18n-icon-only) {
   min-width: 0;
   padding: 0 10px;
 }
+
+/* ================== 循环管理（定时/间隔无头任务） ================== */
+
+.loops-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.loops-title { font-size: 14px; font-weight: 600; color: #1c1e21; }
+
+.loops-sched {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.loops-sched::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #c03a2f;
+}
+
+.loops-sched.is-on { color: #1f7a63; }
+
+.loops-sched.is-on::before { background: #16baaa; }
+
+.loops-header-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+.loops-list { display: flex; flex-direction: column; gap: 10px; }
+
+.loop-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid #eceff3;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.loop-card.is-paused { opacity: .62; }
+
+.loop-card.is-completed { opacity: .72; }
+
+.loop-card-main { flex: 1; min-width: 0; }
+
+.loop-card-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.loop-name { font-size: 14px; font-weight: 600; color: #1c1e21; }
+
+.loop-card-sched {
+  font-size: 12.5px;
+  color: #1f7a63;
+  margin-bottom: 4px;
+}
+
+.loop-card-sched .loop-cd { color: #8a8e94; }
+
+.loop-card-task {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #3d4044;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.loop-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #8a8e94;
+}
+
+.loop-card-meta .loop-last-bad { color: #b0563a; }
+
+.loop-card-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  flex: none;
+  width: 92px;
+}
+
+.loop-card-actions .layui-btn {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.loop-card-actions .layui-btn + .layui-btn { margin-left: 0; }
+
+/* 卡片里的启停开关：layui 渲染后是 .layui-form-switch，居中放在按钮列顶部 */
+.loop-card-switch { display: flex; justify-content: center; padding: 1px 0 3px; }
+
+.loop-card-switch .layui-form-switch { margin: 0; }
+
+/* ---------- 新建/编辑弹层 ---------- */
+
+.loop-form { padding: 18px 22px 8px; height: 100%; display: flex; flex-direction: column; }
+
+.loop-form-body { flex: 1; min-height: 0; overflow-y: auto; }
+
+.loop-form .layui-form-label { width: 96px; padding: 9px 0; }
+
+.loop-form .layui-input-block { margin-left: 96px; }
+
+.loop-select-wrap { display: inline-block; }
+
+.loop-select-wrap.loop-select-timeout { width: 150px; flex: none; }
+
+.loop-form-engines { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
+
+.loop-form-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.loop-weekdays { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+
+.loop-weekday {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  color: #3d4044;
+  cursor: pointer;
+}
+
+.loop-form-adv {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid #f0f2f4;
+}
+
+.loop-form-risk {
+  margin: 4px 0 10px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #a5680f;
+}
+
+.loop-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ---------- 运行历史 ---------- */
+
+.loop-runs { padding: 14px 18px; }
+
+.loop-runs-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #5b5e63;
+}
+
+.loop-runs-list { display: flex; flex-direction: column; gap: 8px; max-height: 460px; overflow-y: auto; }
+
+.loop-run {
+  border: 1px solid #eceff3;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.loop-run-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.loop-run-trigger {
+  font-size: 11.5px;
+  color: #8a8e94;
+  border: 1px solid #eceff3;
+  border-radius: 100px;
+  padding: 1px 8px;
+}
+
+.loop-run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 12px;
+  color: #8a8e94;
+}
+
+.loop-run-error {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #b0563a;
+  word-break: break-word;
+}
+
+.loop-run-actions { margin-top: 6px; display: flex; gap: 6px; }
+
+.loop-log-view { padding: 14px 18px; }
+
+.loop-log-view pre {
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #f7f8fa;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 520px;
+  overflow: auto;
+}
+
+@media (max-width: 760px) {
+  .loop-card { flex-direction: column; }
+  .loop-card-actions { flex-direction: row; width: auto; }
+  .loop-card-actions .layui-btn { width: auto; }
+}

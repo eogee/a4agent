@@ -144,8 +144,8 @@ def ensure_schema() -> None:
     from sqlalchemy import text
 
     # Skill 管理两张表的补建：对旧库（create_all 时模型尚不存在的情况）兜底
-    from .models import (AgentTask, McpMigration, McpTrash, SkillMigration,
-                         SkillTrash)
+    from .models import (AgentTask, Loop, McpMigration, McpTrash,
+                         SkillMigration, SkillTrash)
 
     Base.metadata.create_all(
         bind=engine,
@@ -155,10 +155,21 @@ def ensure_schema() -> None:
             McpMigration.__table__,
             McpTrash.__table__,
             AgentTask.__table__,
+            Loop.__table__,
         ],
     )
 
     with engine.begin() as conn:
+        # 循环任务沿用任务表存运行记录：旧库补两列来源标记
+        tcols = {row[1] for row in conn.execute(text("PRAGMA table_info(agent_tasks)"))}
+        if tcols:
+            if "loop_id" not in tcols:
+                conn.execute(text("ALTER TABLE agent_tasks ADD COLUMN loop_id INTEGER"))
+            if "trigger_type" not in tcols:
+                conn.execute(
+                    text("ALTER TABLE agent_tasks ADD COLUMN trigger_type VARCHAR(10) DEFAULT ''")
+                )
+
         cols = {row[1] for row in conn.execute(text("PRAGMA table_info(configurations)"))}
         if "targets" not in cols:
             conn.execute(

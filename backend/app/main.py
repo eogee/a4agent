@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import models  # noqa: F401  # 注册模型建表
-from .api.v1 import (configs, desktop, feedback, fs, llama, mcp,
+from .api.v1 import (configs, desktop, feedback, fs, llama, loops, mcp,
                      phone, providers, removal, skills, switch, tasks, update)
 from .database import Base, engine, ensure_schema
 from .logging_config import setup_logging
@@ -60,6 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(feedback.router, prefix="/api/v1", tags=["feedback"])
     app.include_router(llama.router, prefix="/api/v1", tags=["llama"])
     app.include_router(tasks.router, prefix="/api/v1", tags=["tasks"])
+    app.include_router(loops.router, prefix="/api/v1", tags=["loops"])
     app.include_router(removal.router, prefix="/api/v1", tags=["removal"])
     app.include_router(fs.router, prefix="/api/v1", tags=["fs"])
     app.include_router(desktop.router, prefix="/api/v1", tags=["desktop"])
@@ -76,6 +77,10 @@ def create_app() -> FastAPI:
     # WorkBuddy 会话雷达：该端的提问面板不触发 hook（作答后才调），改读会话记录
     from . import workbuddy_listen
     workbuddy_listen.start()
+
+    # 循环任务调度：到点拉起目标 CLI 的无头模式（仅应用运行时调度，关窗即停）
+    from . import loop_scheduler
+    loop_scheduler.start()
 
     # 前端静态资源：开发/桌面运行时由后端统一托管
     frontend_dir = _frontend_dir()

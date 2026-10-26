@@ -1,6 +1,6 @@
 """Pydantic 请求/响应模型。"""
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -221,11 +221,55 @@ class TaskOut(BaseModel):
     started_at: str = ""
     finished_at: str = ""
     duration_seconds: Optional[int] = None
+    loop_id: Optional[int] = None  # 非空 = 循环任务触发的一次运行
+    trigger_type: str = ""  # auto=调度触发 / manual=手动立即执行；普通任务为空
 
 
 class TaskDetail(TaskOut):
     output: str = ""
     output_truncated: bool = False
+
+
+# ---------------- 循环任务 ----------------
+
+class LoopBase(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode)$")
+    task_content: str = Field(min_length=1, max_length=8000)
+    workdir: str = ""
+    schedule_type: str = Field(pattern="^(once|interval|daily|weekly)$")
+    # dict 或 JSON 字符串都吃：服务端用 loop_schedule.parse_config 校验并规范化
+    schedule_config: Any = {}
+    timeout_seconds: int = Field(default=1800, ge=300, le=14400)
+    catch_up: bool = False
+    enabled: bool = True
+
+
+class LoopCreate(LoopBase):
+    pass
+
+
+class LoopUpdate(LoopBase):
+    pass
+
+
+class LoopOut(BaseModel):
+    id: int
+    name: str
+    tool: str
+    tool_label: str
+    task_content: str
+    workdir: str = ""
+    schedule_type: str
+    schedule_config: dict = {}
+    timeout_seconds: int
+    catch_up: bool
+    enabled: bool
+    status: str
+    next_run_at: str = ""
+    last_run_at: str = ""
+    running: bool = False
+    last_run: Optional[dict] = None
 
 
 # ---------------- 应用内反馈 ----------------

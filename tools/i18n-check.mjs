@@ -18,6 +18,7 @@ const FILES = [
   'frontend/js/app.js',
   'frontend/js/llama.js',
   'frontend/js/tasks.js',
+  'frontend/js/loops.js',
   'frontend/js/phone.js',
   'frontend/js/dirpicker.js',
 ];

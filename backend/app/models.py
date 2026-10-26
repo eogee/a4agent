@@ -176,6 +176,38 @@ class AgentTask(Base):
     output_path = Column(String(500), default="")
     precheck_result = Column(Text, default="")  # 预检明细 JSON（步骤/耗时/失败原因）
     precheck_ms = Column(Integer, nullable=True)
+    # 循环任务的运行记录也落这张表：非空 loop_id 即「由循环调度触发的那一次运行」。
+    # 执行器/日志/取消/通知/详情全部复用任务链，循环侧只多这两列来源标记。
+    loop_id = Column(Integer, nullable=True, index=True)
+    trigger_type = Column(String(10), default="")  # auto / manual；普通任务为空
     created_at = Column(DateTime, default=datetime.now)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
+
+
+class Loop(Base):
+    """循环任务：到点由调度线程拉起目标 CLI 的无头模式执行。
+
+    本表只描述「什么时候、用谁、做什么」；每次执行的运行记录是一条带
+    loop_id 的 AgentTask，不另建运行表（见 AgentTask.loop_id）。
+    schedule_config 是 JSON 字符串，结构与 next_run 计算同处
+    app.loop_schedule，写入前由 API 层校验。
+    """
+
+    __tablename__ = "loops"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    tool = Column(String(20), nullable=False)
+    task_content = Column(Text, nullable=False)
+    workdir = Column(String(500), default="")
+    schedule_type = Column(String(20), nullable=False)  # once / interval / daily / weekly
+    schedule_config = Column(String(500), default="{}")  # {"run_at"}/{"minutes"}/{"time"}/{"weekdays":[],"time"}
+    timeout_seconds = Column(Integer, default=1800)  # 默认 30 分钟，5 分钟 ~ 4 小时
+    catch_up = Column(Boolean, default=False)  # 启动时是否补跑错过的触发
+    enabled = Column(Boolean, default=True)
+    status = Column(String(20), default="active")  # active / paused / completed
+    next_run_at = Column(DateTime, nullable=True, index=True)  # 调度扫描依据
+    last_run_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
