@@ -224,8 +224,16 @@ def _child_env(tool: str):
 
 def _run_cli(task, path: Path, timeout: int, mount_info=None) -> tuple:
     """跑一次 CLI：stdout/stderr 直接落盘，超时杀整棵进程树。返回 (退出码, 是否超时)。"""
+    workdir = (task.working_dir or "").strip()
+    # 默认在工作目录=用户主目录跑：留空会继承 a4agent 自己的进程目录
+    # （开发时是仓库、打包后是安装目录），引擎会在那里读到不该读的项目配置
+    cwd = workdir or str(Path.home())
+    # 目录参数与 Popen 的 cwd 必须同值（方案 §6.3 约束 1）：两边都只看 workdir；
+    # 未选工作目录时传 None，不把 home 塞进 argv（各端默认行为就是 home，显式
+    # 授权主目录只会让命令更长、日志更难读）。build_argv 内部逻辑不动（约束 3）。
     # 前缀只在本次拼接，**绝不写回 task.prompt**：详情与复跑要用原文（方案 §7.2）
-    argv = task_engines.build_argv(task.tool, _prompt_with_skills(task, mount_info))
+    prompt = _prompt_with_skills(task, mount_info)
+    argv = task_engines.build_argv(task.tool, prompt, workdir or None)
     # 默认在工作目录=用户主目录跑：留空会继承 a4agent 自己的进程目录
     # （开发时是仓库、打包后是安装目录），引擎会在那里读到不该读的项目配置
     cwd = (task.working_dir or "").strip() or str(Path.home())

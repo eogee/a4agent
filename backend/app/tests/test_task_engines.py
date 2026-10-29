@@ -63,6 +63,39 @@ def test_build_argv_matrix(monkeypatch):
     assert dsh == ["dsh", "--profile", "headless", "写个测试"]
 
 
+def test_build_argv_carries_working_dir(monkeypatch):
+    """§6.1：四个端各自把工作目录放进 argv；dsh / pi 无目录参数（靠 cwd）。
+
+    _run_cli 长期漏传 working_dir，这四个分支一直走空——所以这里必须逐端断言，
+    且断言参数值就是传进去的那个字符串（不是「有参数」就算通过）。
+    """
+    monkeypatch.setattr(task_engines.shutil, "which", lambda name: name)
+    monkeypatch.setattr(task_engines, "foreign_plugin_ids", lambda path=None: [])
+    workdir = r"C:\proj\示例 项目"
+
+    claude = task_engines.build_argv("claude", "P", workdir)
+    assert claude[claude.index("--add-dir") + 1] == workdir
+
+    codex = task_engines.build_argv("codex", "P", workdir)
+    assert codex[codex.index("-C") + 1] == workdir
+
+    zcode = task_engines.build_argv("zcode", "P", workdir)
+    assert zcode[zcode.index("--cwd") + 1] == workdir
+
+    qoder = task_engines.build_argv("qoder", "P", workdir)
+    assert qoder[qoder.index("-w") + 1] == workdir
+
+    dir_flags = {"--add-dir", "-C", "--cwd", "-w"}
+    for tool in ("dsh", "pi"):
+        argv = task_engines.build_argv(tool, "P", workdir)
+        assert not (dir_flags & set(argv)), f"{tool} 不该带目录参数：{argv}"
+
+    # 未传工作目录时，任何端都不得凭空加上目录参数
+    for tool in ("claude", "codex", "zcode", "qoder", "dsh", "pi"):
+        argv = task_engines.build_argv(tool, "P")
+        assert not (dir_flags & set(argv)), f"{tool} 空工作目录却带了目录参数：{argv}"
+
+
 # ---------------- dsh headless 外部插件屏蔽 ----------------
 
 
