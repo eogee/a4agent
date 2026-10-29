@@ -18,6 +18,7 @@
 Python 版本上限 3.10（venv 实测 3.10.18），不要用 3.11+ 的语法与标准库。
 """
 import json
+import locale
 import logging
 import os
 import shutil
@@ -272,15 +273,23 @@ def _mount_one(task_id, tool: str, target_root: Path, ref: dict, links: dict, kn
     if info is None:
         raise SkillMountError(f"技能「{name or dir_name}」的 {skill_manager.SKILL_FILE} 不可读，请重新选择")
 
-    # 归一化只按 description 判定（附录 C3）：缺 description / 为空 → 跳过并提示。
-    # name 不合规（大写/中文/空格/下划线/bad--name）只作提示、不阻断、不改名——
-    # pi 1.0.2 实测对不合规 name 只告警照常加载，pi_skill_notice() 的返回值不能
-    # 当阻断条件（它对合规名也会报「不会加载」）。
+    # 归一化只按 description 判定（附录 C3），但**阻断范围只到实测覆盖的两个端**：
+    # pi 1.0.2 对不合规 name 只告警照常加载，唯一硬拦截是缺 description；OpenCode 同口径。
+    # 其余端缺 description 时能否加载**未测**（附录 C3「批 1 复核补注」2026-10-30 明确
+    # 实测证据只覆盖 pi / OpenCode）。未测的事不能拿推断去阻断——一阻断就等于替用户丢掉
+    # 他自己选的技能，而静默注入又会让用户以为「配了就生效」。故「照常注入 + 往 notices
+    # 记一条提示」是唯一合规的中间态：既不误伤、也不无声。
+    # 另：name 不合规（大写/中文/空格/下划线/bad--name）只作提示、不阻断、不改名，因为
+    # pi_skill_notice() 的返回值不能当阻断条件（它对合规名也会报「不会加载」）。
     if not str(info.get("description") or "").strip():
-        links["skipped_invalid"].append(
-            {"name": name or dir_name, "reason": "frontmatter 缺少非空 description，模型端不会使用该技能"}
+        if tool in ("pi", "opencode"):
+            links["skipped_invalid"].append(
+                {"name": name or dir_name, "reason": "frontmatter 缺少非空 description，模型端不会使用该技能"}
+            )
+            return
+        links["notices"].append(
+            {"name": name or dir_name, "message": "缺少 description，可能不会被该端加载"}
         )
-        return
 
     notice = _end_notice(tool, source)
     if notice:
@@ -379,6 +388,9 @@ def _mklink(dest: Path, source: Path) -> tuple:
     """建目录联接（Windows）/ 目录符号链接（其他平台），返回 (退出码, 输出)。
 
     argv 列表传参、不拼字符串：链接名与路径含中文或空格时同样成立。
+    输出按**系统本地编码**解码：mklink 的提示语（「拒绝访问。」「系统找不到指定的
+    路径。」）在中文 Windows 上是 mbcs/GBK，按 utf-8 解会变成乱码——而附录 C1.3
+    规定文案只进日志（判据只看 returncode），日志乱码等于这条设计失去意义。
     """
     if os.name == "nt":
         argv = ["cmd", "/c", "mklink", "/J", str(dest), str(source)]
@@ -387,7 +399,7 @@ def _mklink(dest: Path, source: Path) -> tuple:
                 argv,
                 capture_output=True,
                 text=True,
-                encoding="utf-8",
+                encoding=locale.getpreferredencoding(False),
                 errors="replace",
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )

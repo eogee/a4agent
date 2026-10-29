@@ -156,16 +156,6 @@ def test_mount_global_skill_into_project(env):
     ).scalar()
     assert json.loads(stored)["created"][0]["path"] == str(root / "pdf")
 
-    # 归一化只按 description 拦（附录 C3）：缺 description 只跳过、不报错
-    bare = env.global_root / "claude" / "bare"
-    bare.mkdir()
-    (bare / "SKILL.md").write_text("---\nname: bare\n---\n# 正文\n", encoding="utf-8")
-    task2 = _new_task(db, [_ref(bare, name="bare", dir_name="bare")], workdir=env.workdir)
-    links2 = task_skills.mount(task2, db)
-    assert links2["created"] == []
-    assert links2["skipped_invalid"][0]["name"] == "bare"
-    assert not os.path.lexists(str(root / "bare"))
-
     task_skills.unmount(task.id, db)
     db.close()
 
@@ -398,4 +388,59 @@ def test_second_task_takes_over_existing_owned_link(env):
     assert os.path.lexists(str(dest))
     task_skills.unmount(second.id, db)
     assert not os.path.lexists(str(dest))
+    db.close()
+
+
+# ---------------- 附录 C3 批 1 复核补注：阻断范围只到 pi / opencode ----------------
+
+
+def _make_bare_skill(parent: Path) -> Path:
+    """造一个**缺 description** 的 skill bundle。"""
+    skill_dir = parent / "bare"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: bare\n---\n# 正文\n", encoding="utf-8")
+    return skill_dir
+
+
+def test_mount_missing_description_still_injects_on_untested_tool(env):
+    """claude 端未实测：缺 description 照常注入，只记一条 notices 提示（不阻断）。
+
+    依据：附录 C3 表格「其余端」行 + 批 1 复核补注（未测不得阻断）。
+    """
+    db = env.maker()
+    bare = _make_bare_skill(env.global_root / "claude")
+    task = _new_task(db, [_ref(bare, name="bare", dir_name="bare")], tool="claude",
+                     workdir=env.workdir)
+
+    links = task_skills.mount(task, db)
+
+    dest = env.workdir / ".claude" / "skills" / "bare"
+    assert dest.is_dir()  # 目录必须真建出来
+    assert skill_manager.read_skill(dest)["name"] == "bare"
+    assert len(links["created"]) == 1
+    assert links["created"][0]["path"] == str(dest)
+    assert links["skipped_invalid"] == []  # 不阻断
+    assert [n["name"] for n in links["notices"]] == ["bare"]
+    assert "description" in links["notices"][0]["message"]
+
+    task_skills.unmount(task.id, db)
+    assert not os.path.lexists(str(dest))
+    db.close()
+
+
+def test_mount_missing_description_skips_on_pi_without_creating_root(env):
+    """pi 端已实测：缺 description 跳过（skipped_invalid），且不建目录、不建空根。"""
+    db = env.maker()
+    bare = _make_bare_skill(env.global_root / "claude")
+    task = _new_task(db, [_ref(bare, name="bare", dir_name="bare")], tool="pi",
+                     workdir=env.workdir)
+
+    links = task_skills.mount(task, db)
+
+    assert [item["name"] for item in links["skipped_invalid"]] == ["bare"]
+    assert links["created"] == []
+    assert links["root_created"] is False
+    assert not os.path.lexists(str(env.workdir / ".pi" / "skills" / "bare"))
+    assert not (env.workdir / ".pi").exists()  # 不为它单独建出 .pi / skills 空根
+    assert list(env.workdir.iterdir()) == []
     db.close()
