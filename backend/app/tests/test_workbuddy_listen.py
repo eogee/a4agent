@@ -122,7 +122,7 @@ def test_truncated_file_restarts_without_crash(session_file):
 def test_history_before_startup_not_replayed(session_file):
     path, queued = session_file
     radar.scan_once()
-    stale = _now_ms() - radar._HISTORY_SKIP_MS - 60_000
+    stale = radar._started_ms - radar._HISTORY_SKIP_MS - 60_000
     _append(path, _call(ts=stale))
     assert radar.scan_once() == 0
     assert queued == []
