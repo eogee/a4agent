@@ -183,10 +183,6 @@ def sweep() -> dict:
     cleaned = failed = 0
     db = SessionLocal()
     try:
-        if not _has_links_column(db):
-            # 批 1 尚未给 agent_tasks 补 skill_links 列（批 2 补），此时不存在残留。
-            logger.warning("agent_tasks 缺少 skill_links 列，跳过本次 skill 清扫")
-            return {"cleaned": 0, "failed": 0}
         statuses = ", ".join(f"'{s}'" for s in TERMINAL_STATUSES)
         rows = db.execute(
             text(
@@ -553,44 +549,18 @@ def _parse_links(raw: str) -> dict:
 
 
 def _read_links(db, task) -> str:
-    """读 skill_links：优先 ORM 属性，其次按 id 直查（批 2 映射前属性不在实例上）。"""
     raw = getattr(task, "skill_links", None)
-    if isinstance(raw, str):
-        return raw
-    task_id = getattr(task, "id", None)
-    if task_id is None or not _has_links_column(db):
-        return ""
-    row = db.execute(
-        text("SELECT skill_links FROM agent_tasks WHERE id = :i"), {"i": task_id}
-    ).first()
-    return (row[0] or "") if row else ""
+    return raw if isinstance(raw, str) else ""
 
 
 def _write_links(db, task, value: str) -> None:
     """把 skill_links 写进任务行并**立即 commit**（方案 §5.5）。
 
-    批 2 给模型补上映射列后，setattr + commit 就是唯一路径；批 1 阶段该列尚未
-    映射在 ORM 上，需要额外一条 UPDATE 才能真落库（测试按批 2 的列结构建库）。
+    这一列已在 models 里映射、由 ensure_schema 给旧库补齐（批 2），所以
+    setattr + commit 就是唯一路径。
     """
     task.skill_links = value
-    task_id = getattr(task, "id", None)
-    if task_id is not None and "skill_links" not in models.AgentTask.__table__.columns:
-        if _has_links_column(db):
-            db.execute(
-                text("UPDATE agent_tasks SET skill_links = :v WHERE id = :i"),
-                {"v": value, "i": task_id},
-            )
-        else:
-            logger.warning("agent_tasks 尚无 skill_links 列，回收依据只存在进程内（批 2 补列后落库）")
     db.commit()
-
-
-def _has_links_column(db) -> bool:
-    try:
-        rows = db.execute(text("PRAGMA table_info(agent_tasks)")).fetchall()
-    except Exception:  # noqa: BLE001 - 非 SQLite / 连接异常时按「没有该列」处理
-        return False
-    return any(row[1] == "skill_links" for row in rows)
 
 
 # ---------------- 杂项 ----------------

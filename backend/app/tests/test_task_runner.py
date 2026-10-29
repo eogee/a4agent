@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.app import task_engines, task_notify, task_runner
+from backend.app import task_engines, task_notify, task_runner, task_skills
 from backend.app.database import Base
 from backend.app.models import AgentTask
 
@@ -18,9 +18,13 @@ def _reset_runner_globals():
     是模块级单例——前一个文件的取消测试留下的残留会把这里同 id 的任务误判为取消。"""
     task_runner._cancelled.clear()
     task_runner._shutdown_reason.clear()
+    task_skills._skill_refs.clear()
+    task_skills._skill_kinds.clear()
     yield
     task_runner._cancelled.clear()
     task_runner._shutdown_reason.clear()
+    task_skills._skill_refs.clear()
+    task_skills._skill_kinds.clear()
 
 
 @pytest.fixture()
@@ -30,6 +34,8 @@ def env(tmp_path, monkeypatch):
     Base.metadata.create_all(engine)
     maker = sessionmaker(bind=engine)
     monkeypatch.setattr(task_runner, "SessionLocal", maker)
+    # task_skills 在 finally 里用独立 session 回收：不换掉就会摸到开发机真实库
+    monkeypatch.setattr(task_skills, "SessionLocal", maker)
     events = []
     monkeypatch.setattr(task_notify, "notify", lambda event: events.append(event))
     yield SimpleNamespace(maker=maker, events=events, tmp=tmp_path)

@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
-from . import opencode_client, task_engines, task_notify
+from . import opencode_client, task_engines, task_notify, task_skills
 from .database import SessionLocal, get_data_dir
 from .models import AgentTask
 
@@ -126,12 +126,24 @@ def _execute(task_id: int) -> None:
             db.commit()
             return
 
+        # 技能注入：插在 _cancelled 早退之后（已取消的任务不该在工作目录里建任何
+        # 东西）、output_path_for 之前，且必须早于拉起进程——各端只在进程启动时
+        # 扫一次 skill（方案 §7.1 + 附录 C4.1）。mount 内部会独立 commit 一次。
+        try:
+            mount_info = task_skills.mount(task, db)
+        except task_skills.SkillMountError as e:
+            task.status = FAILED
+            task.error_summary = f"技能挂载失败：{e}"
+            task.finished_at = datetime.now()
+            db.commit()
+            return  # 注入失败不拉起进程
+
         path = output_path_for(task.tool, task.id)
         timeout = _clamp_timeout(task.timeout_seconds)
         if task.tool in task_engines.HTTP_ENGINES:
-            parsed, exit_code, timed_out = _run_http(task, path, timeout)
+            parsed, exit_code, timed_out = _run_http(task, path, timeout, mount_info)
         else:
-            exit_code, timed_out = _run_cli(task, path, timeout)
+            exit_code, timed_out = _run_cli(task, path, timeout, mount_info)
             content = _read_tail(path)
             parsed = task_engines.parse_output(task.tool, content, exit_code)
 
@@ -177,6 +189,12 @@ def _execute(task_id: int) -> None:
             task.finished_at = datetime.now()
             db.commit()
     finally:
+        try:
+            # 回收点（方案 §7.3）：独立 session（不传主 session，避免受主事务回滚
+            # 影响），异常自己吞并记日志——**绝不改任务状态**，删不掉留给启动 sweep。
+            task_skills.unmount(task_id)
+        except Exception:  # noqa: BLE001 - 回收失败不得影响已落库的终态
+            logger.exception("回收任务 #%s 的技能链接异常", task_id)
         _cancelled.discard(task_id)
         db.close()
 
@@ -204,9 +222,10 @@ def _child_env(tool: str):
     return env
 
 
-def _run_cli(task, path: Path, timeout: int) -> tuple:
+def _run_cli(task, path: Path, timeout: int, mount_info=None) -> tuple:
     """跑一次 CLI：stdout/stderr 直接落盘，超时杀整棵进程树。返回 (退出码, 是否超时)。"""
-    argv = task_engines.build_argv(task.tool, task.prompt)
+    # 前缀只在本次拼接，**绝不写回 task.prompt**：详情与复跑要用原文（方案 §7.2）
+    argv = task_engines.build_argv(task.tool, _prompt_with_skills(task, mount_info))
     # 默认在工作目录=用户主目录跑：留空会继承 a4agent 自己的进程目录
     # （开发时是仓库、打包后是安装目录），引擎会在那里读到不该读的项目配置
     cwd = (task.working_dir or "").strip() or str(Path.home())
@@ -243,6 +262,52 @@ def _run_cli(task, path: Path, timeout: int) -> tuple:
     return (int(proc.returncode or 0) if proc.returncode is not None else -1), timed_out
 
 
+def _prompt_with_skills(task, mount_info) -> str:
+    """按注入结果给 prompt 拼技能前缀（只用于本次调用，不落 task.prompt）。
+
+    - 真的挂进工作目录了（含「同名已有、本次让路」）→ 用 prompt_prefix 的标准措辞
+    - 没有工作目录（no_workdir，方案 §5.3 不注入）→ 降级措辞，说明只是建议
+    - 其它情况（未选技能 / 全被归一化跳过）→ 不加前缀，保持原文
+    """
+    if not mount_info:
+        return task.prompt or ""
+    names = [str(item.get("name") or "").strip() for item in mount_info.get("created") or []]
+    # skipped_existing 的目标目录确实存在（用户自己装的那份），对模型是可用技能
+    names += [str(name or "").strip() for name in mount_info.get("skipped_existing") or []]
+    names = [name for name in names if name]
+    if names:
+        return task_skills.prompt_prefix([{"name": name} for name in names]) + (task.prompt or "")
+    if str(mount_info.get("skipped_reason") or "") == "no_workdir":
+        wanted = _skill_names(task)
+        if wanted:
+            return (
+                f"本次建议使用的技能：{'、'.join(wanted)}"
+                "（未注入到工作目录，可能不会被自动加载）。\n\n"
+            ) + (task.prompt or "")
+    return task.prompt or ""
+
+
+def _skill_names(task) -> list:
+    """读 task.skills 快照里的技能名（不依赖注入结果，no_workdir 降级措辞要用）。"""
+    raw = getattr(task, "skills", "") or ""
+    if isinstance(raw, str):
+        if not raw.strip():
+            return []
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return []
+    if not isinstance(raw, list):
+        return []
+    names = []
+    for item in raw:
+        if isinstance(item, dict):
+            name = str(item.get("name") or item.get("dir_name") or "").strip()
+            if name:
+                names.append(name)
+    return names
+
+
 def _looks_like_empty_rejection(messages: list) -> bool:
     """空会话失败：只有 user 原文 + idle{failed}，没有任何 assistant 消息。
 
@@ -274,18 +339,22 @@ def _model_rejected(parsed: dict, messages: list | None = None) -> bool:
 
 
 def _run_http_once(task, path: Path, timeout: int, model: dict | None,
-                   base: str, password: str) -> tuple[dict, str, int, bool, list]:
+                   base: str, password: str, mount_info=None) -> tuple[dict, str, int, bool, list]:
     """跑一次 HTTP 会话任务。
 
     返回 (parsed, sessionID, exit_code, timed_out, messages)；messages 一并回传
     是为了让调用方能识别「空会话失败」这一形态（换模型重试需要它）。
+
+    OpenCode 的 prompt 组装点是 create_session（会话建好后 prompt 就固定了，
+    与 CLI 一样没有第二次机会），所以技能前缀在这里按与 _run_cli 完全相同的
+    口径拼：同样不写回 task.prompt。
     """
     directory = (task.working_dir or "").strip() or None
     timed_out = False
     sid = ""
     try:
         sid = opencode_client.create_session(
-            task.prompt, directory=directory, model=model,
+            _prompt_with_skills(task, mount_info), directory=directory, model=model,
             base_url=base, password=password,
         )
     except opencode_client.OpenCodeError as e:
@@ -340,7 +409,7 @@ def _run_http_once(task, path: Path, timeout: int, model: dict | None,
             logger.info("OpenCode 会话 %s 未删除（可能已不存在）", sid)
 
 
-def _run_http(task, path: Path, timeout: int) -> tuple[dict, int, bool]:
+def _run_http(task, path: Path, timeout: int, mount_info=None) -> tuple[dict, int, bool]:
     """HTTP 引擎（OpenCode）：建会话 → 等空闲 → 导出产出，必要时换模型重试。
 
     与 _run_cli 的差异只有一处：没有子进程，所以「取消」不是杀进程树，而是
@@ -357,7 +426,7 @@ def _run_http(task, path: Path, timeout: int) -> tuple[dict, int, bool]:
     """
     base, password = opencode_client.resolve_connection()
     parsed, _sid, exit_code, timed_out, messages = _run_http_once(
-        task, path, timeout, None, base, password)
+        task, path, timeout, None, base, password, mount_info)
     if parsed.get("ok") or not _model_rejected(parsed, messages):
         return (parsed, exit_code, timed_out)
     # 用户已取消 / 已超时 → 换模型重跑没有意义
@@ -372,7 +441,7 @@ def _run_http(task, path: Path, timeout: int) -> tuple[dict, int, bool]:
         logger.info("OpenCode 任务 #%s：默认模型不可用，换 %s 重试",
                     task.id, f"{model['providerID']}/{model['id']}")
         parsed, _sid, exit_code, timed_out, messages = _run_http_once(
-            task, path, timeout, model, base, password)
+            task, path, timeout, model, base, password, mount_info)
         if parsed.get("ok") or not _model_rejected(parsed, messages):
             return (parsed, exit_code, timed_out)
     return (parsed, exit_code, timed_out)
