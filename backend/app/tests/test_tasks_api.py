@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.app import task_engines, task_precheck, task_runner
+from backend.app import skill_manager, task_engines, task_precheck, task_runner
 from backend.app.api.v1 import tasks as tasks_api
 from backend.app.crypto import encrypt_text
 from backend.app.database import Base
@@ -199,3 +199,112 @@ def test_delete_refuses_running_and_removes_output_file(db, tmp_path):
     assert tasks_api.delete_task(done.id, db=db) == {"deleted": done.id}
     assert not out.exists()
     assert db.get(AgentTask, done.id) is None
+
+
+# ---------------- 技能：校验与快照（方案 §8） ----------------
+
+
+def _skill_root(tmp_path, monkeypatch):
+    """把「已知 skill 根」指到一个临时目录（别扫开发机），返回该根。"""
+    root = tmp_path / "skills" / "claude"
+    root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(skill_manager, "all_known_skill_roots", lambda: [root])
+    return root
+
+
+def _make_skill(root, dir_name="pdf", name="pdf"):
+    skill_dir = root / dir_name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: 处理 PDF\n---\n# 正文\n", encoding="utf-8"
+    )
+    return skill_dir
+
+
+def test_create_task_stores_skill_snapshot(db, tmp_path, monkeypatch):
+    _seed_config(db)
+    root = _skill_root(tmp_path, monkeypatch)
+    src = _make_skill(root)
+    body = tasks_api.schemas.TaskCreate(
+        prompt="整理 PDF", tool="pi",
+        skills=[tasks_api.schemas.SkillRef(
+            name="pdf", source_tool="claude", source_scope="global", source_path=str(src),
+        )],
+    )
+
+    out = tasks_api.create_task(body, db=db)
+
+    row = db.get(AgentTask, out["id"])
+    snapshot = json.loads(row.skills)
+    assert snapshot == [{
+        "name": "pdf",
+        "dir_name": "pdf",
+        "source_tool": "claude",
+        "source_scope": "global",
+        "source_project": "",
+        "source_path": str(src),
+    }]
+    # 快照同时回给前端（TaskOut.skills 只保留 §4.2 的字段）
+    assert out["skills"][0]["name"] == "pdf"
+
+
+def test_create_task_without_skills_keeps_column_empty(db):
+    _seed_config(db)
+    out = tasks_api.create_task(_body(), db=db)
+    assert db.get(AgentTask, out["id"]).skills == ""
+    assert out["skills"] == []
+
+
+def test_create_task_rejects_skill_path_outside_known_roots(db, tmp_path, monkeypatch):
+    _seed_config(db)
+    _skill_root(tmp_path, monkeypatch)
+    outside = _make_skill(tmp_path / "elsewhere")
+    body = tasks_api.schemas.TaskCreate(
+        prompt="x", tool="pi",
+        skills=[tasks_api.schemas.SkillRef(name="pdf", source_path=str(outside))],
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        tasks_api.create_task(body, db=db)
+    assert exc.value.status_code == 422
+    assert "不在允许" in exc.value.detail
+    assert db.query(AgentTask).count() == 0
+
+
+def test_create_task_rejects_missing_skill(db, tmp_path, monkeypatch):
+    """源在已知根内但已删掉（没 SKILL.md）→ 422，提示重新选择。"""
+    _seed_config(db)
+    root = _skill_root(tmp_path, monkeypatch)
+    ghost = root / "ghost"
+    ghost.mkdir()
+    body = tasks_api.schemas.TaskCreate(
+        prompt="x", tool="pi",
+        skills=[tasks_api.schemas.SkillRef(name="ghost", source_path=str(ghost))],
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        tasks_api.create_task(body, db=db)
+    assert exc.value.status_code == 422
+    assert "已不存在" in exc.value.detail
+    assert db.query(AgentTask).count() == 0
+
+
+def test_create_task_rejects_too_many_skills():
+    """数量上限 20 由 schema 拦（方案 §4.2）。"""
+    refs = [{"name": f"s{i}"} for i in range(21)]
+    with pytest.raises(Exception):
+        tasks_api.schemas.TaskCreate(prompt="x", tool="pi", skills=refs)
+
+
+def test_detail_exposes_skill_links_summary(db, tmp_path):
+    row = AgentTask(
+        prompt="带技能", tool="pi", status=task_runner.SUCCESS, timeout_seconds=600,
+        output_path="", skills=json.dumps([{"name": "pdf", "dir_name": "pdf"}], ensure_ascii=False),
+        skill_links="",
+    )
+    db.add(row)
+    db.commit()
+
+    detail = tasks_api.task_detail(row.id, db=db)
+    assert detail["skills"] == [{"name": "pdf", "dir_name": "pdf"}]
+    assert detail["skill_links"] == {}

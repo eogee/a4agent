@@ -607,12 +607,39 @@ def task_payload(task, include_output: bool = False) -> dict:
         "duration_seconds": _duration(task),
         "loop_id": task.loop_id,
         "trigger_type": task.trigger_type or "",
+        "skills": _skills_of(task),
     }
     if include_output:
         text = _read_tail(Path(task.output_path)) if task.output_path else ""
         data["output"] = text
         data["output_truncated"] = len(text) >= OUTPUT_TAIL_BYTES
+        # 详情额外给回收依据摘要，便于排查残留（方案 §8）；列表不带
+        data["skill_links"] = _links_of(task)
     return data
+
+
+def _skills_of(task) -> list:
+    """任务行的 skills 快照（下发时写入的 JSON 数组）；坏数据按「没选技能」处理。"""
+    raw = task.skills or ""
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return []
+    return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
+
+def _links_of(task) -> dict:
+    """任务行的 skill_links（回收依据 JSON）；空串 = 当前没有需要回收的条目。"""
+    raw = task.skill_links or ""
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _precheck_of(task) -> dict:

@@ -1,4 +1,5 @@
 """FastAPI 应用入口（含静态文件托管）。"""
+import logging
 import sys
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from .seed import seed_providers
 from .version import current_version
 
 setup_logging()
+logger = logging.getLogger(__name__)
 
 
 def _frontend_dir() -> Path:
@@ -81,6 +83,18 @@ def create_app() -> FastAPI:
     # 循环任务调度：到点拉起目标 CLI 的无头模式（仅应用运行时调度，关窗即停）
     from . import loop_scheduler
     loop_scheduler.start()
+
+    # 任务级 skill 的启动清扫（方案 §7.4）：兜住崩溃/强杀留下的链接残留。
+    # 同步跑一次即可（任务表通常几十到几百行），失败只记日志——清扫失败不能让
+    # 应用起不来，残留下次启动还会被再扫一遍。
+    from . import task_skills
+    try:
+        swept = task_skills.sweep()
+        logger.info(
+            "任务级 skill 清扫：清理 %s 条，失败 %s 条", swept.get("cleaned", 0), swept.get("failed", 0)
+        )
+    except Exception:  # noqa: BLE001 - 清扫异常不得阻断启动
+        logger.exception("任务级 skill 清扫失败（已忽略）")
 
     # 前端静态资源：开发/桌面运行时由后端统一托管
     frontend_dir = _frontend_dir()
