@@ -271,6 +271,31 @@ def test_create_task_rejects_skill_path_outside_known_roots(db, tmp_path, monkey
     assert db.query(AgentTask).count() == 0
 
 
+def test_create_task_accepts_skill_in_workdir_project_root(db, tmp_path, monkeypatch):
+    """工作目录里的项目级 skill（该目录没登记进 projects.json）必须放行。
+
+    注入层把「本任务工作目录的项目级根」也算已知根，下发校验若只看
+    all_known_skill_roots()，两层就一个收一个拒（方案 §6.3 同一口径）。
+    """
+    _seed_config(db)
+    _skill_root(tmp_path, monkeypatch)          # 全局根指到别处，确保不是它在放行
+    workdir = tmp_path / "proj"
+    src = _make_skill(workdir / ".claude" / "skills", dir_name="mine", name="mine")
+    body = tasks_api.schemas.TaskCreate(
+        prompt="用本地技能", tool="pi", working_dir=str(workdir),
+        skills=[tasks_api.schemas.SkillRef(
+            name="mine", source_tool="claude", source_scope="project",
+            source_path=str(src),
+        )],
+    )
+
+    out = tasks_api.create_task(body, db=db)
+
+    snapshot = json.loads(db.get(AgentTask, out["id"]).skills)
+    assert snapshot[0]["dir_name"] == "mine"
+    assert snapshot[0]["source_path"] == str(src)
+
+
 def test_create_task_rejects_missing_skill(db, tmp_path, monkeypatch):
     """源在已知根内但已删掉（没 SKILL.md）→ 422，提示重新选择。"""
     _seed_config(db)

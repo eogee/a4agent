@@ -21,7 +21,7 @@ router = APIRouter(prefix="/tasks")
 MAX_TASK_SKILLS = 20  # 与 schemas.TaskCreate.skills 的 max_length 同值（方案 §4.2）
 
 
-def _skill_snapshot(skills: list) -> list:
+def _skill_snapshot(skills: list, workdir: str = "") -> list:
     """校验所选技能并生成入库快照（方案 §8，全部在建行之前，失败回 422）。
 
     只做「名字非空 + 来源路径合法且可读」这类**零副作用**校验；不做试挂载
@@ -31,7 +31,18 @@ def _skill_snapshot(skills: list) -> list:
         return []
     if len(skills) > MAX_TASK_SKILLS:
         raise HTTPException(422, f"一次最多选择 {MAX_TASK_SKILLS} 个技能")
+    # 两层必须同一口径：这里放行的来源，注入层（task_skills._known_roots）也必须认。
+    # 注入层的根 = 全局 + 已注册项目 + **本任务工作目录**的项目级根，最后一项不在
+    # all_known_skill_roots() 里（工作目录可能没登记进 projects.json），必须并上，
+    # 否则工作目录里的项目级 skill 会被我们判 422 而注入层照收；复跑历史任务时
+    # 快照里的 source_path 指向任务自己的工作目录，同理会被自己拒掉。
     known = [skill_manager._normkey(root) for root in skill_manager.all_known_skill_roots()]
+    if workdir:
+        try:
+            known += [skill_manager._normkey(root)
+                      for root in skill_manager.project_skill_roots(Path(workdir)).values()]
+        except Exception:  # noqa: BLE001 - 目录异常时只是少放行，不能因此 500
+            pass
     snapshot = []
     for ref in skills:
         name = (ref.name or "").strip()
@@ -97,7 +108,7 @@ def create_task(body: schemas.TaskCreate, db: Session = Depends(get_db)):
             raise HTTPException(422, f"工作目录不存在或不是文件夹：{working_dir}")
         working_dir = str(folder)
     # 技能校验在建行之前（失败 422、不入库）；通过后把快照 JSON 存进任务行
-    skills = _skill_snapshot(body.skills)
+    skills = _skill_snapshot(body.skills, workdir=working_dir)
     active = crud.get_active_config(db)
     # HTTP 引擎（OpenCode）自带自己的模型与凭据体系（用户在 OpenCode 里配），
     # 不走 a4agent 的配置方案：要求用户先切换一个生效方案，对它毫无意义，

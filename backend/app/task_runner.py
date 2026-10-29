@@ -234,9 +234,6 @@ def _run_cli(task, path: Path, timeout: int, mount_info=None) -> tuple:
     # 前缀只在本次拼接，**绝不写回 task.prompt**：详情与复跑要用原文（方案 §7.2）
     prompt = _prompt_with_skills(task, mount_info)
     argv = task_engines.build_argv(task.tool, prompt, workdir or None)
-    # 默认在工作目录=用户主目录跑：留空会继承 a4agent 自己的进程目录
-    # （开发时是仓库、打包后是安装目录），引擎会在那里读到不该读的项目配置
-    cwd = (task.working_dir or "").strip() or str(Path.home())
     timed_out = False
     env = _child_env(task.tool)
     with path.open("wb") as sink:
