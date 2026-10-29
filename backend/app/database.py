@@ -169,6 +169,16 @@ def ensure_schema() -> None:
                 conn.execute(
                     text("ALTER TABLE agent_tasks ADD COLUMN trigger_type VARCHAR(10) DEFAULT ''")
                 )
+            # 任务级 skill（方案 §4.3）：旧库历史行 skills 为空串，行为与今天一致
+            if "skills" not in tcols:
+                conn.execute(text("ALTER TABLE agent_tasks ADD COLUMN skills TEXT DEFAULT ''"))
+            if "skill_links" not in tcols:
+                conn.execute(text("ALTER TABLE agent_tasks ADD COLUMN skill_links TEXT DEFAULT ''"))
+
+        lcols = {row[1] for row in conn.execute(text("PRAGMA table_info(loops)"))}
+        if lcols and "skills" not in lcols:
+            # 循环任务复用同一份 skills 快照结构（复制到运行行属批 4）
+            conn.execute(text("ALTER TABLE loops ADD COLUMN skills TEXT DEFAULT ''"))
 
         cols = {row[1] for row in conn.execute(text("PRAGMA table_info(configurations)"))}
         if "targets" not in cols:

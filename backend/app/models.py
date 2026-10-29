@@ -180,6 +180,11 @@ class AgentTask(Base):
     # 执行器/日志/取消/通知/详情全部复用任务链，循环侧只多这两列来源标记。
     loop_id = Column(Integer, nullable=True, index=True)
     trigger_type = Column(String(10), default="")  # auto / manual；普通任务为空
+    # 任务级 skill：skills 是下发时的快照 JSON（详情与复跑用，含 name/dir_name/
+    # source_*），skill_links 是本次实际创建的条目 JSON（回收依据，空串即无可回收
+    # 项）。两者都由 app.task_skills 读写，见方案 §4.1。
+    skills = Column(Text, default="")
+    skill_links = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.now)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
@@ -209,5 +214,8 @@ class Loop(Base):
     status = Column(String(20), default="active")  # active / paused / completed
     next_run_at = Column(DateTime, nullable=True, index=True)  # 调度扫描依据
     last_run_at = Column(DateTime, nullable=True)
+    # 与 AgentTask.skills 同一份快照结构：调度触发时原样复制到本次运行的任务行
+    # （复制逻辑属批 4，见方案 §10）
+    skills = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

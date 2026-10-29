@@ -1,4 +1,6 @@
 """数据目录迁移（品牌改名 a4api → a4agent）测试。"""
+from sqlalchemy import create_engine, text
+
 from backend.app import database
 
 
@@ -58,3 +60,42 @@ def test_migrate_noop_when_nothing_legacy(tmp_path, monkeypatch):
     database._migrate_legacy_data(new_dir)
     assert new_dir.is_dir()
     assert not (new_dir / "a4agent.db").exists()
+
+
+def test_ensure_schema_adds_skill_columns_to_old_db(tmp_path, monkeypatch):
+    """旧库（无 skills / skill_links / loops.skills）跑一次 ensure_schema 即补齐三列。
+
+    手工建最小旧表再补列，是「create_all 不会修改已存在表」的唯一有效回归路径。
+    configurations 也要有（_migrate_targets_v2 会扫它），否则会误报连接错误。
+    """
+    engine = create_engine(f"sqlite:///{tmp_path / 'old.db'}")
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE agent_tasks ("
+            "id INTEGER PRIMARY KEY, prompt TEXT NOT NULL, tool VARCHAR(20) NOT NULL,"
+            "status VARCHAR(20) NOT NULL)"
+        ))
+        conn.execute(text("CREATE TABLE loops (id INTEGER PRIMARY KEY, name VARCHAR(100) NOT NULL)"))
+        conn.execute(text("CREATE TABLE configurations (id INTEGER PRIMARY KEY, targets VARCHAR(50))"))
+        conn.execute(text("CREATE TABLE providers (id INTEGER PRIMARY KEY, name VARCHAR(100))"))
+    monkeypatch.setattr(database, "engine", engine)
+
+    database.ensure_schema()
+
+    tcols = {row[1] for row in engine.connect().execute(text("PRAGMA table_info(agent_tasks)"))}
+    assert {"skills", "skill_links"} <= tcols
+    lcols = {row[1] for row in engine.connect().execute(text("PRAGMA table_info(loops)"))}
+    assert "skills" in lcols
+
+
+def test_ensure_schema_is_idempotent_on_fresh_db(tmp_path, monkeypatch):
+    """新库（create_all 已建全）再跑一次不得重复 ALTER 报错。"""
+    engine = create_engine(f"sqlite:///{tmp_path / 'new.db'}")
+    monkeypatch.setattr(database, "engine", engine)
+    database.Base.metadata.create_all(bind=engine)
+
+    database.ensure_schema()
+    database.ensure_schema()
+
+    tcols = {row[1] for row in engine.connect().execute(text("PRAGMA table_info(agent_tasks)"))}
+    assert {"skills", "skill_links"} <= tcols

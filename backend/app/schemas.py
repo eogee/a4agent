@@ -196,11 +196,26 @@ class McpImportIn(BaseModel):
 # ---------------- 无头任务 ----------------
 
 
+class SkillRef(BaseModel):
+    """任务/循环所选技能的一条引用（字段与方案 §4.2 逐字一致，契约冻结于 A1）。
+
+    source_path 优先用；失效时后端按 name + source_tool + source_scope 重新定位。
+    """
+
+    name: str = Field(min_length=1, max_length=200)
+    source_tool: str = ""
+    source_scope: str = ""  # global / project
+    source_project: str = ""
+    source_path: str = ""  # 优先用；失效时按 name + tool + scope 重新定位
+
+
 class TaskCreate(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode)$", description="无头引擎")
     working_dir: Optional[str] = None
     timeout_seconds: Optional[int] = Field(default=None, ge=30, le=3600)
+    # 上限 20：每个 skill 的描述都要占模型上下文，兼给注入/回收耗时兜底（§4.2）
+    skills: list[SkillRef] = Field(default_factory=list, max_length=20)
 
 
 class TaskOut(BaseModel):
@@ -223,11 +238,14 @@ class TaskOut(BaseModel):
     duration_seconds: Optional[int] = None
     loop_id: Optional[int] = None  # 非空 = 循环任务触发的一次运行
     trigger_type: str = ""  # auto=调度触发 / manual=手动立即执行；普通任务为空
+    skills: list[SkillRef] = []
 
 
 class TaskDetail(TaskOut):
     output: str = ""
     output_truncated: bool = False
+    # 回收依据摘要（目标根 / 已建条目 / 跳过项），仅详情回传，便于排查残留
+    skill_links: dict = {}
 
 
 # ---------------- 循环任务 ----------------
@@ -243,6 +261,8 @@ class LoopBase(BaseModel):
     timeout_seconds: int = Field(default=1800, ge=300, le=14400)
     catch_up: bool = False
     enabled: bool = True
+    # 与任务下发同一份快照结构与上限（循环触发时复制进 AgentTask.skills，见批 4）
+    skills: list[SkillRef] = Field(default_factory=list, max_length=20)
 
 
 class LoopCreate(LoopBase):
@@ -270,6 +290,7 @@ class LoopOut(BaseModel):
     last_run_at: str = ""
     running: bool = False
     last_run: Optional[dict] = None
+    skills: list[SkillRef] = []
 
 
 # ---------------- 应用内反馈 ----------------

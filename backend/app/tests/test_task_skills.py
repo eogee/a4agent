@@ -2,9 +2,6 @@
 
 全部用**真实临时目录**（tmp_path），不碰 `%LOCALAPPDATA%` 与用户真实的 skill 根：
 全局根、项目根都 monkeypatch 到临时目录，`SessionLocal` 换成临时 sqlite。
-
-批 1 阶段 `agent_tasks` 还没有 skills / skill_links 列（批 2 才补），夹具按批 2 的
-最终列结构补上，让 skill_links 的落库与清空路径能真跑。
 """
 import hashlib
 import json
@@ -85,9 +82,6 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("A4AGENT_DATA_DIR", str(tmp_path / "data"))
     engine = create_engine(f"sqlite:///{tmp_path / 'tasks.db'}")
     Base.metadata.create_all(engine)
-    with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE agent_tasks ADD COLUMN skills TEXT DEFAULT ''"))
-        conn.execute(text("ALTER TABLE agent_tasks ADD COLUMN skill_links TEXT DEFAULT ''"))
     maker = sessionmaker(bind=engine)
 
     # 全局根与项目扫描全部沙箱化：否则 discover() 会扫真机所有盘符
@@ -125,7 +119,7 @@ def _new_task(db, skills: list, tool: str = "claude", workdir="", status: str = 
     db.add(task)
     db.commit()
     db.refresh(task)
-    # 批 1 阶段 skills 还没映射到 ORM，直接挂在实例上（批 2 由 API 落库）
+    # 快照由 API 落库；这里直接写列（与批 2 的存储形态一致）
     task.skills = json.dumps(skills, ensure_ascii=False) if skills else ""
     return task
 
