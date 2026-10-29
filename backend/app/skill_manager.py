@@ -1093,6 +1093,16 @@ def _find_source(descriptor: dict) -> tuple[Path, dict]:
     raise ValueError(f"在{where}{TOOL_LABELS.get(tool, tool)}端未找到 skill：{name}")
 
 
+def resolve_source(descriptor: dict) -> tuple[Path, dict]:
+    """按 (scope, tool, project, name/dir_name) 定位源 skill 目录的公共包装。
+
+    `_find_source` 是迁移内部用的私有名；任务级注入（task_skills）同样需要
+    「按描述符重新定位源」，走这里而不是直接调下划线函数，避免两个模块互相绑死
+    在私有实现上。行为与迁移源定位完全一致（含路径越界拦截）。
+    """
+    return _find_source(descriptor)
+
+
 def _ignore_links(directory, names):
     """copytree 的 ignore 回调：跳过符号链接与 Windows junction（reparse point）。
 
