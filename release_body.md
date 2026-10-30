@@ -37,5 +37,5 @@ UI realignment — the active-configuration status and the "new configuration" b
 ## 校验 / Checksum
 
 ```
-SHA256_PLACEHOLDER
+75CBDE01554FBE831703DCDE1BC8BCF79BB201D78849FD33368AF9873453CA1C  a4agent-setup-0.6.6.exe
 ```
