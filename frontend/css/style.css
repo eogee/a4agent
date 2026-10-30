@@ -2760,3 +2760,6 @@ html[lang="en"] .card-actions .layui-btn:not(.i18n-icon-only) {
   font-size: 12px;
   color: #8a8e94;
 }
+
+/* 计划时刻输入（laydate time）：只读，点击弹 layui 面板，指针提示可点 */
+.task-sched-time { cursor: pointer; }

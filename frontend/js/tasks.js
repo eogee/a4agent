@@ -4,9 +4,10 @@
  * 循环任务（POST/PUT /loops），不填就立即执行（POST /tasks）——循环只是
  * 给任务加一个计划，不是另一类任务。
  */
-layui.use(['layer', 'form', 'element'], function () {
+layui.use(['layer', 'form', 'element', 'laydate'], function () {
   var layer = layui.layer;
   var form = layui.form;
+  var laydate = layui.laydate;
   var API = '/api/v1/tasks';
   var LOOP_API = '/api/v1/loops';
 
@@ -464,7 +465,10 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   /* 周期字段随类型整体重绘：四种计划的输入形态完全不同，混在一个
-     表单里要靠显隐切换，反而更容易漏校验（同循环表单的既有决策） */
+     表单里要靠显隐切换，反而更容易漏校验（同循环表单的既有决策）。
+     时刻输入用 laydate（type:'time'）而不是原生 <input type="time">：
+     原生控件的面板/图标由浏览器渲染（Chrome 蓝色滚轮、图标贴右缘），
+     无法与本站主题统一；laydate 面板走 layui 主题且 format 直接给 HH:mm。 */
   function renderSchedFields() {
     var box = document.getElementById('task-sched');
     if (!box) return;
@@ -481,25 +485,33 @@ layui.use(['layer', 'form', 'element'], function () {
         '<input class="layui-input" id="task-sched-interval" type="number" min="1" max="10080" ' +
         'value="' + (cfg.minutes || 30) + '" style="max-width:120px">' +
         '<span class="task-hint">分钟一轮（上一轮结束或跳过后才计下一轮）</span></div>';
-    } else if (scheduleType === 'daily') {
-      html = '<div class="loop-form-row">' +
-        '<input class="layui-input" id="task-sched-time" type="time" value="' + (cfg.time || '09:00') +
-        '" style="max-width:120px">' +
-        '<span class="task-hint">每天到这个点执行</span></div>';
     } else {
-      var days = cfg.weekdays || [1];
-      var wd = WEEKDAYS.map(function (name, i) {
-        var v = i + 1;
-        return '<label class="loop-weekday"><input type="checkbox" name="task-sched-weekday" value="' + v + '"' +
-          (days.indexOf(v) >= 0 ? ' checked' : '') + '>' + name + '</label>';
-      }).join('');
-      html = '<div class="loop-weekdays">' + wd + '</div>' +
-        '<div class="loop-form-row" style="margin-top:8px">' +
-        '<input class="layui-input" id="task-sched-time" type="time" value="' + (cfg.time || '09:00') +
-        '" style="max-width:120px">' +
-        '<span class="task-hint">选中星期到这个点执行</span></div>';
+      var timeInput = '<input class="layui-input task-sched-time" id="task-sched-time" readonly ' +
+        'placeholder="请选择时刻" value="' + (cfg.time || '') + '" style="max-width:120px">';
+      if (scheduleType === 'daily') {
+        html = '<div class="loop-form-row">' + timeInput +
+          '<span class="task-hint">每天到这个点执行</span></div>';
+      } else {
+        var days = cfg.weekdays || [1];
+        var wd = WEEKDAYS.map(function (name, i) {
+          var v = i + 1;
+          return '<label class="loop-weekday"><input type="checkbox" name="task-sched-weekday" value="' + v + '"' +
+            (days.indexOf(v) >= 0 ? ' checked' : '') + '>' + name + '</label>';
+        }).join('');
+        html = '<div class="loop-weekdays">' + wd + '</div>' +
+          '<div class="loop-form-row" style="margin-top:8px">' + timeInput +
+          '<span class="task-hint">选中星期到这个点执行</span></div>';
+      }
     }
     box.innerHTML = html;
+    if (scheduleType === 'daily' || scheduleType === 'weekly') {
+      laydate.render({
+        elem: '#task-sched-time',
+        type: 'time',
+        format: 'HH:mm',       // 后端 schedule_config.time 的口径
+        theme: '#16baaa'       // 与全站主题色一致
+      });
+    }
   }
 
   function readSchedConfig() {
