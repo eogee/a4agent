@@ -829,9 +829,15 @@ layui.use(['layer', 'form', 'element'], function () {
     renderScheduleFields();
   });
 
-  /* ---------- tab ---------- */
-  window.addEventListener('main-tab-changed', function (e) {
-    active = e.detail.index === 6;
+  /* ---------- tab 与子视图 ----------
+   * 2026-10-30 起循环并入「任务下发」页：页内 seg（#tasks-view-seg）切
+   * 「单次任务 / 循环任务」两个容器，本模块只负责循环视图。
+   * 激活 = 任务下发 Tab（index 5）且 seg 选中循环；切走即停轮询与倒计时，
+   * 与独立 Tab 时代的语义一致。 */
+  var segView = 'tasks';   // 与 index.html 的 #tasks-view-seg 对应
+
+  function setLoopsView(on) {
+    active = on;
     if (active && !loaded) {
       loaded = true;
       renderShell();
@@ -841,6 +847,26 @@ layui.use(['layer', 'form', 'element'], function () {
     syncPolling();
     if (active && !cdTimer) cdTimer = setInterval(renderCountdowns, 1000);
     if (!active && cdTimer) { clearInterval(cdTimer); cdTimer = null; }
+  }
+
+  window.addEventListener('main-tab-changed', function (e) {
+    if (e.detail.index !== 5) { setLoopsView(false); return; }
+    setLoopsView(segView === 'loops');
+  });
+
+  document.querySelectorAll('#tasks-view-seg .seg-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      segView = btn.getAttribute('data-view') || 'tasks';
+      document.querySelectorAll('#tasks-view-seg .seg-btn').forEach(function (b) {
+        b.classList.toggle('seg-active', b === btn);
+      });
+      var loopsBox = document.getElementById('loops-content');
+      var tasksBox = document.getElementById('tasks-content');
+      if (loopsBox) loopsBox.hidden = segView !== 'loops';
+      if (tasksBox) tasksBox.hidden = segView !== 'tasks';
+      // 单次视图的轮询仍由 tasks.js 按 Tab 激活管理；本模块只管循环视图的开停
+      setLoopsView(segView === 'loops');
+    });
   });
 
   /* 语言切换后重绘一次：星期顿号/逗号是按当时语言拼的，DOM 应用器不会

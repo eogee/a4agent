@@ -355,8 +355,9 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   window.addEventListener('main-tab-changed', function (e) {
-    // 索引 7：循环管理插在「任务下发」之后，通知提醒整体后移一位
-    active = e.detail.index === 7;
+    // 索引 6：2026-10-30 循环并入「任务下发」页，独立「循环管理」Tab 删除，
+    // 通知提醒紧跟「任务下发」之后
+    active = e.detail.index === 6;
     if (active && !loaded) { loaded = true; boot(); }
   });
 });

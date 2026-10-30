@@ -2738,3 +2738,8 @@ html[lang="en"] .card-actions .layui-btn:not(.i18n-icon-only) {
   font-size: 12px;
   color: #8a8e94;
 }
+
+/* 任务下发页的「单次任务 / 循环任务」子切换（2026-10-30 循环并入任务下发） */
+.tab-seg-bar {
+  padding: 6px 2px 16px;
+}
