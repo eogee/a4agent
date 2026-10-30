@@ -1,8 +1,8 @@
 """OpenCode HTTP 客户端：连接、会话生命周期与事件订阅。
 
 **为什么用 HTTP 而不是拉 CLI 子进程**：OpenCode 本来就跑着一个常驻后台服务
-（本机 127.0.0.1:49374），直接对接它的 API 比每次新起一个 CLI 进程
-更贴合真实形态，且换来三样 CLI 给不了的能力：
+（地址由 resolve_connection 从 service.json 发现，默认 127.0.0.1:49374），
+直接对接它的 API 比每次新起一个 CLI 进程更贴合真实形态，且换来三样 CLI 给不了的能力：
 
 - **会话级免审批**：POST /api/session 接受 permissions 规则，无头任务因此不必
   改用户的全局配置（其它端只能靠各自的 --yolo 类开关）
@@ -11,7 +11,7 @@
 - **可中断**：POST /api/session/{id}/interrupt 取消，DELETE 清会话
 
 **鉴权**（实测确认，见 docs/OpenCode-实测记录.md）：HTTP Basic，用户名固定
-`opencode`，密码来自 ~/.config/opencode/service.json，由本文件自动读取——
+`opencode`，密码自动读取（config 的 service.json 优先，state 那份兜底）——
 与其他端「装了就在」一致，没有任何连接配置界面。
 
 **降级策略**：所有端点失败都不抛到调用方之外——连接问题统一以 OpenCodeError
@@ -69,26 +69,55 @@ class OpenCodeError(Exception):
 
 
 def service_json_path() -> Path:
+    """OpenCode 的凭据注册文件（至少含密码）。"""
     return Path.home() / ".config" / "opencode" / SERVICE_JSON
 
 
+def state_json_path() -> Path:
+    """OpenCode 运行实例的注册文件（id/version/url/pid/password）。
+
+    新版 OpenCode 启动时把实例信息写在这里——**url 只在这份里有**，
+    这也是本文件不再硬编码端口的原因（本机 2.0.32 实测写的是 45278）。
+    """
+    return Path.home() / ".local" / "state" / "opencode" / SERVICE_JSON
+
+
+def _read_json(path: Path) -> dict:
+    """读一个 JSON 对象；不存在/损坏/非对象一律按空处理（发现类读取不算错误）。"""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def read_local_password() -> str:
-    """本机模式：读 ~/.config/opencode/service.json 的明文密码；读不到返回空串。
+    """本机模式：明文密码，config 优先、state 兜底；都没有返回空串。
 
     这是用户自己的服务注册文件，与 OpenCode 的正常行为一致（本机 `opencode api`
     也是走同一套凭据）。读不到不算错误，交由上层如实提示「未取得凭据」。
     """
-    path = service_json_path()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):
-        return ""
-    return str(data.get("password") or "") if isinstance(data, dict) else ""
+    data = _read_json(service_json_path())
+    password = str(data.get("password") or "")
+    if password:
+        return password
+    return str(_read_json(state_json_path()).get("password") or "")
 
 
 def resolve_connection() -> tuple[str, str]:
-    """返回 (base_url, password)：默认端口 + 本机 service.json 自动发现。"""
-    return DEFAULT_BASE_URL, read_local_password()
+    """返回 (base_url, password)：地址从 service.json 发现，读不到回落默认端口。
+
+    OpenCode 启动时可能换端口（硬编码 49374 曾因此连不上本机 45278 的实例），
+    所以 url 以运行实例注册文件为准：state 的 url 优先，config 里也写了就采纳；
+    两处都没有才用 DEFAULT_BASE_URL。url 是否存活不由这里判断，交给调用方
+    按连接失败如实提示（与「未取得凭据」同一口径）。
+    """
+    url = ""
+    for path in (state_json_path(), service_json_path()):
+        url = str(_read_json(path).get("url") or "").strip()
+        if url:
+            break
+    return (url or DEFAULT_BASE_URL), read_local_password()
 
 
 # ---------------- 底层请求 ----------------

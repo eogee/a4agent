@@ -503,8 +503,12 @@ def test_last_assistant_text_skips_textless_tail():
 # ---------------- 连接配置 ----------------
 
 
-def test_resolve_connection_uses_default_and_local_password(monkeypatch):
-    """无连接配置界面：默认端口 + service.json 自动发现，装了 OpenCode 即在。"""
+def test_resolve_connection_uses_default_and_local_password(monkeypatch, tmp_path):
+    """无连接配置界面：两份 service.json 都没有 url 时回落默认端口，密码自动发现。"""
+    monkeypatch.setattr(opencode_client, "service_json_path",
+                        lambda: tmp_path / "nope.json")
+    monkeypatch.setattr(opencode_client, "state_json_path",
+                        lambda: tmp_path / "nope-state.json")
     monkeypatch.setattr(opencode_client, "read_local_password", lambda: "auto")
     base, pwd = opencode_client.resolve_connection()
     assert base == opencode_client.DEFAULT_BASE_URL
@@ -514,6 +518,8 @@ def test_resolve_connection_uses_default_and_local_password(monkeypatch):
 def test_read_local_password_missing_file(monkeypatch, tmp_path):
     monkeypatch.setattr(opencode_client, "service_json_path",
                         lambda: tmp_path / "nope.json")
+    monkeypatch.setattr(opencode_client, "state_json_path",
+                        lambda: tmp_path / "nope-state.json")
     assert opencode_client.read_local_password() == ""
 
 
@@ -521,6 +527,8 @@ def test_read_local_password_broken_file(monkeypatch, tmp_path):
     bad = tmp_path / "service.json"
     bad.write_text("{not json", encoding="utf-8")
     monkeypatch.setattr(opencode_client, "service_json_path", lambda: bad)
+    monkeypatch.setattr(opencode_client, "state_json_path",
+                        lambda: tmp_path / "nope-state.json")
     assert opencode_client.read_local_password() == ""
 
 
@@ -662,3 +670,55 @@ def test_event_stream_survives_callback_error():
 
     stream = opencode_client.EventStream("http://x", "pw", boom)
     stream._handle_block('data: {"type":"session.execution.failed"}')
+
+
+# ---------------- 连接发现（url 不再硬编码） ----------------
+
+
+@pytest.fixture()
+def svc_paths(tmp_path, monkeypatch):
+    """把两份 service.json 都指到临时目录，绝不触碰真实用户目录。"""
+    config = tmp_path / "config" / "opencode" / "service.json"
+    state = tmp_path / "state" / "opencode" / "service.json"
+    monkeypatch.setattr(opencode_client, "service_json_path", lambda: config)
+    monkeypatch.setattr(opencode_client, "state_json_path", lambda: state)
+    return {"config": config, "state": state}
+
+
+def test_resolve_connection_uses_state_url(svc_paths):
+    """新版实例把 url 写进 state/service.json：地址跟实例走，不再硬编码端口。"""
+    svc_paths["state"].parent.mkdir(parents=True)
+    svc_paths["state"].write_text(json.dumps(
+        {"id": "x", "version": "2.0.32", "url": "http://127.0.0.1:45278", "pid": 1,
+         "password": "pw-state"}), encoding="utf-8")
+    svc_paths["config"].parent.mkdir(parents=True)
+    svc_paths["config"].write_text(json.dumps({"password": "pw-config"}), encoding="utf-8")
+    base, password = opencode_client.resolve_connection()
+    assert base == "http://127.0.0.1:45278"
+    assert password == "pw-config"  # 密码仍以 config 优先（既有语义不变）
+
+
+def test_resolve_connection_falls_back_to_default_when_no_url(svc_paths):
+    """两处都没写 url（旧版/手工文件）→ 回落默认端口，行为与今天一致。"""
+    svc_paths["config"].parent.mkdir(parents=True)
+    svc_paths["config"].write_text(json.dumps({"password": "pw"}), encoding="utf-8")
+    base, password = opencode_client.resolve_connection()
+    assert base == opencode_client.DEFAULT_BASE_URL
+    assert password == "pw"
+
+
+def test_resolve_connection_password_falls_back_to_state(svc_paths):
+    """config 只有 url 或缺失时，密码从 state 兜底（新版两处都会写）。"""
+    svc_paths["state"].parent.mkdir(parents=True)
+    svc_paths["state"].write_text(json.dumps(
+        {"url": "http://127.0.0.1:45278", "password": "pw-state"}), encoding="utf-8")
+    base, password = opencode_client.resolve_connection()
+    assert base == "http://127.0.0.1:45278"
+    assert password == "pw-state"
+
+
+def test_resolve_connection_survives_missing_or_broken_files(svc_paths):
+    """两份文件都缺失/损坏：不抛错，回落默认地址与空密码（发现类读取不算错误）。"""
+    svc_paths["config"].parent.mkdir(parents=True)
+    svc_paths["config"].write_text("{broken", encoding="utf-8")
+    assert opencode_client.resolve_connection() == (opencode_client.DEFAULT_BASE_URL, "")
