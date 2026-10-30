@@ -28,13 +28,6 @@ layui.use(['layer', 'form', 'element', 'laydate'], function () {
   // 整词入字典（「周一」…「周日」）：i18n 抽取器会把数组里的单字当成独立文案
   var WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
-  function pad2(n) { return (n < 10 ? '0' : '') + n; }
-
-  function localDTValue(d) {
-    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
-      'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
-  }
-
   /* ---------- 工具 ---------- */
   function escapeHtml(s) {
     return String(s == null ? '' : s)
@@ -466,19 +459,18 @@ layui.use(['layer', 'form', 'element', 'laydate'], function () {
 
   /* 周期字段随类型整体重绘：四种计划的输入形态完全不同，混在一个
      表单里要靠显隐切换，反而更容易漏校验（同循环表单的既有决策）。
-     时刻输入用 laydate（type:'time'）而不是原生 <input type="time">：
-     原生控件的面板/图标由浏览器渲染（Chrome 蓝色滚轮、图标贴右缘），
-     无法与本站主题统一；laydate 面板走 layui 主题且 format 直接给 HH:mm。 */
+     时刻/日期时间一律用 laydate 而不是原生 <input type="time|datetime-local">：
+     原生控件的面板由浏览器渲染（Chrome 蓝色高亮、图标贴右缘、直角），
+     无法与本站主题统一；laydate 面板走 layui 主题（圆角样式见 style.css）。 */
   function renderSchedFields() {
     var box = document.getElementById('task-sched');
     if (!box) return;
     var cfg = editingLoop && editingLoop.schedule_config ? editingLoop.schedule_config : {};
     var html = '';
     if (scheduleType === 'once') {
-      var at = cfg.run_at ? String(cfg.run_at).replace(' ', 'T') : localDTValue(new Date(Date.now() + 5 * 60000));
       html = '<div class="loop-form-row">' +
-        '<input class="layui-input" id="task-sched-once" type="datetime-local" value="' + at + '" ' +
-        'style="max-width:220px">' +
+        '<input class="layui-input task-sched-time" id="task-sched-once" readonly ' +
+        'placeholder="请选择执行时间" value="' + (cfg.run_at || '') + '" style="max-width:220px">' +
         '<span class="task-hint">应用关着时错过的触发不会补跑</span></div>';
     } else if (scheduleType === 'interval') {
       html = '<div class="loop-form-row">' +
@@ -504,7 +496,14 @@ layui.use(['layer', 'form', 'element', 'laydate'], function () {
       }
     }
     box.innerHTML = html;
-    if (scheduleType === 'daily' || scheduleType === 'weekly') {
+    if (scheduleType === 'once') {
+      laydate.render({
+        elem: '#task-sched-once',
+        type: 'datetime',
+        format: 'yyyy-MM-dd HH:mm',   // 后端 schedule_config.run_at 的口径（无秒）
+        theme: '#16baaa'
+      });
+    } else if (scheduleType === 'daily' || scheduleType === 'weekly') {
       laydate.render({
         elem: '#task-sched-time',
         type: 'time',
@@ -518,7 +517,7 @@ layui.use(['layer', 'form', 'element', 'laydate'], function () {
     if (scheduleType === 'once') {
       var v = document.getElementById('task-sched-once').value;
       if (!v) { layer.msg('请选择执行时间', { icon: 2 }); return null; }
-      return { run_at: v.replace('T', ' ') };
+      return { run_at: v };   // laydate 已按 yyyy-MM-dd HH:mm 写回，无 T 可替
     }
     if (scheduleType === 'interval') {
       var mins = Number(document.getElementById('task-sched-interval').value);
