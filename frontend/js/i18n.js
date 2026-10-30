@@ -517,6 +517,25 @@
     "（无产出）": "(no output)",
     "\\n\\n…（产出较长，此处仅显示末尾部分，完整内容见产出文件）": "\\n\\n… (the output is long — only the tail is shown; open the output file for everything)",
 
+    /* ---------- 任务下发 · 技能选择（tasks.js / skillpick.js） ---------- */
+    "选择技能": "Choose skills",
+    "选择技能…": "Choose skills…",
+    "已选": "Selected",
+    "个 · 任务结束自动移除": "· auto-removed when the task ends",
+    "未选工作目录时技能不会注入到项目，仅作为提示词建议": "Without a working directory, skills are not injected into the project and serve only as prompt suggestions",
+    "搜索名称或描述": "Search by name or description",
+    "全局技能": "Global skills",
+    "项目技能": "Project skills",
+    "项目": "Project",
+    "该端不会加载此技能": "The selected target won't load this skill",
+    "一次最多选择 20 个技能": "Pick at most 20 skills",
+    "没有可用的技能": "No skills available",
+    "没有匹配的技能": "No matching skills",
+    "技能选择组件未加载，请刷新页面": "The skill picker is not loaded; refresh the page",
+    "同名技能已存在，使用已有版本：": "Skills with the same name already exist; the existing copies are used: ",
+    "未能注入：": "Failed to mount: ",
+    "提示：": "Notes: ",
+
     /* ---------- 循环管理 ---------- */
     "循环管理": "Loops",
     "循环任务": "Loops",
@@ -778,6 +797,8 @@
        会把任何以 s 结尾的英文误判成时长，锚点必须够具体 */
     ["{0} 分 {1} 秒", "{0} min {1} sec"],
     ["{0} 秒", "{0} sec"],
+    ["技能 {0} 个：{1}", "Skills ({0}): {1}"],
+    ["技能列表加载失败：{0}", "Failed to load the skill list: @{0}"],
 
     /* 循环管理 */
     ["{0} 执行一次", "Once at {0}"],

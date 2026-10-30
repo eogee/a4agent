@@ -12,6 +12,7 @@ layui.use(['layer', 'form', 'element'], function () {
   var engines = [];
   var activeConfig = null;
   var workdir = '';         // 已选工作目录，空 = 交给后端回落到用户主目录
+  var pickedSkills = [];    // 已选技能（SkillRef + _ends/_visible 渲染元数据，提交时剥掉元数据）
   var lastTasks = {};      // id -> status，用于识别「刚结束」的任务并提示
   var firstLoad = true;
 
@@ -93,6 +94,15 @@ layui.use(['layer', 'form', 'element'], function () {
           '<label>引擎</label><div id="task-engines" class="task-engine-radios"></div>' +
         '</div>' +
         '<div class="task-form-row">' +
+          '<label>技能</label>' +
+          '<button class="layui-btn layui-btn-sm" id="task-pick-skills">选择技能…</button>' +
+          '<div id="task-skills-chips" class="task-skills-chips"></div>' +
+          '<span class="task-skills-hint" id="task-skills-hint">' +
+            '<span>已选 </span><span id="task-skills-count">0</span>' +
+            '<span> 个 · 任务结束自动移除</span>' +
+          '</span>' +
+        '</div>' +
+        '<div class="task-form-row">' +
           '<label>使用模型</label><span id="task-current-model" class="task-current-model">以实测为准</span>' +
         '</div>' +
         '<div class="task-form-row">' +
@@ -121,9 +131,14 @@ layui.use(['layer', 'form', 'element'], function () {
     document.getElementById('task-submit').onclick = submitTask;
     document.getElementById('task-refresh').onclick = loadTasks;
     document.getElementById('task-pick-dir').onclick = openDirPicker;
+    document.getElementById('task-pick-skills').onclick = openSkillPicker;
     var engineBox = document.getElementById('task-engines');
-    if (engineBox) engineBox.addEventListener('change', updateCurrentModel);
+    if (engineBox) engineBox.addEventListener('change', function () {
+      updateCurrentModel();
+      renderSkillChips();   // 引擎切换保留已选，但不兼容项要重新标黄
+    });
     renderWorkdir();
+    renderSkillChips();
     form.render('select', 'task-timeout-form');
   }
 
@@ -177,6 +192,56 @@ layui.use(['layer', 'form', 'element'], function () {
     });
   }
 
+  /* ---------- 技能选择 ---------- */
+  /* 弹层是公共组件（skillpick.js，循环任务页也用同一份）；这里只负责
+   * 把结果写回 pickedSkills 并重渲 chip。引擎切换不自动删不兼容项。 */
+  function skillCompatible(s, tool) {
+    if (!tool) return true;
+    if ((s._ends || []).indexOf(tool) >= 0) return true;
+    return tool === 'opencode' && !!s._visible;
+  }
+
+  function openSkillPicker() {
+    if (!window.A4SkillPicker) {
+      layer.msg('技能选择组件未加载，请刷新页面', { icon: 2 });
+      return;
+    }
+    window.A4SkillPicker.pick({
+      tool: selectedTool(),
+      workdir: workdir,
+      selected: pickedSkills
+    }).then(function (refs) {
+      if (refs === null) return;   // 用户取消，保持原状
+      pickedSkills = refs;
+      renderSkillChips();
+    }).catch(function (e) {
+      layer.msg('技能列表加载失败：' + e.message, { icon: 2 });
+    });
+  }
+
+  function renderSkillChips() {
+    var box = document.getElementById('task-skills-chips');
+    var count = document.getElementById('task-skills-count');
+    if (!box) return;
+    var tool = selectedTool();
+    var warnTip = '该端不会加载此技能';
+    box.innerHTML = pickedSkills.map(function (s, i) {
+      var ok = skillCompatible(s, tool);
+      return '<span class="task-skill-chip' + (ok ? '' : ' is-warn') + '"' +
+        (ok ? '' : ' title="' + warnTip + '"') + '>' +
+        '<span class="task-skill-chip-name">' + escapeHtml(s.name) + '</span>' +
+        '<button type="button" class="task-skill-chip-x" data-x="' + i + '">×</button>' +
+      '</span>';
+    }).join('');
+    box.querySelectorAll('[data-x]').forEach(function (btn) {
+      btn.onclick = function () {
+        pickedSkills.splice(Number(btn.getAttribute('data-x')), 1);
+        renderSkillChips();
+      };
+    });
+    if (count) count.textContent = String(pickedSkills.length);
+  }
+
   /* ---------- 引擎与方案 ---------- */
   function loadEngines() {
     apiGet('/engines').then(function (data) {
@@ -227,6 +292,18 @@ layui.use(['layer', 'form', 'element'], function () {
       working_dir: workdir || null,
       timeout_seconds: Number(document.getElementById('task-timeout').value)
     };
+    // 未选则不传（后端按空处理）；提交只带 SkillRef 契约字段，剥掉 _ends/_visible 渲染元数据
+    if (pickedSkills.length) {
+      body.skills = pickedSkills.map(function (s) {
+        return {
+          name: s.name,
+          source_tool: s.source_tool || '',
+          source_scope: s.source_scope || '',
+          source_project: s.source_project || '',
+          source_path: s.source_path || ''
+        };
+      });
+    }
     var btn = document.getElementById('task-submit');
     btn.disabled = true;
     apiSend('', 'POST', body).then(function (task) {
@@ -348,6 +425,27 @@ layui.use(['layer', 'form', 'element'], function () {
           var box = document.getElementById('task-detail-' + id);
           if (!box) return;   // 弹窗已被用户关掉，晚到的响应直接丢弃
           var steps = (t.precheck && t.precheck.steps) || [];
+          var names = (t.skills || []).map(function (s) { return s.name; }).join('、');
+          var links = t.skill_links || {};
+          // 非阻断提示（运行期存在，任务结束随 skill_links 清空）：静态标签各自成
+          // 独立节点进字典，后端给的名单/原因属数据，不参与翻译
+          var skillNotes = '';
+          if (links.skipped_existing && links.skipped_existing.length) {
+            skillNotes += '<div class="task-skill-note"><span>同名技能已存在，使用已有版本：</span><span>' +
+              escapeHtml(links.skipped_existing.join('、')) + '</span></div>';
+          }
+          if (links.skipped_invalid && links.skipped_invalid.length) {
+            skillNotes += '<div class="task-skill-note"><span>未能注入：</span><span>' +
+              escapeHtml(links.skipped_invalid.map(function (x) {
+                return x.name + (x.reason ? '（' + x.reason + '）' : '');
+              }).join('；')) + '</span></div>';
+          }
+          if (links.notices && links.notices.length) {
+            skillNotes += '<div class="task-skill-note"><span>提示：</span><span>' +
+              escapeHtml(links.notices.map(function (x) {
+                return x.name + (x.message ? '：' + x.message : '');
+              }).join('；')) + '</span></div>';
+          }
           box.innerHTML =
             '<div class="task-detail-head">' + statusBadge(t.status) +
               '<span>' + escapeHtml(t.tool_label) + '</span>' +
@@ -355,6 +453,9 @@ layui.use(['layer', 'form', 'element'], function () {
               (t.exit_code != null ? '<span>退出码 ' + t.exit_code + '</span>' : '') +
               (t.output_path ? '<span class="task-output-path">' + escapeHtml(t.output_path) + '</span>' : '') +
             '</div>' +
+            ((t.skills && t.skills.length) ?
+              '<div class="task-detail-skills">' + '技能 ' + t.skills.length + ' 个：' + escapeHtml(names) + '</div>' : '') +
+            skillNotes +
             (steps.length ? '<div class="task-precheck">' + steps.map(function (s) {
               return '<span class="task-precheck-step ' + (s.ok ? 'is-ok' : 'is-bad') + '" title="' +
                 escapeHtml(s.detail || '') + '">' + escapeHtml(s.label) + ' · ' + s.ms + 'ms</span>';
