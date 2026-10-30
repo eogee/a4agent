@@ -2770,3 +2770,12 @@ html[lang="en"] .card-actions .layui-btn:not(.i18n-icon-only) {
   border-radius: 10px;
   overflow: hidden;
 }
+
+/* laydate 底部按钮组是拼接式分段控件（清空|现在|确定），半径 2px→8px
+   与全站按钮一致；相邻边保持 0 否则拼接处穿弧；左侧时间预览块同值。
+   按结构选择器覆盖（layui 原规则 .laydate-footer-btns span:first/last-child
+   特异性更高，类名选择器压不住，靠 style.css 后加载同特异性取胜） */
+.layui-laydate .laydate-footer-btns span { border-radius: 0; }
+.layui-laydate .laydate-footer-btns span:first-child { border-radius: 8px 0 0 8px; }
+.layui-laydate .laydate-footer-btns span:last-child { border-radius: 0 8px 8px 0; }
+.layui-laydate .layui-laydate-preview { border-radius: 8px; }
