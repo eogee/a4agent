@@ -127,7 +127,7 @@
     "该端已改为在应用内自配，本工具不再代管": "This target is now configured inside its own app; a4agent no longer manages it",
 
     /* ---------- 配置方案 ---------- */
-    "还没有配置方案，点击右上角「新增配置」创建": "No configurations yet. Click \"New configuration\" in the top right to create one.",
+    "还没有配置方案，点击页头「新增配置」创建": "No configurations yet. Click \"New configuration\" in the page header to create one.",
     "切换后重启 Claude Code（若正在运行）": "Restart Claude Code after switching (if it is running)",
     "Codex 配置写入后需重启 Codex 才生效": "Restart Codex after switching for the new configuration to take effect",
     "确认切换": "Confirm switch",

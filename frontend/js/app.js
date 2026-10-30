@@ -421,7 +421,7 @@ layui.use(['layer', 'form', 'element'], function () {
     apiGet('/configs').then(function (list) {
       var grid = document.getElementById('card-grid');
       if (!list.length) {
-        grid.innerHTML = '<div class="empty-tip">还没有配置方案，点击右上角「新增配置」创建</div>';
+        grid.innerHTML = '<div class="empty-tip">还没有配置方案，点击页头「新增配置」创建</div>';
         return;
       }
       grid.innerHTML = list.map(buildCard).join('');

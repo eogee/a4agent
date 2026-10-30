@@ -135,7 +135,20 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+  margin-left: auto;   /* 顶栏只剩全局项，整体贴右 */
 }
+
+/* 配置方案页头：「当前生效」状态 + 「新增配置」按钮（2026-10-30 自顶栏归位） */
+.configs-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 2px 2px 18px;
+}
+
+.configs-head .status-bar { flex: 1; }
+
+.configs-head #btn-add { flex: none; }
 
 .proxy-label {
   font-size: 13px;

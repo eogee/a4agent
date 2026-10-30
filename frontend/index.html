@@ -20,10 +20,6 @@
   -->
   <div class="app-header">
     <div class="app-title"><img class="app-mark" src="logo.png?v=20261007" alt="" aria-hidden="true">a4agent</div>
-    <div class="status-bar" id="status-bar">
-      <span class="status-label">当前生效：</span>
-      <span id="status-text" class="status-text">加载中…</span>
-    </div>
     <div class="header-actions layui-form">
       <div class="seg-control lang-seg" id="lang-seg" role="group" aria-label="Language / 语言" data-i18n-skip>
         <button type="button" class="seg-btn" data-lang="zh" title="中文">中</button>
@@ -33,7 +29,6 @@
       <input type="checkbox" id="proxy-switch" lay-skin="switch" lay-filter="proxy-switch" disabled>
       <a href="javascript:;" class="update-link" id="btn-check-update">检查更新</a>
       <a href="javascript:;" class="update-link" id="btn-quit" title="退出 a4agent（关窗只是转入后台）">退出</a>
-      <button class="layui-btn layui-btn-normal" id="btn-add">新增配置</button>
     </div>
   </div>
 
@@ -50,6 +45,13 @@
       </ul>
       <div class="layui-tab-content">
         <div class="layui-tab-item layui-show">
+          <div class="configs-head">
+            <div class="status-bar" id="status-bar">
+              <span class="status-label">当前生效：</span>
+              <span id="status-text" class="status-text">加载中…</span>
+            </div>
+            <button class="layui-btn layui-btn-normal" id="btn-add">新增配置</button>
+          </div>
           <div id="card-grid" class="card-grid">
             <div class="empty-tip">加载中…</div>
           </div>
