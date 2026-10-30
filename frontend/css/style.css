@@ -1816,6 +1816,16 @@ html[lang="en"] .phone-hint-block { padding-left: 96px; }
 
 .task-engine-radios { display: flex; flex-wrap: wrap; gap: 8px; }
 
+/* 重新检测跟着胶囊流排，圆角与高度对齐 .task-engine，避免显成一颗异物 */
+.task-engine-retest {
+  align-self: center;
+  height: 28px;
+  line-height: 28px;
+  padding: 0 12px;
+  border-radius: 100px;
+  font-size: 12px;
+}
+
 .task-engine {
   display: inline-flex;
   align-items: center;
@@ -2313,13 +2323,13 @@ html[lang="en"] .card-actions .layui-btn:not(.i18n-icon-only) {
   padding: 0 10px;
 }
 
-/* ================== 循环管理（定时/间隔无头任务） ================== */
+/* ================== 循环任务（执行计划横条，并入任务下发页） ================== */
 
 .loops-header {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 14px;
+  margin: 18px 2px 14px;
 }
 
 .loops-title { font-size: 14px; font-weight: 600; color: #1c1e21; }
@@ -2347,7 +2357,6 @@ html[lang="en"] .card-actions .layui-btn:not(.i18n-icon-only) {
 .loops-header-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 
 .loops-list { display: flex; flex-direction: column; gap: 10px; }
-
 .loop-card {
   display: flex;
   align-items: flex-start;
@@ -2737,9 +2746,4 @@ html[lang="en"] .card-actions .layui-btn:not(.i18n-icon-only) {
   padding-top: 8px;
   font-size: 12px;
   color: #8a8e94;
-}
-
-/* 任务下发页的「单次任务 / 循环任务」子切换（2026-10-30 循环并入任务下发） */
-.tab-seg-bar {
-  padding: 6px 2px 16px;
 }

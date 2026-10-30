@@ -1,10 +1,14 @@
 /* 任务下发（无头 Agent 任务）—— 引擎探测 / 下发 / 队列轮询 / 产出查看。
  * 下发与执行分离：POST 立即返回 task_id，本页只轮询状态与产出。
+ * 执行计划（2026-10-30）：同一个表单，执行计划切到「按计划循环」即创建
+ * 循环任务（POST/PUT /loops），不填就立即执行（POST /tasks）——循环只是
+ * 给任务加一个计划，不是另一类任务。
  */
 layui.use(['layer', 'form', 'element'], function () {
   var layer = layui.layer;
   var form = layui.form;
   var API = '/api/v1/tasks';
+  var LOOP_API = '/api/v1/loops';
 
   var loaded = false;
   var active = false;
@@ -15,6 +19,20 @@ layui.use(['layer', 'form', 'element'], function () {
   var pickedSkills = [];    // 已选技能（SkillRef + _ends/_visible 渲染元数据，提交时剥掉元数据）
   var lastTasks = {};      // id -> status，用于识别「刚结束」的任务并提示
   var firstLoad = true;
+
+  /* ---------- 执行计划 ---------- */
+  var planMode = 'now';       // 'now' 立即执行 | 'scheduled' 按计划循环
+  var editingLoop = null;     // 编辑中的循环对象（null = 非编辑）
+  var scheduleType = 'daily'; // 计划类型：once | interval | daily | weekly
+  // 整词入字典（「周一」…「周日」）：i18n 抽取器会把数组里的单字当成独立文案
+  var WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  function localDTValue(d) {
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
+      'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  }
 
   /* ---------- 工具 ---------- */
   function escapeHtml(s) {
@@ -120,8 +138,41 @@ layui.use(['layer', 'form', 'element'], function () {
               '<option value="3600">60 分钟</option>' +
             '</select>' +
           '</div>' +
+        '</div>' +
+        '<div class="task-form-row">' +
+          '<label>执行计划</label>' +
+          '<div class="layui-form task-timeout-wrap" lay-filter="task-plan-form">' +
+            '<select id="task-plan" lay-filter="task-plan">' +
+              '<option value="now" selected>立即执行</option>' +
+              '<option value="scheduled">按计划循环</option>' +
+            '</select>' +
+          '</div>' +
+          '<span class="task-hint" id="task-plan-hint">下发后立即进队列，运行记录出现在下方任务列表</span>' +
+        '</div>' +
+        '<div class="task-form-row" id="task-plan-name-row" style="display:none">' +
+          '<label>计划名称</label>' +
+          '<input class="layui-input" id="task-plan-name" style="max-width:320px" ' +
+            'placeholder="默认取任务描述开头">' +
+          '<span class="task-hint" id="task-edit-hint" style="display:none"></span>' +
+          '<button class="layui-btn layui-btn-sm layui-btn-primary" id="task-edit-cancel" ' +
+            'style="display:none">取消编辑</button>' +
+        '</div>' +
+        '<div class="task-form-row" id="task-sched-row" style="display:none">' +
+          '<label>周期</label>' +
+          '<div class="layui-form task-timeout-wrap" lay-filter="task-sched-form">' +
+            '<select id="task-sched-type" lay-filter="task-sched-type">' +
+              '<option value="interval" selected>按间隔重复</option>' +
+              '<option value="daily">每天固定时刻</option>' +
+              '<option value="weekly">每周选定几天</option>' +
+              '<option value="once">仅一次</option>' +
+            '</select>' +
+          '</div>' +
+          '<div id="task-sched" class="task-sched-fields"></div>' +
+        '</div>' +
+        '<div class="task-form-row">' +
+          '<label></label>' +
           '<button class="layui-btn layui-btn-normal" id="task-submit">下发任务</button>' +
-          '<span class="task-hint">下发前自动检测引擎、服务商连通与端配置一致性</span>' +
+          '<span class="task-hint" id="task-submit-hint">下发前自动检测引擎、服务商连通与端配置一致性</span>' +
         '</div>' +
       '</div>' +
       '<div class="task-queue-head">任务队列' +
@@ -132,15 +183,40 @@ layui.use(['layer', 'form', 'element'], function () {
     document.getElementById('task-refresh').onclick = loadTasks;
     document.getElementById('task-pick-dir').onclick = openDirPicker;
     document.getElementById('task-pick-skills').onclick = openSkillPicker;
+    document.getElementById('task-edit-cancel').onclick = cancelLoopEdit;
     var engineBox = document.getElementById('task-engines');
     if (engineBox) engineBox.addEventListener('change', function () {
       updateCurrentModel();
       renderSkillChips();   // 引擎切换保留已选，但不兼容项要重新标黄
     });
+    /* 探测结果在后端缓存 5 分钟（重装/启动 OpenCode 后不会立刻自愈），
+       按钮走 refresh=true 直通重测；内容每次重渲，所以用委托绑定 */
+    if (engineBox) engineBox.addEventListener('click', function (ev) {
+      if (ev.target && ev.target.id === 'task-redetect') {
+        ev.target.disabled = true;
+        loadEngines(true);
+      }
+    });
     renderWorkdir();
     renderSkillChips();
+    updatePlanUI();
     form.render('select', 'task-timeout-form');
+    form.render('select', 'task-plan-form');
+    form.render('select', 'task-sched-form');
   }
+
+  /* select 被 layui 藏起来后元素级 onchange 不可靠，计划/周期切换走
+     layui 的 select 事件（同循环表单的既有坑位） */
+  form.on('select(task-plan)', function (data) {
+    planMode = data.value === 'scheduled' ? 'scheduled' : 'now';
+    updatePlanUI();
+    if (planMode === 'scheduled') renderSchedFields();
+  });
+
+  form.on('select(task-sched-type)', function (data) {
+    scheduleType = data.value;
+    renderSchedFields();
+  });
 
   function updateCurrentModel() {
     var el = document.getElementById('task-current-model');
@@ -243,8 +319,8 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   /* ---------- 引擎与方案 ---------- */
-  function loadEngines() {
-    apiGet('/engines').then(function (data) {
+  function loadEngines(refresh) {
+    apiGet('/engines' + (refresh ? '?refresh=true' : '')).then(function (data) {
       engines = data.engines || [];
       activeConfig = data.active_config || null;
       var cfg = document.getElementById('task-active-config');
@@ -260,14 +336,19 @@ layui.use(['layer', 'form', 'element'], function () {
       box.innerHTML = engines.map(function (e, i) {
         var dis = e.installed ? '' : ' disabled';
         var cls = e.installed ? '' : ' is-off';
-        var tip = e.installed ? (e.version ? ' v' + e.version : '') : '未安装';
+        /* OpenCode 这类走 HTTP 会话的端没有可探测的命令，「不可用」的含义是
+           后台服务没在跑，报「未安装」会让明明装了桌面端的用户以为装错了。 */
+        var off = e.http ? '服务未运行' : '未安装';
+        var tip = e.installed ? (e.version ? ' v' + e.version : '') : off;
         return '<label class="task-engine' + cls + '"' +
           (e.error ? ' title="' + escapeHtml(e.error) + '"' : '') + '>' +
           '<input type="radio" name="task-tool" value="' + e.tool + '" ' +
           (i === firstInstalled ? 'checked' : '') + dis + '>' +
           '<span>' + escapeHtml(e.label) + '</span>' +
           '<em>' + escapeHtml(tip) + '</em></label>';
-      }).join('');
+      }).join('') +
+        '<button type="button" class="layui-btn layui-btn-primary layui-btn-xs task-engine-retest" ' +
+          'id="task-redetect">重新检测</button>';
       updateCurrentModel();
       renderTasks(lastTaskList || []);
     }).catch(function (e) {
@@ -280,12 +361,20 @@ layui.use(['layer', 'form', 'element'], function () {
     return el ? el.value : '';
   }
 
-  /* ---------- 下发 ---------- */
+  /* ---------- 下发 ----------
+   * 一张表单两种提交：执行计划 = 立即执行 → POST /tasks（含预检）；
+   * 按计划循环（或正在编辑某个计划）→ POST/PUT /loops。
+   * 循环只是给任务加一个执行计划，不是另一类任务。 */
   function submitTask() {
     var prompt = (document.getElementById('task-prompt').value || '').trim();
     if (!prompt) { layer.msg('请先填写任务描述', { icon: 2 }); return; }
     var tool = selectedTool();
     if (!tool) { layer.msg('请选择引擎', { icon: 2 }); return; }
+    if (planMode === 'scheduled' || editingLoop) submitLoopPlan(prompt, tool);
+    else submitNow(prompt, tool);
+  }
+
+  function submitNow(prompt, tool) {
     var body = {
       prompt: prompt,
       tool: tool,
@@ -294,15 +383,7 @@ layui.use(['layer', 'form', 'element'], function () {
     };
     // 未选则不传（后端按空处理）；提交只带 SkillRef 契约字段，剥掉 _ends/_visible 渲染元数据
     if (pickedSkills.length) {
-      body.skills = pickedSkills.map(function (s) {
-        return {
-          name: s.name,
-          source_tool: s.source_tool || '',
-          source_scope: s.source_scope || '',
-          source_project: s.source_project || '',
-          source_path: s.source_path || ''
-        };
-      });
+      body.skills = pickedSkills.map(skillRefOf);
     }
     var btn = document.getElementById('task-submit');
     btn.disabled = true;
@@ -317,6 +398,265 @@ layui.use(['layer', 'form', 'element'], function () {
       layer.alert(e.message, { title: '预检未通过', icon: 2 });
     });
   }
+
+  function skillRefOf(s) {
+    return {
+      name: s.name,
+      source_tool: s.source_tool || '',
+      source_scope: s.source_scope || '',
+      source_project: s.source_project || '',
+      source_path: s.source_path || ''
+    };
+  }
+
+  function submitLoopPlan(prompt, tool) {
+    var nameEl = document.getElementById('task-plan-name');
+    var name = ((nameEl && nameEl.value) || '').trim();
+    if (!name) name = prompt.slice(0, 20);   // 默认取任务描述开头
+    var config = readSchedConfig();
+    if (!config) return;
+    var body = {
+      name: name,
+      tool: tool,
+      task_content: prompt,
+      workdir: workdir,
+      schedule_type: scheduleType,
+      schedule_config: config,
+      timeout_seconds: Number(document.getElementById('task-timeout').value),
+      // 合并表单不再暴露这两个开关：新建走默认（不补跑、保存即启用），
+      // 编辑保留原值——它们是低频选项，不值得常驻表单
+      catch_up: editingLoop ? !!editingLoop.catch_up : false,
+      enabled: editingLoop ? !!editingLoop.enabled : true
+    };
+    if (pickedSkills.length) {
+      body.skills = pickedSkills.map(skillRefOf);
+    }
+    var btn = document.getElementById('task-submit');
+    btn.disabled = true;
+    loopSend(editingLoop ? '/' + editingLoop.id : '', editingLoop ? 'PUT' : 'POST', body)
+      .then(function () {
+        btn.disabled = false;
+        document.getElementById('task-prompt').value = '';
+        if (nameEl) nameEl.value = '';
+        var wasEditing = !!editingLoop;
+        exitLoopEdit(false);
+        layer.msg(wasEditing ? '计划已保存' : '循环任务已创建，到点自动执行', { icon: 1 });
+        if (window.A4Loops && window.A4Loops.reload) window.A4Loops.reload();
+      })
+      .catch(function (e) {
+        btn.disabled = false;
+        layer.alert(e.message, { title: '保存失败', icon: 2 });
+      });
+  }
+
+  /* ---------- 执行计划：显隐 / 周期字段 / 编辑模式 ---------- */
+  function loopSend(path, method, body) {
+    return fetch(LOOP_API + path, {
+      method: method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function (r) {
+      if (!r.ok) return r.json().then(function (j) { throw new Error(parseError(j, r.status)); },
+        function () { throw new Error('请求失败（HTTP ' + r.status + '）'); });
+      if (r.status === 204) return null;
+      return r.json();
+    });
+  }
+
+  /* 周期字段随类型整体重绘：四种计划的输入形态完全不同，混在一个
+     表单里要靠显隐切换，反而更容易漏校验（同循环表单的既有决策） */
+  function renderSchedFields() {
+    var box = document.getElementById('task-sched');
+    if (!box) return;
+    var cfg = editingLoop && editingLoop.schedule_config ? editingLoop.schedule_config : {};
+    var html = '';
+    if (scheduleType === 'once') {
+      var at = cfg.run_at ? String(cfg.run_at).replace(' ', 'T') : localDTValue(new Date(Date.now() + 5 * 60000));
+      html = '<div class="loop-form-row">' +
+        '<input class="layui-input" id="task-sched-once" type="datetime-local" value="' + at + '" ' +
+        'style="max-width:220px">' +
+        '<span class="task-hint">应用关着时错过的触发不会补跑</span></div>';
+    } else if (scheduleType === 'interval') {
+      html = '<div class="loop-form-row">' +
+        '<input class="layui-input" id="task-sched-interval" type="number" min="1" max="10080" ' +
+        'value="' + (cfg.minutes || 30) + '" style="max-width:120px">' +
+        '<span class="task-hint">分钟一轮（上一轮结束或跳过后才计下一轮）</span></div>';
+    } else if (scheduleType === 'daily') {
+      html = '<div class="loop-form-row">' +
+        '<input class="layui-input" id="task-sched-time" type="time" value="' + (cfg.time || '09:00') +
+        '" style="max-width:120px">' +
+        '<span class="task-hint">每天到这个点执行</span></div>';
+    } else {
+      var days = cfg.weekdays || [1];
+      var wd = WEEKDAYS.map(function (name, i) {
+        var v = i + 1;
+        return '<label class="loop-weekday"><input type="checkbox" name="task-sched-weekday" value="' + v + '"' +
+          (days.indexOf(v) >= 0 ? ' checked' : '') + '>' + name + '</label>';
+      }).join('');
+      html = '<div class="loop-weekdays">' + wd + '</div>' +
+        '<div class="loop-form-row" style="margin-top:8px">' +
+        '<input class="layui-input" id="task-sched-time" type="time" value="' + (cfg.time || '09:00') +
+        '" style="max-width:120px">' +
+        '<span class="task-hint">选中星期到这个点执行</span></div>';
+    }
+    box.innerHTML = html;
+  }
+
+  function readSchedConfig() {
+    if (scheduleType === 'once') {
+      var v = document.getElementById('task-sched-once').value;
+      if (!v) { layer.msg('请选择执行时间', { icon: 2 }); return null; }
+      return { run_at: v.replace('T', ' ') };
+    }
+    if (scheduleType === 'interval') {
+      var mins = Number(document.getElementById('task-sched-interval').value);
+      if (!mins || mins < 1) { layer.msg('间隔至少 1 分钟', { icon: 2 }); return null; }
+      return { minutes: Math.floor(mins) };
+    }
+    var time = document.getElementById('task-sched-time').value;
+    if (!time) { layer.msg('请选择时刻', { icon: 2 }); return null; }
+    if (scheduleType === 'daily') return { time: time };
+    var days = [];
+    document.querySelectorAll('input[name="task-sched-weekday"]:checked').forEach(function (cb) {
+      days.push(Number(cb.value));
+    });
+    if (!days.length) { layer.msg('每周计划至少要选一天', { icon: 2 }); return null; }
+    return { weekdays: days.sort(), time: time };
+  }
+
+  /* 超时上限两种模式不同（后端 schema：手动 le=3600，循环 le=14400），
+     按模式重建 options；原值不在新集合里就回落 10 分钟 */
+  function renderTimeoutOptions() {
+    var sel = document.getElementById('task-timeout');
+    if (!sel) return;
+    var cur = sel.value;
+    var opts = planMode === 'scheduled'
+      ? [['300', '5 分钟'], ['600', '10 分钟'], ['1800', '30 分钟'], ['3600', '60 分钟'],
+         ['7200', '2 小时'], ['14400', '4 小时']]
+      : [['300', '5 分钟'], ['600', '10 分钟'], ['1800', '30 分钟'], ['3600', '60 分钟']];
+    var keep = opts.some(function (o) { return o[0] === cur; });
+    sel.innerHTML = opts.map(function (o) {
+      return '<option value="' + o[0] + '"' + (!keep && o[0] === '600' ? ' selected' :
+        (keep && o[0] === cur ? ' selected' : '')) + '>' + o[1] + '</option>';
+    }).join('');
+    form.render('select', 'task-timeout-form');
+  }
+
+  function updatePlanUI() {
+    var planSel = document.getElementById('task-plan');
+    var nameRow = document.getElementById('task-plan-name-row');
+    var schedRow = document.getElementById('task-sched-row');
+    var hint = document.getElementById('task-plan-hint');
+    var submitHint = document.getElementById('task-submit-hint');
+    var submitBtn = document.getElementById('task-submit');
+    var editHint = document.getElementById('task-edit-hint');
+    var editCancel = document.getElementById('task-edit-cancel');
+    if (!planSel) return;
+    if (editingLoop) planSel.value = 'scheduled';
+    var scheduled = planSel.value === 'scheduled';
+    planMode = scheduled ? 'scheduled' : 'now';
+    if (nameRow) nameRow.style.display = scheduled ? '' : 'none';
+    if (schedRow) schedRow.style.display = scheduled ? '' : 'none';
+    if (hint) hint.textContent = scheduled
+      ? '保存为计划，到点自动执行；应用开着才会触发'
+      : '下发后立即进队列，运行记录出现在下方任务列表';
+    if (submitHint) submitHint.textContent = scheduled
+      ? '保存后到点自动执行；引擎以无头模式获得完全权限，请只把计划交给可信的工作目录'
+      : '下发前自动检测引擎、服务商连通与端配置一致性';
+    if (submitBtn) submitBtn.textContent = editingLoop ? '保存修改' : (scheduled ? '保存计划' : '下发任务');
+    if (editHint) {
+      editHint.style.display = editingLoop ? '' : 'none';
+      if (editingLoop) editHint.textContent = '正在编辑计划 #' + editingLoop.id + ' · ' + editingLoop.name;
+    }
+    if (editCancel) editCancel.style.display = editingLoop ? '' : 'none';
+    if (planSel.disabled !== !editingLoop) {
+      planSel.disabled = !!editingLoop;   // 编辑中的计划不能就地改成「立即执行」
+      form.render('select', 'task-plan-form');
+    }
+    renderTimeoutOptions();
+  }
+
+  /* loops.js 的「编辑」按钮走这里：把循环灌回主表单（进编辑模式） */
+  function startLoopEdit(loop) {
+    if (!loop) return;
+    editingLoop = loop;
+    scheduleType = loop.schedule_type || 'interval';
+    workdir = loop.workdir || '';
+    pickedSkills = (loop.skills || []).map(function (s) {
+      return {
+        name: s.name, source_tool: s.source_tool || '',
+        source_scope: s.source_scope || '', source_project: s.source_project || '',
+        source_path: s.source_path || ''
+      };
+    });
+    document.getElementById('task-prompt').value = loop.task_content || '';
+    document.getElementById('task-plan-name').value = loop.name || '';
+    var toolRadio = document.querySelector('input[name="task-tool"][value="' + loop.tool + '"]');
+    if (toolRadio && !toolRadio.disabled) toolRadio.checked = true;
+    updateCurrentModel();
+    renderWorkdir();
+    renderSkillChips();
+    updatePlanUI();
+    renderSchedFields();
+    document.getElementById('task-timeout').value = String(loop.timeout_seconds || 1800);
+    form.render('select', 'task-timeout-form');
+    var typeSel = document.getElementById('task-sched-type');
+    if (typeSel) { typeSel.value = scheduleType; form.render('select', 'task-sched-form'); }
+    var promptEl = document.getElementById('task-prompt');
+    if (promptEl) promptEl.focus();
+  }
+
+  /* 退出编辑模式。reset=true（取消/保存后）连周期类型一起回落默认 */
+  function exitLoopEdit(reset) {
+    editingLoop = null;
+    if (reset) scheduleType = 'interval';
+    var planSel = document.getElementById('task-plan');
+    if (planSel) planSel.value = 'scheduled';   // 保存完计划回到计划态，方便连建
+    var nameEl = document.getElementById('task-plan-name');
+    if (nameEl && reset) nameEl.value = '';
+    syncSchedType();
+    updatePlanUI();
+    renderSchedFields();
+  }
+
+  function cancelLoopEdit() {
+    exitLoopEdit(true);
+    document.getElementById('task-prompt').value = '';
+    workdir = '';
+    pickedSkills = [];
+    renderWorkdir();
+    renderSkillChips();
+  }
+
+  /* loops.js 的「新建循环任务」按钮走这里：切到计划态清空表单 */
+  function startNewLoop() {
+    editingLoop = null;
+    scheduleType = 'interval';
+    workdir = '';
+    pickedSkills = [];
+    document.getElementById('task-prompt').value = '';
+    var planSel = document.getElementById('task-plan');
+    if (planSel) planSel.value = 'scheduled';
+    syncSchedType();
+    renderWorkdir();
+    renderSkillChips();
+    updatePlanUI();
+    renderSchedFields();
+    document.getElementById('task-prompt').focus();
+  }
+
+  /* 类型下拉的显示值与 scheduleType 同步（layui select 改 value 后要重渲染） */
+  function syncSchedType() {
+    var typeSel = document.getElementById('task-sched-type');
+    if (!typeSel) return;
+    typeSel.value = scheduleType;
+    form.render('select', 'task-sched-form');
+  }
+
+  window.A4TaskForm = {
+    editLoop: startLoopEdit,
+    newLoop: startNewLoop
+  };
 
   /* ---------- 队列 ---------- */
   var lastTaskList = [];
