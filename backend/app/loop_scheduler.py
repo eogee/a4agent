@@ -84,6 +84,7 @@ def _record(loop: Loop, status: str, detail: str, now: datetime) -> AgentTask:
         trigger_type="auto",
         error_summary=detail,
         finished_at=now,
+        skills=loop.skills or "",  # 标记行同样带上快照，历史里能看到该轮带了哪些技能
     )
 
 
@@ -125,6 +126,9 @@ def _fire(loop: Loop, now: datetime, db, submit, precheck=None) -> str:
         status="pending",
         loop_id=loop.id,
         trigger_type="auto",
+        # 快照语义：循环存的就是当时选的源，原样复制进本次运行的任务行，
+        # 注入时再按三级兜底定位（方案 §10）
+        skills=loop.skills or "",
     )
     db.add(task)
     db.flush()  # 先拿到 id

@@ -15,6 +15,7 @@ from ... import crud, loop_schedule, loop_scheduler, schemas, task_engines, task
 from ...crypto import decrypt_text
 from ...database import get_db
 from ...models import AgentTask, Loop
+from .skill_snapshot import skill_snapshot
 
 router = APIRouter(prefix="/loops")
 
@@ -78,6 +79,31 @@ def _parse_schedule(schedule_type: str, raw) -> dict:
         raise HTTPException(422, str(e)) from None
 
 
+def _parse_skills(raw: str) -> list:
+    """Loop.skills 快照 JSON → list[SkillRef]；空串/坏数据一律按「没选技能」。
+
+    回显只保留 SkillRef 契约五字段（§4.2），快照里的 dir_name 等内部字段不外带。
+    """
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [
+        {
+            "name": item.get("name") or "",
+            "source_tool": item.get("source_tool") or "",
+            "source_scope": item.get("source_scope") or "",
+            "source_project": item.get("source_project") or "",
+            "source_path": item.get("source_path") or "",
+        }
+        for item in data if isinstance(item, dict) and item.get("name")
+    ]
+
+
 def loop_payload(loop: Loop, db: Session) -> dict:
     """列表/详情共用的序列化：是否有进行中的运行、最近一次运行。
 
@@ -106,6 +132,7 @@ def loop_payload(loop: Loop, db: Session) -> dict:
         "last_run_at": _fmt(loop.last_run_at),
         "running": _has_active_run(db, loop.id),
         "last_run": None if last is None else task_runner.task_payload(last),
+        "skills": _parse_skills(loop.skills),
     }
 
 
@@ -132,6 +159,8 @@ def create_loop(body: schemas.LoopCreate, db: Session = Depends(get_db)):
         raise HTTPException(422, "名称不能为空")
     workdir = _check_workdir(body.workdir)
     config = _parse_schedule(body.schedule_type, body.schedule_config)
+    # 技能校验与任务下发同一口径（workdir 用循环自己的工作目录），失败 422 不建行
+    skills = skill_snapshot(body.skills, workdir=workdir)
     loop = Loop(
         name=name,
         tool=body.tool,
@@ -144,6 +173,7 @@ def create_loop(body: schemas.LoopCreate, db: Session = Depends(get_db)):
         enabled=body.enabled,
         status="active" if body.enabled else "paused",
         next_run_at=loop_schedule.next_run(body.schedule_type, config, datetime.now()),
+        skills=json.dumps(skills, ensure_ascii=False) if skills else "",
     )
     db.add(loop)
     db.commit()
@@ -159,6 +189,8 @@ def update_loop(loop_id: int, body: schemas.LoopUpdate, db: Session = Depends(ge
         raise HTTPException(422, "名称不能为空")
     workdir = _check_workdir(body.workdir)
     config = _parse_schedule(body.schedule_type, body.schedule_config)
+    # 技能校验与任务下发同一口径；整个替换式更新（传空 = 清空已选技能）
+    skills = skill_snapshot(body.skills, workdir=workdir)
 
     schedule_changed = (loop.schedule_type != body.schedule_type
                         or _config_dict(loop) != config)
@@ -171,6 +203,7 @@ def update_loop(loop_id: int, body: schemas.LoopUpdate, db: Session = Depends(ge
     loop.timeout_seconds = body.timeout_seconds
     loop.catch_up = body.catch_up
     loop.enabled = body.enabled
+    loop.skills = json.dumps(skills, ensure_ascii=False) if skills else ""
     # 改计划 = 重新排期；已完成的一次性任务改时间即「再跑一次」。
     # 只是改名/改内容时不动 next_run_at，已完成的一次性任务也不会被改名唤醒。
     if schedule_changed:
@@ -272,6 +305,7 @@ def run_now(loop_id: int, db: Session = Depends(get_db)):
         precheck_result=json.dumps(result, ensure_ascii=False),
         precheck_ms=result["ms"],
         error_summary="",
+        skills=loop.skills or "",  # 手动执行与调度触发同口径：快照原样复制
     )
     db.add(task)
     db.commit()

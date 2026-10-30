@@ -2,6 +2,7 @@
 
 用独立内存/临时库，并把 submit 换成假函数——真实投递会拉起 CLI 子进程。
 """
+import json
 from datetime import datetime, timedelta
 
 import pytest
@@ -219,3 +220,50 @@ def test_tick_commits_precheck_failed_across_sessions(db, submitted):
         assert fresh.get(Loop, loop_id).next_run_at == NOW + timedelta(minutes=30)
     finally:
         fresh.close()
+
+
+# ---------------- 技能快照复制（方案 §10，批 4） ----------------
+
+SKILLS = json.dumps([{"name": "pdf", "dir_name": "pdf", "source_tool": "claude",
+                      "source_scope": "global", "source_project": "",
+                      "source_path": r"C:\skills\claude\pdf"}], ensure_ascii=False)
+
+
+def test_fire_copies_skills_into_task(db, submitted, precheck_ok):
+    """fired 分支：loop.skills 原样复制进本次运行的任务行（快照语义）。"""
+    ids, submit = submitted
+    loop = _make_loop(db, skills=SKILLS)
+
+    counts = sched.tick(now=NOW, db=db, submit=submit, precheck=precheck_ok)
+
+    assert counts == {"fired": 1, "skipped": 0}
+    task = db.query(AgentTask).filter(AgentTask.loop_id == loop.id).one()
+    assert json.loads(task.skills) == json.loads(loop.skills)  # 同一份快照
+    assert task.skills == SKILLS  # 原样复制，不重算不重排
+
+
+def test_skipped_record_carries_skills(db, submitted, precheck_ok):
+    """skipped 标记行同样带快照（_fire 的建行分支全生效）。"""
+    ids, submit = submitted
+    loop = _make_loop(db, skills=SKILLS)
+    db.add(AgentTask(prompt="上一轮", tool="claude", status="running", loop_id=loop.id))
+    db.commit()
+
+    counts = sched.tick(now=NOW, db=db, submit=submit, precheck=precheck_ok)
+
+    assert counts == {"fired": 0, "skipped": 1}
+    assert ids == []
+    skipped = (db.query(AgentTask)
+               .filter(AgentTask.loop_id == loop.id, AgentTask.status == "skipped").one())
+    assert json.loads(skipped.skills) == json.loads(SKILLS)
+
+
+def test_fire_without_skills_keeps_column_empty(db, submitted, precheck_ok):
+    """零回归：不带技能的循环，任务行 skills 仍为空串。"""
+    ids, submit = submitted
+    loop = _make_loop(db)
+
+    sched.tick(now=NOW, db=db, submit=submit, precheck=precheck_ok)
+
+    task = db.query(AgentTask).filter(AgentTask.loop_id == loop.id).one()
+    assert task.skills == ""

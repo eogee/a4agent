@@ -11,8 +11,9 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.app import task_precheck, task_runner
+from backend.app import skill_manager, task_precheck, task_runner
 from backend.app.api.v1 import loops as loops_api
+from backend.app.api.v1.skill_snapshot import skill_snapshot
 from backend.app.database import Base
 from backend.app.models import AgentTask, Loop
 
@@ -263,3 +264,117 @@ def test_delete_refuses_when_run_active(db):
         loops_api.delete_loop(loop.id, db=db)
     assert exc.value.status_code == 409
     assert db.get(Loop, loop.id) is not None
+
+
+# ---------------- 技能：校验 / 落库 / 回显（方案 §10，批 4） ----------------
+
+
+def _skill_root(tmp_path, monkeypatch):
+    """把「已知 skill 根」指到一个临时目录（别扫开发机），返回该根。"""
+    root = tmp_path / "skills" / "claude"
+    root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(skill_manager, "all_known_skill_roots", lambda: [root])
+    return root
+
+
+def _make_skill(root, dir_name="pdf", name="pdf"):
+    skill_dir = root / dir_name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: 处理 PDF\n---\n# 正文\n", encoding="utf-8"
+    )
+    return skill_dir
+
+
+def _skill_body(**kw):
+    src = kw.pop("src")
+    base = dict(
+        name="带技能巡检", tool="opencode", task_content="用技能汇总",
+        workdir="", schedule_type="interval", schedule_config={"minutes": 30},
+        skills=[loops_api.schemas.SkillRef(
+            name="pdf", source_tool="claude", source_scope="global",
+            source_path=str(src),
+        )],
+    )
+    base.update(kw)
+    return loops_api.schemas.LoopCreate(**base)
+
+
+def test_create_loop_stores_and_echoes_skills(db, tmp_path, monkeypatch):
+    root = _skill_root(tmp_path, monkeypatch)
+    src = _make_skill(root)
+
+    out = loops_api.create_loop(_skill_body(src=src), db=db)
+
+    row = db.get(Loop, out["id"])
+    assert json.loads(row.skills) == [{
+        "name": "pdf", "dir_name": "pdf", "source_tool": "claude",
+        "source_scope": "global", "source_project": "", "source_path": str(src),
+    }]
+    # GET /loops 回显同一份（LoopOut.skills 只保留 §4.2 的字段）
+    listing = loops_api.list_loops(db=db)
+    echoed = [l for l in listing["loops"] if l["id"] == out["id"]][0]
+    assert echoed["skills"] == [{
+        "name": "pdf", "source_tool": "claude", "source_scope": "global",
+        "source_project": "", "source_path": str(src),
+    }]
+
+
+def test_update_loop_replaces_skills(db, tmp_path, monkeypatch):
+    root = _skill_root(tmp_path, monkeypatch)
+    src = _make_skill(root)
+    loop = _make_loop(db)
+    loops_api.update_loop(loop.id, _skill_body(src=src, name="补技能"), db=db)
+    db.refresh(loop)
+    assert json.loads(loop.skills)[0]["name"] == "pdf"
+    # 传空 = 清空已选技能（替换式更新）
+    loops_api.update_loop(loop.id, _body(name="清技能"), db=db)
+    db.refresh(loop)
+    assert loop.skills == ""
+
+
+def test_create_loop_rejects_skill_path_outside_known_roots(db, tmp_path, monkeypatch):
+    _skill_root(tmp_path, monkeypatch)
+    outside = _make_skill(tmp_path / "elsewhere")
+    with pytest.raises(HTTPException) as exc:
+        loops_api.create_loop(_skill_body(src=outside), db=db)
+    assert exc.value.status_code == 422
+    assert "不在允许" in exc.value.detail
+    assert db.query(Loop).count() == 0
+
+
+def test_create_loop_rejects_too_many_skills():
+    """数量上限 20 由 schema 拦（与 TaskCreate 同值，方案 §4.2）。"""
+    refs = [{"name": f"s{i}"} for i in range(21)]
+    with pytest.raises(Exception):
+        loops_api.schemas.LoopCreate(
+            name="x", tool="claude", task_content="x",
+            schedule_type="interval", schedule_config={"minutes": 30}, skills=refs)
+
+
+def test_skill_snapshot_helper_rejects_over_limit():
+    """路由层助手同样守住 20（直呼不经 pydantic 的场景兜底）。"""
+    refs = [loops_api.schemas.SkillRef(name=f"s{i}") for i in range(21)]
+    with pytest.raises(HTTPException) as exc:
+        skill_snapshot(refs)
+    assert exc.value.status_code == 422
+    assert "20" in exc.value.detail
+
+
+def test_run_now_copies_skills_into_manual_task(db, tmp_path, monkeypatch):
+    root = _skill_root(tmp_path, monkeypatch)
+    src = _make_skill(root)
+    out = loops_api.create_loop(_skill_body(src=src), db=db)
+    loop = db.get(Loop, out["id"])
+
+    task = loops_api.run_now(loop.id, db=db)
+
+    # task_payload 回原始快照（HTTP 层由 TaskOut 剥掉 dir_name）；列值与 loop.skills 逐字相等
+    assert task["skills"] == json.loads(loop.skills)
+    assert db.get(AgentTask, task["id"]).skills == loop.skills
+
+
+def test_create_loop_without_skills_keeps_column_empty(db):
+    out = loops_api.create_loop(_body(), db=db)
+    assert db.get(Loop, out["id"]).skills == ""
+    assert out["skills"] == []
