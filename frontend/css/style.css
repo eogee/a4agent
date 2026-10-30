@@ -2763,3 +2763,10 @@ html[lang="en"] .card-actions .layui-btn:not(.i18n-icon-only) {
 
 /* 计划时刻输入（laydate time）：只读，点击弹 layui 面板，指针提示可点 */
 .task-sched-time { cursor: pointer; }
+
+/* laydate 面板圆角与全站卡片一致（默认 2px 太硬，teal 头条露出直角）；
+   overflow:hidden 把头部色块与底条一起裁圆 */
+.layui-laydate {
+  border-radius: 10px;
+  overflow: hidden;
+}
