@@ -2779,3 +2779,10 @@ html[lang="en"] .card-actions .layui-btn:not(.i18n-icon-only) {
 .layui-laydate .laydate-footer-btns span:first-child { border-radius: 8px 0 0 8px; }
 .layui-laydate .laydate-footer-btns span:last-child { border-radius: 0 8px 8px 0; }
 .layui-laydate .layui-laydate-preview { border-radius: 8px; }
+
+/* laydate 时间列：选中行高亮块 6px（原通栏直角）；可见列外框（时/分，
+   秒列本项目 format=HH:mm 恒为 display:none，故右圆固定落在第 2 列）
+   首尾 8px，中缝拼接线不变 */
+.layui-laydate .laydate-time-list ol li.layui-this { border-radius: 6px; }
+.layui-laydate .laydate-time-list > li:first-child ol { border-radius: 8px 0 0 8px; }
+.layui-laydate .laydate-time-list > li:nth-child(2) ol { border-radius: 0 8px 8px 0; }
