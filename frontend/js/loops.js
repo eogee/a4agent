@@ -21,6 +21,7 @@ layui.use(['layer', 'form', 'element'], function () {
   var engines = [];
   var activeConfig = null;
   var draft = null;          // 弹层草稿：null = 新建
+  var pickedSkills = [];     // 弹层已选技能（SkillRef + _ends/_visible 渲染元数据，提交时剥掉）
   var lastRunning = {};      // loop id -> 是否在进行中，用于「刚结束」提示
   var firstLoad = true;
 
@@ -354,13 +355,23 @@ layui.use(['layer', 'form', 'element'], function () {
           schedule_type: loop.schedule_type,
           schedule_config: loop.schedule_config || {},
           timeout_seconds: loop.timeout_seconds,
-          catch_up: loop.catch_up, enabled: loop.enabled
+          catch_up: loop.catch_up, enabled: loop.enabled,
+          skills: Array.isArray(loop.skills) ? loop.skills.slice() : []
         }
       : {
           id: null, name: '', tool: '', task_content: '', workdir: '',
           schedule_type: 'interval', schedule_config: { minutes: 30 },
-          timeout_seconds: 1800, catch_up: false, enabled: true
+          timeout_seconds: 1800, catch_up: false, enabled: true,
+          skills: []
         };
+    // 编辑回填：服务端快照只有契约五字段，先按可兼容处理（无渲染元数据不误标黄）
+    pickedSkills = draft.skills.map(function (s) {
+      return {
+        name: s.name, source_tool: s.source_tool || '',
+        source_scope: s.source_scope || '', source_project: s.source_project || '',
+        source_path: s.source_path || ''
+      };
+    });
     if (!draft.tool) {
       for (var i = 0; i < engines.length; i++) {
         if (engines[i].installed) { draft.tool = engines[i].tool; break; }
@@ -412,6 +423,17 @@ layui.use(['layer', 'form', 'element'], function () {
         '<div class="layui-form-item">' +
           '<label class="layui-form-label">引擎</label>' +
           '<div class="layui-input-block"><div class="loop-form-engines">' + engineHtml + '</div></div>' +
+        '</div>' +
+        '<div class="layui-form-item">' +
+          '<label class="layui-form-label">技能</label>' +
+          '<div class="layui-input-block loop-form-row">' +
+            '<button class="layui-btn layui-btn-sm" id="loop-f-skills">选择技能…</button>' +
+            '<div id="loop-skills-chips" class="task-skills-chips"></div>' +
+            '<span class="task-skills-hint">' +
+              '<span>已选 </span><span id="loop-skills-count">0</span>' +
+              '<span> 个 · 任务结束自动移除</span>' +
+            '</span>' +
+          '</div>' +
         '</div>' +
         '<div class="layui-form-item">' +
           '<label class="layui-form-label">任务内容</label>' +
@@ -475,6 +497,11 @@ layui.use(['layer', 'form', 'element'], function () {
       '</div>';
 
     document.getElementById('loop-f-pick').onclick = pickWorkdir;
+    document.getElementById('loop-f-skills').onclick = openSkillPicker;
+    var engineBox = document.querySelector('.loop-form-engines');
+    if (engineBox) engineBox.addEventListener('change', function () {
+      renderSkillChips();   // 引擎切换保留已选，但不兼容项要重新标黄
+    });
     document.getElementById('loop-f-cancel').onclick = function () { layer.closeAll(); };
     document.getElementById('loop-f-save').onclick = submitForm;
     /* 计划类型切换走 layui 的 select 事件：原生 select 被 form.render 藏起来，
@@ -483,7 +510,65 @@ layui.use(['layer', 'form', 'element'], function () {
     document.getElementById('loop-f-type').value = d.schedule_type;
     renderScheduleFields();
     document.getElementById('loop-f-timeout').value = String(d.timeout_seconds);
+    renderSkillChips();
     form.render(null, 'loop-form');
+  }
+
+  /* ---------- 技能选择 ---------- */
+  /* 弹层是公共组件（skillpick.js，与「任务下发」共用同一份）；这里只负责
+   * 把结果写回 pickedSkills 并重渲 chip。引擎切换不自动删不兼容项。 */
+  function selectedTool() {
+    var el = document.querySelector('input[name="loop-tool"]:checked');
+    return el ? el.value : '';
+  }
+
+  function skillCompatible(s, tool) {
+    if (!tool) return true;
+    // 编辑回填的快照没有 _ends/_visible 渲染元数据，无从判断兼容性，不误标黄
+    if (typeof s._ends === 'undefined' && typeof s._visible === 'undefined') return true;
+    if ((s._ends || []).indexOf(tool) >= 0) return true;
+    return tool === 'opencode' && !!s._visible;
+  }
+
+  function openSkillPicker() {
+    if (!window.A4SkillPicker) {
+      layer.msg('技能选择组件未加载，请刷新页面', { icon: 2 });
+      return;
+    }
+    window.A4SkillPicker.pick({
+      tool: selectedTool(),
+      workdir: draft.workdir || '',
+      selected: pickedSkills
+    }).then(function (refs) {
+      if (refs === null) return;   // 用户取消，保持原状
+      pickedSkills = refs;
+      renderSkillChips();
+    }).catch(function (e) {
+      layer.msg('技能列表加载失败：' + e.message, { icon: 2 });
+    });
+  }
+
+  function renderSkillChips() {
+    var box = document.getElementById('loop-skills-chips');
+    var count = document.getElementById('loop-skills-count');
+    if (!box) return;
+    var tool = selectedTool();
+    var warnTip = '该端不会加载此技能';
+    box.innerHTML = pickedSkills.map(function (s, i) {
+      var ok = skillCompatible(s, tool);
+      return '<span class="task-skill-chip' + (ok ? '' : ' is-warn') + '"' +
+        (ok ? '' : ' title="' + warnTip + '"') + '>' +
+        '<span class="task-skill-chip-name">' + escapeHtml(s.name) + '</span>' +
+        '<button type="button" class="task-skill-chip-x" data-x="' + i + '">×</button>' +
+      '</span>';
+    }).join('');
+    box.querySelectorAll('[data-x]').forEach(function (btn) {
+      btn.onclick = function () {
+        pickedSkills.splice(Number(btn.getAttribute('data-x')), 1);
+        renderSkillChips();
+      };
+    });
+    if (count) count.textContent = String(pickedSkills.length);
   }
 
   /* 触发计划字段随类型整体重绘：四种计划的输入形态完全不同，混在一个
@@ -590,6 +675,18 @@ layui.use(['layer', 'form', 'element'], function () {
       catch_up: document.getElementById('loop-f-catchup').checked,
       enabled: document.getElementById('loop-f-enabled').checked
     };
+    // 未选则不传（后端按空处理）；提交只带 SkillRef 契约字段，剥掉 _ends/_visible 渲染元数据
+    if (pickedSkills.length) {
+      body.skills = pickedSkills.map(function (s) {
+        return {
+          name: s.name,
+          source_tool: s.source_tool || '',
+          source_scope: s.source_scope || '',
+          source_project: s.source_project || '',
+          source_path: s.source_path || ''
+        };
+      });
+    }
     var path = draft.id ? '/' + draft.id : '';
     var method = draft.id ? 'PUT' : 'POST';
     apiSend(path, method, body).then(function () {
