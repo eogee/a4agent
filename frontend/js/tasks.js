@@ -569,10 +569,12 @@ layui.use(['layer', 'form', 'element'], function () {
       if (editingLoop) editHint.textContent = '正在编辑计划 #' + editingLoop.id + ' · ' + editingLoop.name;
     }
     if (editCancel) editCancel.style.display = editingLoop ? '' : 'none';
-    if (planSel.disabled !== !editingLoop) {
+    if (planSel.disabled !== !!editingLoop) {
       planSel.disabled = !!editingLoop;   // 编辑中的计划不能就地改成「立即执行」
-      form.render('select', 'task-plan-form');
     }
+    /* 代码改过原生 value/disabled 后必须重渲染：layui 下拉头显示的是它
+       自己缓存的文本，不同步就会出现「显示立即执行、实际保存计划」 */
+    form.render('select', 'task-plan-form');
     renderTimeoutOptions();
   }
 
@@ -606,24 +608,29 @@ layui.use(['layer', 'form', 'element'], function () {
     if (promptEl) promptEl.focus();
   }
 
-  /* 退出编辑模式。reset=true（取消/保存后）连周期类型一起回落默认 */
-  function exitLoopEdit(reset) {
+  /* 保存计划成功后退出编辑态：保持计划态方便连建（取消编辑走 cancelLoopEdit） */
+  function exitLoopEdit() {
     editingLoop = null;
-    if (reset) scheduleType = 'interval';
     var planSel = document.getElementById('task-plan');
-    if (planSel) planSel.value = 'scheduled';   // 保存完计划回到计划态，方便连建
-    var nameEl = document.getElementById('task-plan-name');
-    if (nameEl && reset) nameEl.value = '';
+    if (planSel) planSel.value = 'scheduled';
     syncSchedType();
     updatePlanUI();
     renderSchedFields();
   }
 
   function cancelLoopEdit() {
-    exitLoopEdit(true);
+    editingLoop = null;
+    scheduleType = 'interval';
+    var planSel = document.getElementById('task-plan');
+    if (planSel) planSel.value = 'now';   // 取消 = 放弃这次编辑，回到立即执行
     document.getElementById('task-prompt').value = '';
+    var nameEl = document.getElementById('task-plan-name');
+    if (nameEl) nameEl.value = '';
     workdir = '';
     pickedSkills = [];
+    syncSchedType();
+    updatePlanUI();
+    renderSchedFields();
     renderWorkdir();
     renderSkillChips();
   }
