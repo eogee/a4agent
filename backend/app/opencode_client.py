@@ -37,6 +37,14 @@ DEFAULT_BASE_URL = "http://127.0.0.1:49374"
 SERVICE_JSON = "service.json"
 CONNECT_TIMEOUT = 5.0
 DEFAULT_TIMEOUT = 300.0
+_CONNECT_ERROR_PREFIX = "无法连接 OpenCode 服务"
+
+# 本机回环请求一律直连、不读环境代理。urllib 默认会把 127.0.0.1 也交给
+# http_proxy（终端/公司网络工具常设），实测在这种环境里探测到的是代理返回的
+# 「HTTP 502」，真因（服务没启动，WinError 10061）被掩盖，排查方向整个跑偏。
+# 本模块只对接本机实例，因此不需要任何代理。
+_DIRECT_PROXY = urllib.request.ProxyHandler({})
+_DIRECT_OPENER = urllib.request.build_opener(_DIRECT_PROXY)
 # 服务端消息保留上限远大于本工具产出文件；导出失败时回退到 /message
 EXPORT_LIMIT = 4 * 1024 * 1024
 
@@ -151,12 +159,12 @@ def request(
         headers["Authorization"] = _auth_header(password)
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _DIRECT_OPENER.open(req, timeout=timeout) as resp:
             return resp.status, resp.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode("utf-8", "replace")
     except (urllib.error.URLError, socket.timeout, OSError) as e:
-        raise OpenCodeError(f"无法连接 OpenCode 服务（{base_url}）：{e}") from e
+        raise OpenCodeError(f"{_CONNECT_ERROR_PREFIX}（{base_url}）：{e}") from e
 
 
 def _json_or_none(text: str):
@@ -213,6 +221,9 @@ def probe(refresh: bool = False) -> dict:
         "command": base,
         "version": "",
         "error": "",
+        # 前端据此区分「未安装」与「已装但服务没跑」：本条走 HTTP 会话，
+        # 没有可探测的 CLI 命令，installed 的含义是「服务可连」而非「命令在 PATH」。
+        "http": True,
     }
     if not pwd:
         info["error"] = (
@@ -229,7 +240,13 @@ def probe(refresh: bool = False) -> dict:
                 # capabilities 随版本增减，原样带出便于排查（实测 v2.0.26 无 persistentPty）
                 info["capabilities"] = caps
         except OpenCodeError as e:
-            info["error"] = f"无法连接 OpenCode 服务：{e}"
+            # OpenCodeError 的文案已经自带「无法连接 OpenCode 服务（url）：…」，
+            # 再套一层前缀会变成「…服务：…服务：…」，这里只补缺失的上下文。
+            msg = str(e)
+            if msg.startswith("HTTP "):
+                info["error"] = f"{_CONNECT_ERROR_PREFIX}：{msg}"
+            else:
+                info["error"] = f"{msg}（OpenCode 桌面端未运行；启动后点「重新检测」）"
     _probe_cache[base] = (now, info)
     return info
 
@@ -541,7 +558,7 @@ class EventStream:
             headers={"Accept": "text/event-stream",
                      **({"Authorization": _auth_header(self.password)} if self.password else {})},
         )
-        with urllib.request.urlopen(req, timeout=None) as resp:
+        with _DIRECT_OPENER.open(req, timeout=None) as resp:
             self._resp = resp
             try:
                 buf = ""

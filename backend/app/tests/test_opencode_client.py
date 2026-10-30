@@ -722,3 +722,78 @@ def test_resolve_connection_survives_missing_or_broken_files(svc_paths):
     svc_paths["config"].parent.mkdir(parents=True)
     svc_paths["config"].write_text("{broken", encoding="utf-8")
     assert opencode_client.resolve_connection() == (opencode_client.DEFAULT_BASE_URL, "")
+
+
+# ---------------- 代理隔离与探测文案 ----------------
+
+
+def test_local_requests_ignore_environment_proxy(monkeypatch):
+    """环境里有 http_proxy 也不能把 127.0.0.1 的请求转出去。
+
+    实测：从带代理的终端启动后端时，探测拿到的是代理返回的 HTTP 502，
+    真因（服务未启动，WinError 10061）被掩盖成另一回事。这里起一个只监听
+    本机的服务，把代理指向必然连不上的端口——请求若被转发就会失败。
+    """
+    import http.server
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler 约定的方法名
+            body = b'{"version":"2.0.32"}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # noqa: D401 - 静音测试输出
+            pass
+
+    assert opencode_client._DIRECT_PROXY.proxies == {}
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setenv("http_proxy", "http://127.0.0.1:1")
+        monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:1")
+        monkeypatch.delenv("no_proxy", raising=False)
+        monkeypatch.delenv("NO_PROXY", raising=False)
+        status, text = opencode_client.request(
+            "GET", "/api/info", base_url=f"http://127.0.0.1:{server.server_port}", timeout=5)
+        assert status == 200
+        assert "2.0.32" in text
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_probe_connect_error_not_double_prefixed(monkeypatch):
+    """OpenCodeError 自带「无法连接 OpenCode 服务（url）」，不能再套一层同名前缀。"""
+    monkeypatch.setattr(opencode_client, "_probe_cache", {})
+    monkeypatch.setattr(opencode_client, "read_local_password", lambda: "pw")
+
+    def boom(base, pwd):
+        raise opencode_client.OpenCodeError(
+            "无法连接 OpenCode 服务（http://127.0.0.1:45278）："
+            "<urlopen error [WinError 10061] 目标计算机积极拒绝>")
+
+    monkeypatch.setattr(opencode_client, "server_info", boom)
+    info = opencode_client.probe()
+    assert info["installed"] is False
+    assert info["http"] is True
+    assert info["error"].count("无法连接 OpenCode 服务") == 1
+    assert "重新检测" in info["error"], "连不上时必须给出可执行的下一步"
+
+
+def test_probe_http_error_keeps_server_reason(monkeypatch):
+    """服务在跑但拒绝请求（401/5xx）时不加「桌面端未运行」的误导性提示。"""
+    monkeypatch.setattr(opencode_client, "_probe_cache", {})
+    monkeypatch.setattr(opencode_client, "read_local_password", lambda: "pw")
+
+    def boom(base, pwd):
+        raise opencode_client.OpenCodeError("HTTP 401：UnauthorizedError")
+
+    monkeypatch.setattr(opencode_client, "server_info", boom)
+    info = opencode_client.probe()
+    assert info["installed"] is False
+    assert info["error"].startswith("无法连接 OpenCode 服务：HTTP 401")
+    assert "未运行" not in info["error"]
