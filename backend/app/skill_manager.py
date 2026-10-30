@@ -797,6 +797,41 @@ def discover() -> dict:
     }
 
 
+def workdir_project_entry(workdir: str | None) -> dict | None:
+    """把「任务工作目录的项目级 skill」扫成一个 projects[] 形状的条目。
+
+    为什么需要：项目发现（project_dirs）只覆盖「扫描范围的一级子目录 +
+    会话线索反查」，用户随手选一个未发现目录当工作目录时，它的 .<tool>/skills
+    不会出现在 discover 里——而 API 校验与注入层（task_skills._known_roots）
+    都认这个目录。这里补上 UI 侧的最后一环：任务在哪个目录跑，就能选哪个
+    目录的技能，不必先去「项目来源」登记。
+
+    - workdir 为空 / 相对路径 / 目录不存在 / 目录下没有任何技能 → 返回 None
+      （调用方按「没有附加条目」处理，不报错）
+    - 该目录已是已发现项目（root 归一化相等）→ 返回 None，避免重复条目
+    - source 固定 "workdir"，前端据此显示「工作目录」标签
+    """
+    path = Path(str(workdir or "").strip())
+    if not path.is_absolute() or not _safe_is_dir(path):
+        return None
+    key = _root_key(path)
+    for proj in project_dirs():
+        if _root_key(proj["root"]) == key:
+            return None
+    project_name = path.name or str(path)
+    entries = _scan_project(path, project_name)
+    if not entries:
+        return None
+    _mark_opencode_visible(entries, opencode_compat_roots(path))
+    return {
+        "project": project_name,
+        "root": str(path),
+        "source": "workdir",
+        "sources": ["任务工作目录"],
+        "skills": _aggregate(entries),
+    }
+
+
 def project_sources(refresh: bool = False) -> dict:
     """项目来源汇总：扫描范围、默认值、忽略项、自动发现的候选与命中。"""
     hints = project_hints.summary(force=refresh)

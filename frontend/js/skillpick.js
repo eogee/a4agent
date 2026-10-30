@@ -26,8 +26,9 @@ layui.use(['layer'], function () {
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  function fetchDiscover() {
-    return fetch(API).then(function (r) {
+  function fetchDiscover(workdir) {
+    var url = API + (workdir ? '?workdir=' + encodeURIComponent(workdir) : '');
+    return fetch(url).then(function (r) {
       if (!r.ok) {
         return r.json().then(
           function (j) { throw new Error(j.detail || ('HTTP ' + r.status)); },
@@ -59,7 +60,7 @@ layui.use(['layer'], function () {
       if (ref && ref.name) selected[keyOf(ref.name, ref.source_scope)] = ref;
     });
 
-    return fetchDiscover().then(function (data) { return open(data); });
+    return fetchDiscover(workdir).then(function (data) { return open(data); });
 
     function open(data) {
       return new Promise(function (resolve) {
@@ -70,12 +71,17 @@ layui.use(['layer'], function () {
           resolve(value);
         }
 
-        /* 候选分组：工作目录命中的项目在前，全局在后 */
+        /* 候选分组：工作目录命中的项目在前，全局在后。
+           source === 'workdir' 是 discover(workdir) 合成的「任务工作目录」条目
+           （未注册目录也能看到自己的技能），分组标签与角标单独标出 */
         var groups = [];
         if (workdir) {
           (data.projects || []).forEach(function (p) {
             if (underRoot(p.root, workdir)) {
-              groups.push({ scope: 'project', project: p.project || '', root: p.root || '', skills: p.skills || [] });
+              groups.push({
+                scope: 'project', project: p.project || '', root: p.root || '',
+                skills: p.skills || [], isWorkdir: p.source === 'workdir'
+              });
             }
           });
         }
@@ -83,7 +89,7 @@ layui.use(['layer'], function () {
 
         var groupItems = groups.map(function (g) {
           return (g.skills || []).map(function (e) {
-            return { entry: e, scope: g.scope, project: g.project, root: g.root };
+            return { entry: e, scope: g.scope, project: g.project, root: g.root, isWorkdir: g.isWorkdir };
           });
         });
 
@@ -154,7 +160,7 @@ layui.use(['layer'], function () {
             '<span class="skillpick-main">' +
               '<span class="skillpick-line">' +
                 '<span class="skillpick-name">' + escapeHtml(e.display_name || e.name) + '</span>' +
-                '<span class="skillpick-scope">' + escapeHtml(item.scope === 'project' ? '项目' : '全局') + '</span>' +
+                '<span class="skillpick-scope">' + escapeHtml(item.scope === 'project' ? (item.isWorkdir ? '工作目录' : '项目') : '全局') + '</span>' +
               '</span>' +
               (desc ? '<span class="skillpick-desc" title="' + escapeHtml(desc) + '">' + escapeHtml(desc) + '</span>' : '') +
             '</span>' +
@@ -183,7 +189,8 @@ layui.use(['layer'], function () {
             any = true;
             var g = groups[gi];
             html += '<div class="skillpick-group">' +
-              '<span class="skillpick-group-label">' + (g.scope === 'project' ? '项目技能' : '全局技能') + '</span>' +
+              '<span class="skillpick-group-label">' +
+                (g.scope === 'project' ? (g.isWorkdir ? '工作目录技能' : '项目技能') : '全局技能') + '</span>' +
               (g.root ? '<span class="skillpick-group-path" title="' + escapeHtml(g.root) + '">' + escapeHtml(g.root) + '</span>' : '') +
             '</div>';
             html += rows.map(rowHtml).join('');

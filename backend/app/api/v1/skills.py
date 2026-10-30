@@ -13,9 +13,19 @@ router = APIRouter()
 
 
 @router.get("/skills/discover")
-def discover_skills():
-    """全量发现：全局与各项目的 skill 聚合结果（含重复标注）。"""
-    return skill_manager.discover()
+def discover_skills(workdir: str = ""):
+    """全量发现：全局与各项目的 skill 聚合结果（含重复标注）。
+
+    workdir（可选）：把该目录的项目级 skill 也扫成一条「工作目录」条目。
+    项目发现只覆盖扫描范围一级子目录与会话线索，任务选中的工作目录未必
+    在其中；不补这一条，选择器就选不到工作目录自己的技能（API 校验与
+    注入层都认它，见 workdir_project_entry 注释）。
+    """
+    data = skill_manager.discover()
+    entry = skill_manager.workdir_project_entry(workdir)
+    if entry is not None:
+        data["projects"].insert(0, entry)
+    return data
 
 
 @router.get("/skills/project-roots")

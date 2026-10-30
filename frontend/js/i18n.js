@@ -526,6 +526,8 @@
     "搜索名称或描述": "Search by name or description",
     "全局技能": "Global skills",
     "项目技能": "Project skills",
+    "工作目录技能": "Working-directory skills",
+    "工作目录": "Working dir",
     "项目": "Project",
     "该端不会加载此技能": "The selected target won't load this skill",
     "一次最多选择 20 个技能": "Pick at most 20 skills",
