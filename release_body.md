@@ -1,41 +1,45 @@
-# a4agent v0.6.6（任务可带技能，循环融入下发 / Skills for tasks, loops inline）
+# a4agent v0.7.0（设备互联：一次确认配对跨机免手工 / Device networking: one-confirm pairing）
 
 **下载对应平台的安装包 / Download for your platform：**
 
-Windows：a4agent-setup-0.6.6.exe——八端 AI 编程工具管理台 + 本地大模型推理控制台，双击安装（per-user 免管理员；SmartScreen 提示时选「更多信息 → 仍要运行」）
+Windows：a4agent-setup-0.7.0.exe——八端 AI 编程工具管理台 + 本地大模型推理控制台，双击安装（per-user 免管理员；SmartScreen 提示时选「更多信息 → 仍要运行」）。本版起安装包内嵌 CrossDevice 设备运行时，安装即具备跨设备控制能力
 
-Windows: a4agent-setup-0.6.6.exe — the eight-tool AI coding console with a local LLM inference panel. Double-click to install (per-user, no admin; if SmartScreen prompts, choose "More info → Run anyway").
+Windows: a4agent-setup-0.7.0.exe — the eight-tool AI coding console with a local LLM inference panel. Double-click to install (per-user, no admin; if SmartScreen prompts, choose "More info → Run anyway"). This release embeds the CrossDevice device runtime, so cross-device control works right after install.
 
-**v0.6.6 更新内容：**
+**v0.7.0 更新内容：**
 
-任务下发支持配置技能——下发与循环任务都能勾选技能（上限 20 个），运行前自动注入工作目录的 `.<端>/skills`：优先建 Windows 目录联接（秒挂零拷贝）、源不可用自动回退复制、同名已有技能一律跳过绝不覆盖、多个任务共享同一技能按引用计数、任务结束只删自建目录并自动清空空壳；选择器区分全局/项目/工作目录三档来源，未注册为项目的目录（含 a4agent 自身）也能选到其项目级技能
+新增「设备」页——CrossDevice 设备运行时（MIT 协议）随安装包交付到安装目录 `node_runtime/`，应用首启自动以独立子进程拉起本机被控端并守护：退出自动重启、连续崩溃熔断、TLS 证书缺失自动生成；也可在设备页手动指定 node.py 路径（开发态可直接指向 CrossDevice 仓）
 
-循环任务并入任务下发——不再有独立板块，同一张表单里把「执行计划」切到「按计划循环」即创建循环（按间隔 / 每天固定时刻 / 每周选定几天 / 仅一次，超时上限放宽到 4 小时），计划以横条常驻表单上方，启停、立即执行、运行历史、日志都在原位；点「编辑」把计划灌回主表单修改，周期与时刻选择全部换成 layui 风格面板（含圆角），不再出现浏览器原生的蓝色控件
+局域网自动发现——双端安装 a4agent 后，同网段设备经 UDP 广播自动出现在「发现的设备」列表（约 10 秒心跳、30 秒无帧判离线、同源限频去重）；广播只提供"看得见"，**不自动建立信任**；未广播的设备可手动添加 IP
 
-工作目录首次真正生效——修复引擎进程没有拿到所选目录的缺陷：命令行目录参数与进程工作目录强制同值（Claude `--add-dir`、Codex `-C`、ZCode `--cwd`、Qoder `-w`），预检冒烟仍跑在主目录不受影响；此前选了目录却只有部分端真的在那个目录里执行
+一次确认配对——控制端点「发起配对」→ 被控端弹出确认窗（显示来源 IP，可拒绝）→ 确认后同屏展示一次性 6 位配对码 + 5 分钟倒计时 → 控制端输码即建立连接，此后该设备对长期免手工；配对码一次性、猜错达上限（默认 5 次）即作废本次会话、发起端受 10 秒限频保护；配对成功/失败/拒绝全程落被控端审计
 
-OpenCode 探测三处修复——服务地址从 `service.json` 自动发现（OpenCode 每次启动可能换端口，此前硬编码导致永远连不上）；回环请求绕过环境代理（带 `http_proxy` 的终端里探测到的是代理 502，真因被掩盖）；「明明装了却显示未安装」区分「未安装」与「已装但服务未运行」，引擎行新增「重新检测」按钮
+配对后免手工操作——远程命令（异步任务与任务历史）、全屏截屏（原始分辨率 PNG 本地保存）、文件上传与下载（4MB 分块 + 断点续传 + MD5 校验）、任务历史按身份过滤；已配对设备的凭据（令牌与证书指纹）经 Windows DPAPI 加密落盘，接口与文件层均不回传明文；证书指纹变更会被拒绝，可在设备页重置指纹后重新连接
 
-界面归位与统一——「当前生效」状态与「新增配置」按钮从全局顶栏移入配置方案页头，顶栏只留全局项；任务队列的完成提示覆盖所有页面；新增/调整测试 26 条，全量 686 通过
+边界如实声明——未配对设备对被控端的请求一律 401；非私网来源一律拒绝；**不提供同网段静默互信**（每台新设备都需要被控端本地一次确认）；被控端拒绝则连接不建立
+
+质量门槛——后端新增测试 67 条、全量 753 通过；CrossDevice 侧配对冒烟 14/14、四道发布门槛（8/8、10/10、10/10、14/14）全绿；安装包内嵌 node 运行时与 CrossDevice MIT LICENSE 文本
 
 ---
 
-**What's new in v0.6.6:**
+**What's new in v0.7.0:**
 
-Dispatched tasks can carry skills — both one-shot and loop tasks accept up to 20 skills, injected automatically into the working directory's `.<tool>/skills` before the run: Windows junctions first (instant, zero-copy), automatic fallback to copying when the source is unusable, existing same-name skills are always skipped and never overwritten, multiple tasks sharing one skill are reference-counted, and after the run only directories we created are removed. The picker distinguishes global / project / working-directory sources, and directories not registered as projects (a4agent itself included) can now expose their project-level skills too
+New "Devices" page — the CrossDevice device runtime (MIT licensed) ships inside the installer at `node_runtime/`; on first launch a4agent starts the local controlled-device node as an independent supervised subprocess: auto-restart on exit, crash circuit-breaker, and automatic TLS certificate generation when missing. You can also point the page at a custom node.py path (in development, the CrossDevice repo works directly)
 
-Loops merge into dispatch — the separate loops tab is gone. In the same form, switch the execution plan to "on a schedule" to create a loop (interval / daily time / selected weekdays / once; timeout raised to 4 hours). Plans live in a strip above the form with enable, run-now, history and logs in place; "edit" pours the plan back into the main form. Schedule and time pickers are now layui-styled panels with rounded corners — no more native blue browser widgets
+LAN auto-discovery — with a4agent installed on both machines, devices in the same subnet appear automatically under "Discovered Devices" via UDP broadcast (roughly a 10-second heartbeat, 30 seconds without frames marks offline, per-source rate limiting and dedup). The broadcast only makes devices visible and **never grants trust by itself**; non-broadcasting devices can be added by IP
 
-Working directories finally work — fixed a defect where the engine process never received the chosen directory: the command-line directory argument and the process cwd are now forced to the same value (Claude `--add-dir`, Codex `-C`, ZCode `--cwd`, Qoder `-w`), while the precheck smoke run stays in the home directory. Previously only some targets actually ran inside the directory you picked
+One-confirm pairing — click "Pair" on the controller → the controlled side pops a confirmation window (showing the source IP, with a Reject button) → once confirmed, a one-time 6-digit pairing code with a 5-minute countdown is shown on screen → enter the code on the controller and the pair is established for good, no more manual setup. Codes are single-use, guessing past the limit (5 by default) voids the session, and the initiating side is rate-limited (10 s). Every success, failure and rejection lands in the controlled side's audit log
 
-Three OpenCode detection fixes — the service address is discovered from `service.json` (OpenCode may change ports per launch; the old hard-coded one never connected); loopback requests bypass the environment proxy (with `http_proxy` set you saw the proxy's 502 instead of the real cause); and "installed but service not running" is now distinguished from "not installed", with a re-detect button on the engine row
+Hands-free operation after pairing — remote commands (async jobs with history), full-screen screenshots (original-resolution PNG saved locally), file upload/download (4 MB chunks + resumable transfer + MD5 verification), and task history filtered by identity. Credentials of paired devices (tokens and certificate fingerprints) are stored locally encrypted with Windows DPAPI and never returned in plain text; a fingerprint change is rejected and can be reset from the Devices page to reconnect
 
-UI realignment — the active-configuration status and the "new configuration" button moved from the global header into the configurations page header, leaving only global items up top; task-finish toasts now reach you on any tab; 26 tests added or adjusted, 686 passing
+Honest boundaries — requests from unpaired devices are always 401; non-private-network sources are always rejected; **no silent same-subnet trust** (every new device needs one local confirmation on the controlled side); rejection means no connection
+
+Quality gates — 67 backend tests added, 753 passing; CrossDevice pairing smoke 14/14 with all four release gates green (8/8, 10/10, 10/10, 14/14); the installer embeds the node runtime plus the CrossDevice MIT LICENSE text
 
 **源码与说明 / Source and docs：** https://github.com/eogee/a4agent ｜ https://eogee.com/article/94
 
 ## 校验 / Checksum
 
 ```
-75CBDE01554FBE831703DCDE1BC8BCF79BB201D78849FD33368AF9873453CA1C  a4agent-setup-0.6.6.exe
+（SHA256 构建后补 / to be filled after build）  a4agent-setup-0.7.0.exe
 ```
