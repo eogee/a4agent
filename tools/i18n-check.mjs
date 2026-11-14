@@ -74,6 +74,23 @@ function* literals(src) {
 
 const ATTR = /\b(?:title|placeholder|alt|aria-label|data-tip)\s*=\s*"([^"]*)"/g;
 
+/* HTML 源文件的标签间文本节点与属性：literals() 只认 JS 引号字面量，
+ * index.html 里 <li>设备</li> 这类纯文本节点此前是收集盲区（2026-11-15
+ * 实测漏报「设备」标签页），.html 文件改走本收集器。 */
+function* htmlSegments(src) {
+  const cleaned = src
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '');
+  for (const m of cleaned.matchAll(ATTR)) {
+    if (CJK.test(m[1])) yield { text: m[1], concat: false };
+  }
+  for (const m of cleaned.matchAll(/>([^<>]+)</g)) {
+    const p = m[1].trim();
+    if (CJK.test(p)) yield { text: p, concat: false };
+  }
+}
+
 function segments(lit) {
   const out = [];
   for (const m of lit.matchAll(ATTR)) if (CJK.test(m[1])) out.push(m[1]);
@@ -128,7 +145,8 @@ const missing = [];
 let skipped = 0;
 for (const f of FILES) {
   const src = fs.readFileSync(path.join(root, f), 'utf8');
-  for (const lit of literals(src)) {
+  const collector = f.endsWith('.html') ? htmlSegments(src) : literals(src);
+  for (const lit of collector) {
     if (lit.concat) { skipped++; continue; }
     for (const raw of segments(lit.text)) {
       const seg = clean(raw);

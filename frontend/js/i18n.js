@@ -38,6 +38,7 @@
     "本地模型": "Local models",
     "任务下发": "Tasks",
     "通知提醒": "Notifications",
+    "设备": "Devices",
     "供应商模板": "Provider templates",
     "新增供应商": "New provider",
     "全局视图": "Global view",
