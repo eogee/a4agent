@@ -41,5 +41,5 @@ Quality gates — 67 backend tests added, 753 passing; CrossDevice pairing smoke
 ## 校验 / Checksum
 
 ```
-（SHA256 构建后补 / to be filled after build）  a4agent-setup-0.7.0.exe
+6a0fb6b955003feea13d27bf9fc8c3c377c5bb65ba1620ac15b8e8eea5532781  a4agent-setup-0.7.0.exe
 ```
