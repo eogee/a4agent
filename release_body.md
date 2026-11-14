@@ -33,5 +33,5 @@ Quality gates — 763 backend tests passing; all four CrossDevice release gates 
 ## 校验 / Checksum
 
 ```
-（SHA256 构建后补 / filled after build）
+D0CCF65574DC30088AA444702C68EAA52EACB07944CD9A8DD607F969F9EA699D
 ```

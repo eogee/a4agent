@@ -1,45 +1,31 @@
-# a4agent v0.7.0（设备互联：一次确认配对跨机免手工 / Device networking: one-confirm pairing）
+# a4agent v0.7.1（安装即用：内嵌设备运行时解释器 / Install-and-go: embedded runtime interpreter）
 
 **下载对应平台的安装包 / Download for your platform：**
 
-Windows：a4agent-setup-0.7.0.exe——八端 AI 编程工具管理台 + 本地大模型推理控制台，双击安装（per-user 免管理员；SmartScreen 提示时选「更多信息 → 仍要运行」）。本版起安装包内嵌 CrossDevice 设备运行时，安装即具备跨设备控制能力
+Windows：a4agent-setup-0.7.1.exe——八端 AI 编程工具管理台 + 本地大模型推理控制台，双击安装（per-user 免管理员；SmartScreen 提示时选「更多信息 → 仍要运行」）
 
-Windows: a4agent-setup-0.7.0.exe — the eight-tool AI coding console with a local LLM inference panel. Double-click to install (per-user, no admin; if SmartScreen prompts, choose "More info → Run anyway"). This release embeds the CrossDevice device runtime, so cross-device control works right after install.
+Windows: a4agent-setup-0.7.1.exe — the eight-tool AI coding console with a local LLM inference panel. Double-click to install (per-user, no admin; if SmartScreen prompts, choose "More info → Run anyway").
 
-**v0.7.0 更新内容：**
+**v0.7.1 更新内容：**
 
-新增「设备」页——CrossDevice 设备运行时（MIT 协议）随安装包交付到安装目录 `node_runtime/`，应用首启自动以独立子进程拉起本机被控端并守护：退出自动重启、连续崩溃熔断、TLS 证书缺失自动生成；也可在设备页手动指定 node.py 路径（开发态可直接指向 CrossDevice 仓）
+安装即用（C8 修复）——安装包内嵌 Python 运行时（python 3.12 embeddable，约 11MB）到 `node_runtime\python\`，设备解释器解析顺序将其置于最前：**全新机器无需预装任何 Python 即可拉起本机被控端**，彻底消除"目标机无匹配解释器导致设备页运行时失败"的缺口；无内嵌场景（开发态/手工构建）仍按原有候选链兜底
 
-局域网自动发现——双端安装 a4agent 后，同网段设备经 UDP 广播自动出现在「发现的设备」列表（约 10 秒心跳、30 秒无帧判离线、同源限频去重）；广播只提供"看得见"，**不自动建立信任**；未广播的设备可手动添加 IP
+Agent 开放交互（B35/FR-16）——新增 `GET /api/v1/devices/overview` 聚合发现端点（一次调用返回已配对设备全景 + backend 地址 + 操作接口速查，设备令牌与指纹不出 backend）与 `POST /api/v1/devices/install-skill` 内置技能三档安装（全局技能库/已注册项目根/自定义目录，同名不覆盖）；内置 `crossdevice` 技能包（能力概述、动态发现流程、API 速查、边界声明），设备页一键安装——AI 编程 Agent 在全新工作空间即可发现并使用局域网设备控制能力，配对确认仍是设备页人工动作
 
-一次确认配对——控制端点「发起配对」→ 被控端弹出确认窗（显示来源 IP，可拒绝）→ 确认后同屏展示一次性 6 位配对码 + 5 分钟倒计时 → 控制端输码即建立连接，此后该设备对长期免手工；配对码一次性、猜错达上限（默认 5 次）即作废本次会话、发起端受 10 秒限频保护；配对成功/失败/拒绝全程落被控端审计
+设备页修复——「发现的设备」列表排除本机行（node.json device_id 识别）并自动清理离线 10 分钟的死设备残影；node 守护日志 utf-8→GBK 双编码解码兜底（修复日志窗中文乱码）；已配对设备卡片单列全宽布局；跨技能文案 i18n 中英登记
 
-配对后免手工操作——远程命令（异步任务与任务历史）、全屏截屏（原始分辨率 PNG 本地保存）、文件上传与下载（4MB 分块 + 断点续传 + MD5 校验）、任务历史按身份过滤；已配对设备的凭据（令牌与证书指纹）经 Windows DPAPI 加密落盘，接口与文件层均不回传明文；证书指纹变更会被拒绝，可在设备页重置指纹后重新连接
-
-边界如实声明——未配对设备对被控端的请求一律 401；非私网来源一律拒绝；**不提供同网段静默互信**（每台新设备都需要被控端本地一次确认）；被控端拒绝则连接不建立
-
-质量门槛——后端新增测试 67 条、全量 753 通过；CrossDevice 侧配对冒烟 14/14、四道发布门槛（8/8、10/10、10/10、14/14）全绿；安装包内嵌 node 运行时与 CrossDevice MIT LICENSE 文本
+质量门槛——后端全量 763 通过；CrossDevice 侧四道发布门槛全绿（8/8、10/10、10/10、14/14）并完成双机实测收口（安装即互见/一次确认配对/防滥用全负例/双端重启免确认重连，证据见 CrossDevice 验收记录 V1.2 §5）；tag v0.5.0 已随独立包发布
 
 ---
 
-**What's new in v0.7.0:**
+**What's new in v0.7.1:**
 
-New "Devices" page — the CrossDevice device runtime (MIT licensed) ships inside the installer at `node_runtime/`; on first launch a4agent starts the local controlled-device node as an independent supervised subprocess: auto-restart on exit, crash circuit-breaker, and automatic TLS certificate generation when missing. You can also point the page at a custom node.py path (in development, the CrossDevice repo works directly)
+Install-and-go (C8 fix) — the installer now embeds a Python runtime (python 3.12 embeddable, ~11 MB) at `node_runtime\python\`, placed first in the device interpreter resolution order: **a brand-new machine needs no pre-installed Python to start the local controlled-device node**, closing the gap where a missing interpreter broke the Devices page runtime. Non-embedded scenarios (development / manual builds) keep the original candidate chain as fallback
 
-LAN auto-discovery — with a4agent installed on both machines, devices in the same subnet appear automatically under "Discovered Devices" via UDP broadcast (roughly a 10-second heartbeat, 30 seconds without frames marks offline, per-source rate limiting and dedup). The broadcast only makes devices visible and **never grants trust by itself**; non-broadcasting devices can be added by IP
+Agent-open interaction (B35/FR-16) — new `GET /api/v1/devices/overview` aggregate endpoint (one call returns the paired-device panorama plus backend address and an API cheat-sheet; device tokens and fingerprints never leave the backend) and `POST /api/v1/devices/install-skill` three-scope skill installation (global library / registered project roots / custom directory, no overwrite on conflict). A built-in `crossdevice` skill (capabilities, dynamic discovery flow, API cheat-sheet, boundary statement) can be installed with one click from the Devices page — AI coding agents can now discover and use LAN device control from a fresh workspace, while pairing confirmation remains a manual action on the Devices page
 
-One-confirm pairing — click "Pair" on the controller → the controlled side pops a confirmation window (showing the source IP, with a Reject button) → once confirmed, a one-time 6-digit pairing code with a 5-minute countdown is shown on screen → enter the code on the controller and the pair is established for good, no more manual setup. Codes are single-use, guessing past the limit (5 by default) voids the session, and the initiating side is rate-limited (10 s). Every success, failure and rejection lands in the controlled side's audit log
+Devices page fixes — the "Discovered Devices" list now excludes the local machine (via node.json device_id) and auto-cleans dead-device ghosts after 10 minutes offline; node guardian logs decode as UTF-8 with GBK fallback (fixes garbled Chinese in the log pane); paired-device cards use a full-width single-column layout; cross-skill strings registered in both i18n languages
 
-Hands-free operation after pairing — remote commands (async jobs with history), full-screen screenshots (original-resolution PNG saved locally), file upload/download (4 MB chunks + resumable transfer + MD5 verification), and task history filtered by identity. Credentials of paired devices (tokens and certificate fingerprints) are stored locally encrypted with Windows DPAPI and never returned in plain text; a fingerprint change is rejected and can be reset from the Devices page to reconnect
-
-Honest boundaries — requests from unpaired devices are always 401; non-private-network sources are always rejected; **no silent same-subnet trust** (every new device needs one local confirmation on the controlled side); rejection means no connection
-
-Quality gates — 67 backend tests added, 753 passing; CrossDevice pairing smoke 14/14 with all four release gates green (8/8, 10/10, 10/10, 14/14); the installer embeds the node runtime plus the CrossDevice MIT LICENSE text
+Quality gates — 763 backend tests passing; all four CrossDevice release gates green (8/8, 10/10, 10/10, 14/14) with the dual-machine acceptance closed (install-and-discover, one-confirm pairing, full anti-abuse negatives, both-sides restart reconnection — evidence in CrossDevice acceptance record V1.2 §5); CrossDevice tag v0.5.0 shipped as a standalone package
 
 **源码与说明 / Source and docs：** https://github.com/eogee/a4agent ｜ https://eogee.com/article/94
-
-## 校验 / Checksum
-
-```
-6a0fb6b955003feea13d27bf9fc8c3c377c5bb65ba1620ac15b8e8eea5532781  a4agent-setup-0.7.0.exe
-```
