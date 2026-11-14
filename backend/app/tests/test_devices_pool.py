@@ -184,14 +184,49 @@ def test_pool_snapshot_prunes_stale_entries():
 
 
 def test_pool_snapshot_exclude_device_id():
-    """快照排除本机 node 条目（exclude_device_id：设备页已有"本机被控端"区块）。"""
+    """快照排除本机 node 条目（exclude_device_id：设备页已有"本机被控端"区块）。
+
+    B45 起回环来源帧在 accept 层即被丢弃，本条目改用 LAN 来源（本机节点
+    经本机网卡广播回环时源地址为 LAN IP 的形态）验证排除语义仍生效。
+    """
     now, state = _tick_factory()
     p = pool_mod.DevicePool(now_fn=now)
     p.accept(pool_mod.parse_frame(
-        encoded(device_id="a1b2c3d4e5f6"), "127.0.0.1"), "127.0.0.1")
+        encoded(device_id="a1b2c3d4e5f6"), "192.168.3.29"), "192.168.3.29")
     p.accept(pool_mod.parse_frame(
         encoded(device_id="b2c3d4e5f6a1", hostname="PC-B"), "192.168.3.11"), "192.168.3.11")
     out = p.snapshot(now=state["now"], exclude_device_id="a1b2c3d4e5f6")
     assert [e["device_id"] for e in out] == ["b2c3d4e5f6a1"]
     out2 = p.snapshot(now=state["now"])                  # 不传排除参数时两台都在
     assert len(out2) == 2
+
+
+# ---------------- B45：回环来源帧丢弃（2026-11-15 幽灵条目事件修复） ----------------
+
+def test_pool_drops_loopback_source_frames():
+    """同机实例广播（127.0.0.1/::1 源）不入池：「跑门槛前退出 a4agent」口径代码化。"""
+    p = pool_mod.DevicePool()
+    assert p.accept(pool_mod.parse_frame(encoded(), "127.0.0.1"), "127.0.0.1") is False
+    assert p.accept(pool_mod.parse_frame(
+        encoded(device_id="b2c3d4e5f6a1"), "::1"), "::1") is False
+    assert p.snapshot() == []                            # 池保持为空，无幽灵条目
+    # 对照：真实局域网来源照常入池
+    assert p.accept(pool_mod.parse_frame(
+        encoded(device_id="b2c3d4e5f6a1"), "192.168.3.11"), "192.168.3.11") is True
+    assert len(p.snapshot()) == 1
+
+
+def test_is_loopback_ip():
+    """回环判定覆盖 127/8 全段与 ::1，非法地址按非回环处理。"""
+    assert pool_mod.is_loopback_ip("127.0.0.1")
+    assert pool_mod.is_loopback_ip("127.8.8.8")
+    assert pool_mod.is_loopback_ip("::1")
+    assert not pool_mod.is_loopback_ip("192.168.3.10")
+    assert not pool_mod.is_loopback_ip("0.0.0.0")
+    assert not pool_mod.is_loopback_ip("not-an-ip")
+
+
+def test_parse_frame_keeps_loopback_source_field():
+    """parse_frame 不拦回环来源（丢弃策略在池层 accept，§19.2 校验清单不变）。"""
+    out = pool_mod.parse_frame(encoded(), "127.0.0.1")
+    assert out is not None and out["ip"] == "127.0.0.1"

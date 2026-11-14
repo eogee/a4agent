@@ -10,6 +10,7 @@ UDP 51889 监听线程：收到 XDCAST 广播帧后按契约校验
 绝不写入已配对存储、绝不自动建立信任。绑定失败只记日志（a4agent 其余功能照常），
 不落盘、不跨进程。
 """
+import ipaddress
 import json
 import logging
 import socket
@@ -31,6 +32,14 @@ _RECV_BUF = 4096                # 比 512B 大，超长报文按超长处理（�
 
 ENTRY_KEYS = ("device_id", "ip", "hostname", "port", "version", "caps",
               "first_seen", "last_seen", "frames")
+
+
+def is_loopback_ip(source_ip):
+    """回环来源判定（B45）：127.0.0.0/8 与 ::1。非法地址按非回环处理。"""
+    try:
+        return ipaddress.ip_address(source_ip).is_loopback
+    except ValueError:
+        return False
 
 
 def parse_frame(data, source_ip):
@@ -89,9 +98,16 @@ class DevicePool:
     def accept(self, frame, source_ip):
         """接受一帧（frame 已过 parse_frame 校验）。限频去重后刷新条目。
 
-        返回 True 表示本帧被接受并刷新了池；False 表示被限频丢弃
-        （不计数、不刷新池，契约 §19.2）。
+        返回 True 表示本帧被接受并刷新了池；False 表示被丢弃
+        （回环来源 B45 / 限频——均不计数、不刷新池，契约 §19.2）。
         """
+        # B45：回环来源帧一律丢弃——同机实例（本机被控端/多实例/临时调试 node，
+        # 如跑门槛时的 smoke 节点）不进「发现的设备」池，避免幽灵条目；
+        # 真实局域网设备的 UDP 源地址必为 LAN IP，本机条目既有「本机被控端」
+        # 区块展示（snapshot 的 exclude_device_id 继续兜住 LAN 来源的自帧），
+        # D38 不自动信任边界不变。
+        if is_loopback_ip(source_ip):
+            return False
         if not frame:
             return False
         device_id = frame["device_id"]
