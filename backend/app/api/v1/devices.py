@@ -527,9 +527,29 @@ def _overview_endpoints() -> dict:
         "screen_save": "POST /api/v1/devices/{name}/screen/save {\"save_dir\"}",
         "put": "POST /api/v1/devices/{name}/put（multipart: file + remote_path）",
         "get": "GET /api/v1/devices/{name}/get?path=<远端路径>&save_dir=<本地目录>",
+        "workspaces": "GET /api/v1/devices/{name}/workspaces（查询被控端可写根：工作空间白名单 + 默认暂存目录）",
         "tasks": "GET /api/v1/devices/{name}/tasks?status=&limit=50&offset=0",
         "task_detail": "GET /api/v1/devices/{name}/tasks/{task_id}",
     }
+
+
+@router.get("/{name}/workspaces")
+def device_workspaces(name: str):
+    """查询被控端工作空间白名单（B42/契约 V1.6：put 撞墙后允许根可发现）。
+
+    live 调 node `/v1/info`（§6.2 V1.6 新增 workspace_roots / workspace_staging）。
+    白名单属被控端本地配置（D24）：本端点只读，不提供任何远程修改能力。
+    """
+    def _go(entry, client):
+        return client.request("GET", "/v1/info", timeout=15)
+    try:
+        info = _call(name, _go)
+    except node_client.NodeError as e:
+        _raise_node_error(e)
+    return {"device": name,
+            "workspace_roots": info.get("workspace_roots") or [],
+            "workspace_staging": info.get("workspace_staging"),
+            "node_version": info.get("node_version")}
 
 
 @router.get("/overview")
@@ -558,6 +578,10 @@ def devices_overview():
             "只能操作本清单中的已配对设备；配对确认是设备页人工动作，Agent 无权发起新配对。",
             "设备令牌与证书指纹由 a4agent 加密托管，不会出现在任何接口响应中。",
             "远程命令在被控端有完整审计记录，只执行任务所需范围内的命令。",
+            "文件上传（put/写方向接口）受被控端工作空间白名单约束：默认仅 node 暂存目录可写；"
+            "403 SANDBOX_DENIED 的 message 会列出允许根，也可用 workspaces 端点主动查询（B42）。",
+            "上传的自动化脚本/临时产物建议先 put 到暂存目录再 exec 执行，exec 命令引号逐字透传"
+            "（node v0.5.1 起），参数含空格直接写引号即可（B43）。",
             "backend 端口记录于 %APPDATA%\\a4agent\\desktop.json；设备可能离线，调用失败先 ping。",
         ],
     }

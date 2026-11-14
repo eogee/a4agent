@@ -358,6 +358,40 @@ def test_overview_backend_base_none_when_no_instance(isolated, monkeypatch):
     assert len(out["devices"]) == 1
 
 
+def test_device_workspaces_proxies_node_info(isolated, monkeypatch):
+    """B42/FR-17：workspaces 端点 live 读 node /v1/info 的白名单字段，只读不落凭据。"""
+    st = devices_api.get_store()
+    st.register(name=None, device_id="a" * 12, ip="192.168.3.10", port=51888,
+                identity="a4agent", token="t1", cert_fingerprint="f" * 64,
+                hostname="PC-A")
+
+    def fake_request(self, method, path, body=None, timeout=30, with_auth=True):
+        assert method == "GET" and path == "/v1/info"
+        return {"node_version": "0.5.1",
+                "workspace_roots": ["c:\\ws", "c:\\cfg\\tmp"],
+                "workspace_staging": "c:\\cfg\\tmp"}
+    monkeypatch.setattr(node_client.NodeClient, "request", fake_request)
+    out = devices_api.device_workspaces("PC-A")
+    assert out["device"] == "PC-A"
+    assert out["workspace_roots"] == ["c:\\ws", "c:\\cfg\\tmp"]
+    assert out["workspace_staging"] == "c:\\cfg\\tmp"
+    assert out["node_version"] == "0.5.1"
+    assert "t1" not in json.dumps(out)          # 凭据不回传
+
+
+def test_overview_documents_put_sandbox_and_workspaces(isolated, monkeypatch):
+    """B42：overview 端点表含 workspaces，notes 说明 put 沙箱边界与报错指引。"""
+    st = devices_api.get_store()
+    st.register(name=None, device_id="c" * 12, ip="192.168.3.12", port=51888,
+                identity="a4agent", token="t3", cert_fingerprint="f" * 64,
+                hostname="PC-C")
+    monkeypatch.setattr(devices_api, "_backend_port", lambda: 12345)
+    out = devices_api.devices_overview()
+    assert out["endpoints"]["workspaces"].startswith("GET")
+    assert any("SANDBOX_DENIED" in n for n in out["notes"])
+    assert any("暂存目录" in n for n in out["notes"])
+
+
 def test_install_skill_rejects_bad_scope(isolated):
     with pytest.raises(HTTPException) as ei:
         devices_api.install_skill({"scope": "nope"})
