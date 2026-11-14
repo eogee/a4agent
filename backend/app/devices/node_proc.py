@@ -11,7 +11,9 @@ node.json 的 port 键读取（node 绑定成功后自写，契约 §9.1），�
 
 node.py 路径可配置（解析顺序：运行时设置文件 → 环境变量 → 安装目录内嵌副本
 → 开发态 CrossDevice 仓兄弟目录）；打包形态由 SA-3 的安装器内嵌
-``node_runtime/node.py + gen_cert.ps1``。
+``node_runtime/node.py + gen_cert.ps1``，并内嵌 python-embed 解释器到
+``node_runtime/python/``（C8 方案 A：打包态解释器最优先候选，全新机零依赖，
+SA-3 集成点闭合）。
 """
 import json
 import logging
@@ -75,11 +77,32 @@ def _cert_tool_candidates(node_path: Path):
             node_path.parent / "gen_cert.ps1"]
 
 
+def _embed_python_candidates():
+    """安装器内嵌解释器候选（打包态）：build.py 构建时下载 python-embed 并经
+    installer.iss 安装到 {app}\\node_runtime\\python\\python.exe，参照
+    _default_node_candidates 的 frozen/meipass 双候选写法（meipass 命中 onefile
+    附带形态，exe 同目录命中 onedir 安装形态）；dev 态无此目录自然为空。"""
+    out = []
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            out.append(Path(meipass) / "node_runtime" / "python" / "python.exe")
+        out.append(Path(sys.executable).resolve().parent
+                   / "node_runtime" / "python" / "python.exe")
+    return out
+
+
 def _default_python():
-    """拉起 node 用的解释器：优先真 python（venv base_prefix / 系统 PATH），
-    跳过 Windows 商店的 python.exe 存根（它在 PATH 里靠前，实际执行报
-    9009"未安装"）。打包态不含解释器时由安装器环境提供（SA-3 集成点）。"""
-    candidates = []
+    """拉起 node 用的解释器（按优先级）：
+
+    1. 打包态安装目录内嵌解释器（node_runtime/python/python.exe，由安装器
+       内嵌 python-embed 提供，全新机零依赖——C8 方案 A，SA-3 集成点闭合，
+       不再依赖目标机恰有匹配 Python）；
+    2. 真 python（venv base_prefix / 系统 PATH），跳过 Windows 商店的
+       python.exe 存根（它在 PATH 里靠前，实际执行报 9009"未安装"）；
+    3. sys.executable 兜底。
+    """
+    candidates = _embed_python_candidates()
     base = Path(sys.base_prefix) / "python.exe"
     if base.is_file():
         candidates.append(base)

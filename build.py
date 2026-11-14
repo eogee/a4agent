@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -54,6 +55,23 @@ NODE_RUNTIME_FILES = (
     ("tools/gen_cert.ps1", "gen_cert.ps1"),
     ("LICENSE", "LICENSE"),
 )
+
+# python-embed 内嵌解释器（C8 方案 A）：安装器内嵌 Windows embeddable 包到
+# {app}\node_runtime\python\，node_proc._default_python 的打包态最优先候选——
+# 全新机零依赖拉起 node（SA-3 集成点闭合）。zip 与解包产物均为构建暂存产物
+# （与 node_runtime 三件同性质），不入 a4agent 仓库（.gitignore 已忽略 build/）。
+# 已暂存且校验通过则跳过重复下载；下载失败/网络不可达时警告并返回 None，
+# 不阻断构建——安装包退化为无内嵌解释器（node_proc 回退既有探测链），与
+# node_runtime 三件的降级策略一致。
+PYTHON_EMBED_VERSION = "3.12.10"
+PYTHON_EMBED_URL = (
+    f"https://www.python.org/ftp/python/{PYTHON_EMBED_VERSION}/"
+    f"python-{PYTHON_EMBED_VERSION}-embed-amd64.zip"
+)
+# 解包校验清单（3.12 embed 为扁平布局）：解释器本体 + stdlib zip + ssl 扩展
+# （node 默认 HTTPS 探活必经 TLS，缺 _ssl 等同无内嵌价值）。注意 _ssl.pyd 依赖
+# 同目录的 libssl-3/libcrypto-3 DLL，随整树复制不会缺。
+PYTHON_EMBED_REQUIRED = ("python.exe", "python312.zip", "_ssl.pyd")
 
 
 def _app_version(override: str | None) -> str:
@@ -273,13 +291,67 @@ def _stage_node_runtime(node_source: str | None) -> Path | None:
     return stage
 
 
-def _run_installer(version: str, iscc: Path, node_runtime_dir: Path | None) -> None:
+def _python_embed_valid(dir_path: Path) -> bool:
+    """内嵌解释器目录校验：python.exe / python312.zip / _ssl.pyd 齐备。"""
+    return all((dir_path / n).is_file() for n in PYTHON_EMBED_REQUIRED)
+
+
+def _stage_python_embed() -> Path | None:
+    """下载/暂存 python-embed 内嵌解释器到 build/node_runtime/python/。
+
+    缓存复用：build/python_embed/<版本>/embed/ 解包产物校验通过则不再联网；
+    暂存目录校验通过（上次构建已落位）也直接跳过。任一环节失败（下载、解包、
+    校验）都只警告并返回 None，不阻断构建——installer.iss 用 #if DirExists
+    兜底跳过，安装包退化为无内嵌解释器。返回 python 子目录路径（供
+    _run_installer 推导 /DNodeRuntimeDir）。
+    """
+    stage = ROOT / "build" / "node_runtime" / "python"
+    if _python_embed_valid(stage):
+        print(f"内嵌解释器已暂存（跳过下载）：{stage}")
+        return stage
+    cache = ROOT / "build" / "python_embed" / PYTHON_EMBED_VERSION
+    src = cache / "embed"
+    if not _python_embed_valid(src):
+        zip_path = cache / Path(PYTHON_EMBED_URL).name
+        print(f"下载 python-embed {PYTHON_EMBED_VERSION}：{PYTHON_EMBED_URL}")
+        try:
+            cache.mkdir(parents=True, exist_ok=True)
+            from urllib.request import urlopen
+
+            with urlopen(PYTHON_EMBED_URL, timeout=120) as resp:
+                zip_path.write_bytes(resp.read())
+            if src.exists():
+                shutil.rmtree(src)
+            with zipfile.ZipFile(zip_path) as zf:
+                zf.extractall(src)
+        except (OSError, zipfile.BadZipFile) as e:
+            print(f"警告：python-embed 下载/解包失败（{e}），"
+                  "本次安装包不内嵌解释器（node 解释器回退系统探测链）")
+            return None
+        if not _python_embed_valid(src):
+            print("警告：python-embed 解包产物校验不通过"
+                  f"（需 {'、'.join(PYTHON_EMBED_REQUIRED)}），"
+                  "本次安装包不内嵌解释器")
+            return None
+    if stage.exists():
+        shutil.rmtree(stage)
+    shutil.copytree(src, stage)
+    print(f"已暂存内嵌解释器：{stage}（python {PYTHON_EMBED_VERSION} embeddable）")
+    return stage
+
+
+def _run_installer(version: str, iscc: Path, node_runtime_dir: Path | None,
+                   python_embed_dir: Path | None = None) -> None:
     print(f"\n编译 Inno Setup 安装包（版本 {version}）...")
     cmd = [str(iscc), "installer.iss", f"/DMyAppVersion={version}"]
-    if node_runtime_dir is not None:
-        # 传相对 a4agent 仓根的路径（ISCC 以该目录为 cwd 编译）；未暂存时不传，
-        # installer.iss 的 #ifndef 默认值配合 #if FileExists 自动跳过三件
-        rel = Path(os.path.relpath(node_runtime_dir, ROOT))
+    # node 三件与内嵌解释器同落 build\node_runtime\（python 在其 python/ 子目录），
+    # 任一暂存成功即注入同一 /DNodeRuntimeDir；均缺席时不传，installer.iss 的
+    # #ifndef 默认值配合 #if FileExists/DirExists 自动跳过对应条目
+    runtime_dir = node_runtime_dir if node_runtime_dir is not None else (
+        python_embed_dir.parent if python_embed_dir is not None else None)
+    if runtime_dir is not None:
+        # 传相对 a4agent 仓根的路径（ISCC 以该目录为 cwd 编译）
+        rel = Path(os.path.relpath(runtime_dir, ROOT))
         cmd.append(f"/DNodeRuntimeDir={rel}")
     subprocess.run(cmd, cwd=str(ROOT), check=True)
     print(f"\n安装包完成：dist/a4agent-setup-{version}.exe")
@@ -303,6 +375,7 @@ def main() -> None:
 
     if args.installer:
         node_runtime_dir = _stage_node_runtime(args.node_source)
+        python_embed_dir = _stage_python_embed()
         iscc = _find_iscc(args.iscc)
         if iscc is None:
             print(
@@ -311,7 +384,7 @@ def main() -> None:
                 "\n或使用 --iscc 指定路径。"
             )
             sys.exit(1)
-        _run_installer(version, iscc, node_runtime_dir)
+        _run_installer(version, iscc, node_runtime_dir, python_embed_dir)
 
 
 if __name__ == "__main__":

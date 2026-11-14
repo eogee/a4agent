@@ -1,10 +1,12 @@
 """node 运行时守护测试（D29）：设置解析、证书保障、命令拼装、探活、
-启停守护（子进程用 sleep 脚本假扮 node，不改 node 代码）。"""
+启停守护（子进程用 sleep 脚本假扮 node，不改 node 代码）、解释器解析
+（C8 方案 A：打包态首选安装目录内嵌 python-embed）。"""
 import socket
 import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -48,6 +50,60 @@ def test_save_settings_partial_update(tmp_path):
     out = save_settings(tmp_path, {"python": "C:\\b\\python.exe"})
     assert out["node_path"] == "C:\\a\\node.py"       # 未提供的键保持原值
     assert out["python"] == "C:\\b\\python.exe"
+
+
+# ---------------- 解释器解析（C8 方案 A：内嵌 python-embed 最优先） ----------------
+
+def _patch_frozen(monkeypatch, exe_dir):
+    """模拟 PyInstaller 打包态目录布局：exe 位于 exe_dir，_MEIPASS 同置此处
+    （onedir 安装形态 {app}；meipass/exe 双候选指向同一位），并屏蔽系统
+    base_prefix/PATH 探测，只留内嵌候选与显式注入的候选可命中。"""
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(exe_dir), raising=False)
+    monkeypatch.setattr(sys, "executable", str(exe_dir / "a4agent.exe"))
+    monkeypatch.setattr(sys, "base_prefix", str(exe_dir / "_nonexistent_prefix"))
+    monkeypatch.setattr(node_proc.shutil, "which", lambda name: None)
+
+
+def test_default_python_prefers_embedded(tmp_path, monkeypatch):
+    """打包态安装目录含 node_runtime/python/python.exe 时首选内嵌解释器。"""
+    exe_dir = tmp_path / "app"
+    embed = exe_dir / "node_runtime" / "python"
+    embed.mkdir(parents=True)
+    (embed / "python.exe").write_bytes(b"MZ")    # 假 exe：候选只做 is_file 判定
+    _patch_frozen(monkeypatch, exe_dir)
+    out = node_proc._default_python()
+    assert Path(out) == (embed / "python.exe").resolve()
+
+
+def test_default_python_falls_back_without_embed(tmp_path, monkeypatch):
+    """打包态内嵌解释器缺席（未暂存/降级包）→ 回退既有候选（base_prefix）。"""
+    exe_dir = tmp_path / "app"
+    exe_dir.mkdir()
+    real_py = tmp_path / "venv" / "python.exe"
+    real_py.parent.mkdir(parents=True)
+    real_py.write_bytes(b"MZ")
+    _patch_frozen(monkeypatch, exe_dir)
+    monkeypatch.setattr(sys, "base_prefix", str(real_py.parent))
+    out = node_proc._default_python()
+    assert Path(out) == real_py.resolve()
+
+
+def test_default_python_dev_mode_ignores_embed(tmp_path, monkeypatch):
+    """dev 态（未 frozen）不启用内嵌候选：即使 exe 旁有 node_runtime/python
+    也不选它（回归护栏：frozen 门控不因重构丢失）。"""
+    embed = tmp_path / "node_runtime" / "python"
+    embed.mkdir(parents=True)
+    (embed / "python.exe").write_bytes(b"MZ")
+    fake_exe = tmp_path / "python.exe"
+    fake_exe.write_bytes(b"MZ")
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    monkeypatch.setattr(sys, "executable", str(fake_exe))
+    monkeypatch.setattr(sys, "base_prefix", str(tmp_path / "_nonexistent_prefix"))
+    monkeypatch.setattr(node_proc.shutil, "which", lambda name: None)
+    out = node_proc._default_python()
+    assert Path(out) == fake_exe.resolve()
 
 
 # ---------------- 证书保障 ----------------

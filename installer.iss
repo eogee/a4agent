@@ -9,6 +9,10 @@
 ;   注入后安装到 {app}\node_runtime\（backend.app.devices.node_proc 的第二探测位，
 ;   无需额外配置即自动生效）；源仓缺席时本文件照常编译出纯 a4agent 包。
 ;   运行时文件一律不入 a4agent 仓库，仅以构建暂存产物形式进入安装包。
+; python-embed 内嵌解释器（C8 方案 A）：build.py 构建时下载 python-embed 暂存到
+;   build\node_runtime\python\，同样经 /DNodeRuntimeDir 安装到 {app}\node_runtime\
+;   python\（打包态解释器最优先候选，全新机零依赖）；下载失败时条件编译自动跳过。
+;   卸载清理由既有 [UninstallDelete] filesandordirs {app}\node_runtime 递归覆盖。
 #ifndef MyAppVersion
   #define MyAppVersion "0.1.0"
 #endif
@@ -62,6 +66,14 @@ Source: "dist\a4agent\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 Source: "{#NodeRuntimeDir}\node.py"; DestDir: "{app}\node_runtime"; Flags: ignoreversion
 Source: "{#NodeRuntimeDir}\gen_cert.ps1"; DestDir: "{app}\node_runtime"; Flags: ignoreversion
 Source: "{#NodeRuntimeDir}\LICENSE"; DestDir: "{app}\node_runtime"; Flags: ignoreversion
+#endif
+; python-embed 内嵌解释器（C8 方案 A）：build.py 构建时下载 Windows embeddable
+; 包并暂存到 build\node_runtime\python\，安装到 {app}\node_runtime\python\
+; （backend.app.devices.node_proc._default_python 的打包态最优先候选），
+; 全新机零依赖拉起 node（SA-3 集成点闭合）。未暂存（下载失败/网络不可达）
+; 时跳过本条目，安装包退化为无内嵌解释器（node_proc 回退既有探测链）。
+#if DirExists(NodeRuntimeDir + "\python")
+Source: "{#NodeRuntimeDir}\python\*"; DestDir: "{app}\node_runtime\python"; Flags: ignoreversion recursesubdirs createallsubdirs
 #endif
 
 [Icons]
