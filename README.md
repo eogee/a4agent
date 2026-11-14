@@ -298,6 +298,12 @@ A blocked task still leaves a `precheck_failed` record, visible in the queue wit
 - Credentials of paired devices (tokens and certificate fingerprints) are stored locally encrypted with Windows DPAPI and are never returned in plain text through the API or files; a certificate fingerprint change is rejected, and the fingerprint can be reset from the Devices page to reconnect
 - The node runtime files (node.py / gen_cert.ps1) ship with the a4agent installer into the install directory `node_runtime/`; you can also point the Devices page at a custom path (in development, the CrossDevice repo works directly)
 
+### Agent Open Interaction (hand device control to AI agents)
+
+- The **Install control skill** button in the "Paired devices" section installs the CrossDevice control skill into agent skill folders, with three scopes: **global skill folders** (all eight tools), **project folder** (registered project roots), or a **custom folder**; existing same-name skills are never overwritten and are reported honestly
+- Once installed, AI agents in your workspaces (Claude Code / Codex / ZCode etc.) discover the device capability via SKILL.md: each session starts with `GET /api/v1/devices/overview` to fetch a live view of paired devices, then calls remote command / screenshot / upload / download / task-history endpoints by device name (the backend listens on 127.0.0.1 only; its port is recorded in `%APPDATA%\a4agent\desktop.json`)
+- Honest boundaries: agents can **only operate paired devices** (pairing confirmation is a manual action by the device owner on the Devices page — agents cannot initiate new pairings); device credentials stay encrypted inside a4agent and never appear in any API response; agent-initiated operations are audited on the controlled device just like any other
+
 ---
 
 ## Notifications (Phone Push & Desktop Toasts)

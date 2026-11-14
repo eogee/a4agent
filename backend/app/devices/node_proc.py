@@ -31,6 +31,18 @@ from ..config_io import atomic_write_doc, read_doc
 logger = logging.getLogger(__name__)
 
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _decode_node_line(raw: bytes) -> str:
+    """node 子进程输出行解码：优先 UTF-8（新版 node 管道输出），失败回退 GBK
+    （Windows 控制台默认编码，兼容旧实例/异常路径的中文输出），
+    避免守护日志窗出现替换符乱码。"""
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("gbk", errors="replace")
+
+
 RUNTIME_FILE = "device_runtime.json"
 NODE_CONFIG_DIR = "node"            # a4agent 数据目录下的 node 配置目录
 NODE_CONFIG_FILE = "node.json"      # node 自己的配置文件（由 node 维护，a4agent 不写）
@@ -248,6 +260,16 @@ class NodeGuardian:
         except (TypeError, ValueError):
             return None
 
+    def read_device_id(self):
+        """node.json 的 device_id 键（node 首启生成并持久化；node 未启动过为 None）。
+
+        供发现池排除本机条目：设备页已有"本机被控端"区块，广播经回环/
+        本机网卡回到自己的监听端口时不应重复出现在"发现的设备"列表。
+        """
+        doc = read_doc(self.config_file, "json")
+        did = str(doc.get("device_id") or "").strip()
+        return did or None
+
     def status(self) -> dict:
         with self._lock:
             settings = resolve_settings(self.data_dir)
@@ -314,10 +336,7 @@ class NodeGuardian:
                 stderr=subprocess.STDOUT,
                 cwd=str(self.config_dir),
                 creationflags=_CREATE_NO_WINDOW,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                bufsize=1,
+                bufsize=0,
             )
         except OSError as e:
             self._log(f"[错误] 启动失败：{e}")
@@ -334,8 +353,8 @@ class NodeGuardian:
 
     def _pump_output(self, proc):
         try:
-            for line in proc.stdout:
-                line = line.rstrip("\r\n")
+            for raw in proc.stdout:
+                line = _decode_node_line(raw).rstrip("\r\n")
                 if line:
                     with self._lock:
                         self._logs.append(f"{time.strftime('%H:%M:%S')} {line}")

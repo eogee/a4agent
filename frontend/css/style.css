@@ -2835,7 +2835,7 @@ html[lang="en"] .card-actions .layui-btn:not(.i18n-icon-only) {
 .dev-state-off { background: #f1f2f4; color: #8a8e94; }
 .dev-state-warn { background: #fdf3e4; color: #c98a2c; }
 .dev-state-bad { background: #fdeaea; color: #c45454; }
-.dev-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+.dev-cards { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .dev-card {
   background: #fff;
   border: 1px solid #ececec;

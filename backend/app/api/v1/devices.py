@@ -9,9 +9,16 @@
 
 角色口径（B33 最小化）：a4agent 以固定身份名 "a4agent" 代表本机控制端；
 任务历史按协议既有 identity 口径过滤（请求方本人），不做权限矩阵。
+
+Agent 开放交互（B35/FR-16）：聚合发现端点 /overview（动态设备全景）+
+内置技能包 /install-skill 三档安装（全局/项目根/自定义）——Agent 经技能
+发现能力后只操作已配对设备，凭据不出 backend，审计可追溯。
 """
+import json
 import logging
 import os
+import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -19,6 +26,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
+from ... import skill_manager
 from ...database import get_data_dir
 from ...devices import node_client, node_proc
 from ...devices.pool import BROADCAST_PORT, discovery
@@ -29,6 +37,33 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/devices")
 
 CONTROL_IDENTITY_NAME = "a4agent"   # B33：固定身份名（配对 confirm 的 name 参数）
+
+SKILL_NAME = "crossdevice"          # B35：内置技能包目录名
+
+
+# --------------------------------------------------------------------------
+# B35：内置技能包定位
+# --------------------------------------------------------------------------
+
+def _skill_bundle_src() -> Path:
+    """内置技能包源目录（含 SKILL.md）：打包态=_internal/resources/skills/，
+    开发态=仓库 resources/skills/（build.py 已 --add-data resources;resources）。"""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", ""))
+    else:
+        base = Path(__file__).resolve().parents[4]      # api/v1/devices.py → 仓根
+    return base / "resources" / "skills" / SKILL_NAME
+
+
+def _backend_port() -> int | None:
+    """backend 自身监听端口（desktop_recovery 实例文件，供 overview 下发）。"""
+    try:
+        from ... import desktop_recovery
+
+        doc = json.loads(Path(desktop_recovery.instance_file()).read_text(encoding="utf-8"))
+        return int(doc.get("port")) if doc.get("port") else None
+    except Exception:  # noqa: BLE001 - 实例文件缺失/损坏时 overview 仍可返回设备
+        return None
 
 
 # --------------------------------------------------------------------------
@@ -142,7 +177,11 @@ def runtime_save_config(patch: dict):
 
 @router.get("/pool")
 def pool_snapshot():
-    return discovery.snapshot()
+    # 排除本机 node 条目：设备页"本机被控端"区块已单独展示本机，
+    # 广播经回环/本机网卡回到自己时不应重复出现在"发现的设备"列表
+    # （node 未启动过时 device_id 为 None，不过滤——此时本机也无广播帧）
+    did = node_proc.get_guardian().read_device_id()
+    return discovery.snapshot(exclude_device_id=did)
 
 
 @router.post("/pool/manual")
@@ -470,3 +509,110 @@ def device_task_detail(name: str, task_id: str):
         return _call(name, _go)
     except node_client.NodeError as e:
         _raise_node_error(e)
+
+
+# --------------------------------------------------------------------------
+# Agent 开放交互（B35/FR-16）：聚合发现 + 技能安装
+# --------------------------------------------------------------------------
+
+def _overview_endpoints() -> dict:
+    """操作接口速查（与 SKILL.md 表格一致；文本形态供 Agent 直接读取）。"""
+    return {
+        "list_devices": "GET /api/v1/devices",
+        "overview": "GET /api/v1/devices/overview",
+        "ping": "POST /api/v1/devices/{name}/ping",
+        "exec": "POST /api/v1/devices/{name}/exec {\"cmd\", \"shell\": \"cmd|powershell\", \"timeout\": 60, \"cwd\": 可选}",
+        "job_result": "GET /api/v1/devices/{name}/job/{job_id}?wait=30",
+        "screen": "GET /api/v1/devices/{name}/screen（PNG 二进制）",
+        "screen_save": "POST /api/v1/devices/{name}/screen/save {\"save_dir\"}",
+        "put": "POST /api/v1/devices/{name}/put（multipart: file + remote_path）",
+        "get": "GET /api/v1/devices/{name}/get?path=<远端路径>&save_dir=<本地目录>",
+        "tasks": "GET /api/v1/devices/{name}/tasks?status=&limit=50&offset=0",
+        "task_detail": "GET /api/v1/devices/{name}/tasks/{task_id}",
+    }
+
+
+@router.get("/overview")
+def devices_overview():
+    """聚合发现（B35/FR-16）：Agent 每次会话首调，动态获取已配对设备全景。
+
+    只列已配对设备（配对是设备页人工动作，Agent 无权发起新配对）；
+    凭据（令牌/指纹）不出 backend——响应不含任何 DPAPI 存储内容。
+    """
+    port = _backend_port()
+    return {
+        "backend_base": f"http://127.0.0.1:{port}" if port else None,
+        "devices": [
+            {
+                "name": d.get("name", ""),
+                "ip": d.get("ip", ""),
+                "port": d.get("port", 0),
+                "hostname": d.get("hostname", ""),
+                "device_id": d.get("device_id", ""),
+                "identity": d.get("identity") or "default",
+            }
+            for d in get_store().list()
+        ],
+        "endpoints": _overview_endpoints(),
+        "notes": [
+            "只能操作本清单中的已配对设备；配对确认是设备页人工动作，Agent 无权发起新配对。",
+            "设备令牌与证书指纹由 a4agent 加密托管，不会出现在任何接口响应中。",
+            "远程命令在被控端有完整审计记录，只执行任务所需范围内的命令。",
+            "backend 端口记录于 %APPDATA%\\a4agent\\desktop.json；设备可能离线，调用失败先 ping。",
+        ],
+    }
+
+
+@router.post("/install-skill")
+def install_skill(body: dict):
+    """安装内置 crossdevice 技能（B35/FR-16）：三档范围，已存在不覆盖、如实报告。
+
+    scope=global → skill_manager.global_skill_roots() 八端全局根；
+    scope=project → project_path 下各端项目级子目录（skill_manager.project_skill_roots）；
+    scope=custom → body.custom_dir 指定目录（写入 <目录>/crossdevice/SKILL.md）。
+    """
+    scope = str(body.get("scope") or "").strip()
+    if scope not in ("global", "project", "custom"):
+        raise HTTPException(400, {"message": "scope 必须是 global / project / custom",
+                                  "code": "BAD_REQUEST"})
+
+    src = _skill_bundle_src()
+    src_file = src / skill_manager.SKILL_FILE
+    if not src_file.is_file():
+        raise HTTPException(500, {"message": f"内置技能包缺失：{src}",
+                                  "code": "INTERNAL"})
+
+    if scope == "global":
+        roots = skill_manager.global_skill_roots()
+        targets = {tool: root / SKILL_NAME for tool, root in roots.items()}
+    elif scope == "project":
+        base = Path(str(body.get("project_path") or "")).expanduser()
+        if not base.is_dir():
+            raise HTTPException(400, {"message": "项目目录不存在",
+                                      "code": "BAD_REQUEST"})
+        roots = skill_manager.project_skill_roots(base)
+        targets = {tool: root / SKILL_NAME for tool, root in roots.items()}
+    else:
+        custom = Path(str(body.get("custom_dir") or "")).expanduser()
+        if not custom.is_absolute():
+            raise HTTPException(400, {"message": "自定义目录必须是绝对路径",
+                                      "code": "BAD_REQUEST"})
+        targets = {"custom": custom / SKILL_NAME}
+
+    installed, skipped = [], []
+    for tool, dest_dir in targets.items():
+        dest_file = dest_dir / skill_manager.SKILL_FILE
+        if dest_file.exists():
+            skipped.append({"tool": tool, "path": str(dest_file),
+                            "reason": "已存在同名技能，未覆盖"})
+            continue
+        try:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src_file, dest_file)
+            installed.append({"tool": tool, "path": str(dest_file)})
+        except OSError as e:
+            skipped.append({"tool": tool, "path": str(dest_file),
+                            "reason": f"写入失败：{e}"})
+
+    return {"installed": installed, "skipped": skipped,
+            "total": len(targets)}

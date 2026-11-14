@@ -169,3 +169,29 @@ def test_manual_targets_remove():
     m.add("192.168.3.20", 51888)
     assert m.remove("192.168.3.20", 51888) is True
     assert m.remove("192.168.3.20", 51888) is False
+
+
+def test_pool_snapshot_prunes_stale_entries():
+    """快照时移除离线超过 PRUNE_AFTER_SECONDS 的条目（死设备残影清理）。"""
+    now, state = _tick_factory()
+    p = pool_mod.DevicePool(now_fn=now)
+    p.accept(pool_mod.parse_frame(encoded(), "192.168.3.10"), "192.168.3.10")
+    p.accept(pool_mod.parse_frame(
+        encoded(device_id="b2c3d4e5f6a1", hostname="PC-B"), "192.168.3.11"), "192.168.3.11")
+    state["now"] += pool_mod.PRUNE_AFTER_SECONDS + 1     # 两台都超过移除阈值
+    assert p.snapshot(now=state["now"]) == []
+    assert p.find("a1b2c3d4e5f6") is None
+
+
+def test_pool_snapshot_exclude_device_id():
+    """快照排除本机 node 条目（exclude_device_id：设备页已有"本机被控端"区块）。"""
+    now, state = _tick_factory()
+    p = pool_mod.DevicePool(now_fn=now)
+    p.accept(pool_mod.parse_frame(
+        encoded(device_id="a1b2c3d4e5f6"), "127.0.0.1"), "127.0.0.1")
+    p.accept(pool_mod.parse_frame(
+        encoded(device_id="b2c3d4e5f6a1", hostname="PC-B"), "192.168.3.11"), "192.168.3.11")
+    out = p.snapshot(now=state["now"], exclude_device_id="a1b2c3d4e5f6")
+    assert [e["device_id"] for e in out] == ["b2c3d4e5f6a1"]
+    out2 = p.snapshot(now=state["now"])                  # 不传排除参数时两台都在
+    assert len(out2) == 2

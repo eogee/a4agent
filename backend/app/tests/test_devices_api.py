@@ -325,3 +325,88 @@ def test_tasks_proxy_passes_identity_free_query(isolated, monkeypatch):
     assert "identity=" not in seen["path"]       # identity 省略 = 请求者本人
     assert "status=done" in seen["path"]
     assert "limit=10" in seen["path"]
+
+
+# ---------------- B35：聚合发现 + 技能安装（FR-16） ----------------
+
+def test_overview_lists_paired_devices_without_credentials(isolated, monkeypatch):
+    """overview：动态列出已配对设备全景；凭据（令牌/指纹）不出 backend。"""
+    st = devices_api.get_store()
+    st.register(name=None, device_id="a" * 12, ip="192.168.3.10", port=51888,
+                identity="a4agent", token="t1", cert_fingerprint="f" * 64,
+                hostname="PC-A")
+    monkeypatch.setattr(devices_api, "_backend_port", lambda: 12345)
+    out = devices_api.devices_overview()
+    assert out["backend_base"] == "http://127.0.0.1:12345"
+    assert len(out["devices"]) == 1
+    d = out["devices"][0]
+    assert d["name"] == "PC-A" and d["device_id"] == "a" * 12
+    assert d["identity"] == "a4agent"
+    blob = json.dumps(out, ensure_ascii=False)
+    assert "t1" not in blob and ("f" * 64) not in blob   # 凭据永不回传
+    assert out["endpoints"]["exec"].startswith("POST")
+    assert any("已配对" in n for n in out["notes"])
+
+
+def test_overview_backend_base_none_when_no_instance(isolated, monkeypatch):
+    """desktop.json 缺失（未运行/a4agent 未启动）→ backend_base 为 None，不猜端口。"""
+    st = devices_api.get_store()
+    st.register(name=None, device_id="b" * 12, ip="192.168.3.11", port=51888,
+                identity="a4agent", token="t2", cert_fingerprint="", hostname="PC-B")
+    out = devices_api.devices_overview()
+    assert out["backend_base"] is None
+    assert len(out["devices"]) == 1
+
+
+def test_install_skill_rejects_bad_scope(isolated):
+    with pytest.raises(HTTPException) as ei:
+        devices_api.install_skill({"scope": "nope"})
+    assert ei.value.status_code == 400
+
+
+def test_install_skill_global_into_roots(isolated, monkeypatch, tmp_path):
+    """global：写入八端全局根（monkeypatch 到临时根）；同名已存在 → 跳过不覆盖。"""
+    roots = {}
+    for i, tool in enumerate(["claude", "codex"]):
+        r = tmp_path / f"root{i}"
+        roots[tool] = r
+    monkeypatch.setattr(devices_api.skill_manager, "global_skill_roots", lambda: roots)
+    out = devices_api.install_skill({"scope": "global"})
+    assert len(out["installed"]) == 2 and out["skipped"] == []
+    for rec in out["installed"]:
+        assert (tmp_path / rec["path"]).exists() or rec["path"].startswith(str(tmp_path))
+    for root in roots.values():
+        f = root / "crossdevice" / "SKILL.md"
+        assert f.is_file() and "CrossDevice" in f.read_text(encoding="utf-8")
+    # 已存在 → 全部跳过且不覆盖（内容不变）
+    before = {r: (r / "crossdevice" / "SKILL.md").read_text(encoding="utf-8")
+              for r in roots.values()}
+    (list(roots.values())[0] / "crossdevice" / "SKILL.md").write_text("USER-EDITED", encoding="utf-8")
+    out2 = devices_api.install_skill({"scope": "global"})
+    assert out2["installed"] == [] and len(out2["skipped"]) == 2
+    assert (list(roots.values())[0] / "crossdevice" / "SKILL.md").read_text(encoding="utf-8") == "USER-EDITED"
+    assert before  # noqa: F841 - 语义占位：未覆盖既定行为
+
+
+def test_install_skill_project_and_custom(isolated, monkeypatch, tmp_path):
+    """project：写入项目根各端子目录；custom：写入自定义目录；非法输入 400。"""
+    project = tmp_path / "proj"
+    project.mkdir()
+    monkeypatch.setattr(devices_api.skill_manager, "project_skill_roots",
+                        lambda p: {"claude": p / ".claude" / "skills",
+                                   "zcode": p / ".zcode" / "skills"})
+    out = devices_api.install_skill({"scope": "project", "project_path": str(project)})
+    assert len(out["installed"]) == 2
+    assert (project / ".claude" / "skills" / "crossdevice" / "SKILL.md").is_file()
+    assert (project / ".zcode" / "skills" / "crossdevice" / "SKILL.md").is_file()
+    with pytest.raises(HTTPException) as ei:
+        devices_api.install_skill({"scope": "project", "project_path": str(tmp_path / "nope")})
+    assert ei.value.status_code == 400
+    custom = tmp_path / "custom-dir"
+    custom.mkdir()
+    out2 = devices_api.install_skill({"scope": "custom", "custom_dir": str(custom)})
+    assert len(out2["installed"]) == 1
+    assert (custom / "crossdevice" / "SKILL.md").is_file()
+    with pytest.raises(HTTPException) as ei:
+        devices_api.install_skill({"scope": "custom", "custom_dir": "not\absolute"})
+    assert ei.value.status_code == 400

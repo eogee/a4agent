@@ -105,6 +105,7 @@ layui.use(['layer'], function () {
       '<div id="dev-runtime" class="dev-runtime"><div class="empty-tip">加载中…</div></div>' +
       '<div class="dev-section-head"><span>已配对设备</span>' +
         '<span class="dev-head-actions">' +
+          '<button class="layui-btn layui-btn-sm layui-btn-primary" id="dev-skill-install">安装控制技能</button>' +
           '<button class="layui-btn layui-btn-sm layui-btn-primary" id="dev-refresh">刷新</button>' +
         '</span></div>' +
       '<div id="dev-list" class="dev-cards"><div class="empty-tip">加载中…</div></div>' +
@@ -137,6 +138,7 @@ layui.use(['layer'], function () {
     };
     document.getElementById('dev-runtime-settings').onclick = openRuntimeSettings;
     document.getElementById('dev-manual-add').onclick = openManualAdd;
+    document.getElementById('dev-skill-install').onclick = openInstallSkill;
   }
 
   function refreshAll() {
@@ -297,6 +299,97 @@ layui.use(['layer'], function () {
           apiSend('/pool/manual', 'POST', { ip: ip, port: port })
             .then(function () { layer.closeAll(); refreshAll(); })
             .catch(function (e) { layer.msg(e.message, { icon: 2 }); });
+        };
+      }
+    });
+  }
+
+  /* ---------- 安装控制技能（B35/FR-16） ---------- */
+  function openInstallSkill() {
+    layer.open({
+      type: 1, title: '安装控制技能', area: ['600px', '440px'],
+      content: '<div class="dev-form dev-skill-form">' +
+        '<div class="dev-pair-wait"><span>把 CrossDevice 控制技能安装到 Agent 技能目录，</span>' +
+        '<span>工作空间内的 Agent 即可发现并使用已配对设备的能力。</span></div>' +
+        '<div class="dev-form-row"><label>安装范围</label>' +
+          '<span class="dev-check"><input type="radio" name="dev-skill-scope" value="global" checked>' +
+          '<span>全局技能库（八端通用）</span></span></div>' +
+        '<div class="dev-form-row"><label></label>' +
+          '<span class="dev-check"><input type="radio" name="dev-skill-scope" value="project">' +
+          '<span>项目目录</span></span>' +
+          '<span class="dev-check"><input type="radio" name="dev-skill-scope" value="custom">' +
+          '<span>自定义目录</span></span></div>' +
+        '<div class="dev-form-row" id="dev-skill-project-row" style="display:none"><label>选择项目</label>' +
+          '<select class="layui-input" id="dev-skill-project" style="flex:1"></select></div>' +
+        '<div class="dev-form-row" id="dev-skill-custom-row" style="display:none"><label>目录路径</label>' +
+          '<input class="layui-input" id="dev-skill-custom-dir" placeholder="绝对路径，如 D:\\work\\demo" autocomplete="off"></div>' +
+        '<div class="dev-form-row"><label></label>' +
+          '<button class="layui-btn layui-btn-normal" id="dev-skill-go">确认安装</button>' +
+          '<span class="dev-muted dev-form-tip" id="dev-skill-msg"></span></div></div>',
+      success: function () {
+        var radios = document.getElementsByName('dev-skill-scope');
+        var projectRow = document.getElementById('dev-skill-project-row');
+        var customRow = document.getElementById('dev-skill-custom-row');
+        var sel = document.getElementById('dev-skill-project');
+        function syncRows() {
+          var v = 'global';
+          radios.forEach(function (r) { if (r.checked) v = r.value; });
+          projectRow.style.display = v === 'project' ? '' : 'none';
+          customRow.style.display = v === 'custom' ? '' : 'none';
+        }
+        radios.forEach(function (r) { r.onchange = syncRows; });
+        fetch(API + '/skills/project-roots').then(function (r) { return r.json(); })
+          .then(function (j) {
+            var list = (j && j.projects) || [];
+            sel.innerHTML = list.length
+              ? list.map(function (p) {
+                  return '<option value="' + escapeHtml(p.path) + '">' + escapeHtml(p.path) + '</option>';
+                }).join('')
+              : '<option value="">（尚无已注册项目，先在技能管理页注册）</option>';
+          }).catch(function () {
+            sel.innerHTML = '<option value="">（项目列表加载失败）</option>';
+          });
+        document.getElementById('dev-skill-go').onclick = function () {
+          var scope = 'global';
+          radios.forEach(function (r) { if (r.checked) scope = r.value; });
+          var body = { scope: scope };
+          if (scope === 'project') {
+            body.project_path = sel.value;
+            if (!body.project_path) {
+              layer.msg('尚无已注册项目，请改选全局或自定义目录', { icon: 2 });
+              return;
+            }
+          }
+          if (scope === 'custom') {
+            body.custom_dir = document.getElementById('dev-skill-custom-dir').value.trim();
+            if (!body.custom_dir) {
+              layer.msg('请填写目录路径', { icon: 2 });
+              return;
+            }
+          }
+          var msgEl = document.getElementById('dev-skill-msg');
+          msgEl.textContent = '正在安装…';
+          apiSend('/install-skill', 'POST', body).then(function (r) {
+            var lines = [];
+            if (r.installed.length) {
+              lines.push('已安装到 ' + r.installed.length + ' 个技能目录：');
+              r.installed.forEach(function (x) {
+                lines.push('　[' + x.tool + '] ' + x.path);
+              });
+            }
+            if (r.skipped.length) {
+              lines.push('已跳过 ' + r.skipped.length + ' 个（同名已存在，未覆盖）：');
+              r.skipped.forEach(function (x) {
+                lines.push('　[' + x.tool + '] ' + x.reason);
+              });
+            }
+            if (!r.installed.length && !r.skipped.length) lines.push('没有可安装的目标目录。');
+            layer.alert(lines.map(function (t) { return '<span>' + escapeHtml(t) + '</span>'; })
+              .join('<br>'), { title: '安装控制技能', icon: r.installed.length ? 1 : 0 });
+          }).catch(function (e) {
+            msgEl.textContent = '';
+            layer.alert(e.message || '安装失败', { title: '安装控制技能', icon: 2 });
+          });
         };
       }
     });

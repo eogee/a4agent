@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 BROADCAST_PORT = 51889          # 发现广播端口（契约 §19.1，仅 UDP）
 MAX_FRAME_BYTES = 512           # 帧上限（§19.2）
 OFFLINE_AFTER_SECONDS = 30.0    # 30 秒无帧判离线（D25）
+PRUNE_AFTER_SECONDS = 600.0     # 离线超过 10 分钟从池中移除（死设备残影/防无界增长）
 RATE_LIMIT_SECONDS = 1.0        # (源IP, device_id) 每秒最多 1 帧（B31）
 
 _MAGIC = "XDCAST"
@@ -125,11 +126,24 @@ class DevicePool:
             entry["frames"] += 1
             return True
 
-    def snapshot(self, now=None):
-        """池快照：按首次出现时间升序，附 online 标注（30 秒无帧判离线）。"""
+    def snapshot(self, now=None, exclude_device_id=None):
+        """池快照：按首次出现时间升序，附 online 标注（30 秒无帧判离线）。
+
+        快照时在同锁内顺带做两件池维护：
+        - 移除离线超过 PRUNE_AFTER_SECONDS 的条目（死设备残影/防无界增长，
+          广播帧到达才建条目，node 关停后的旧条目不应长期驻留展示）；
+        - 排除本机 node 条目（exclude_device_id：设备页已有"本机被控端"
+          区块，广播经回环/本机网卡回到自己的监听端口时不再重复展示）。
+        """
         now = self._now() if now is None else now
         with self._lock:
-            entries = [dict(e) for e in self._entries.values()]
+            cutoff = now - PRUNE_AFTER_SECONDS
+            for k in [k for k, v in self._entries.items() if v["last_seen"] < cutoff]:
+                del self._entries[k]
+            for k in [k for k, v in self._last_frame_ts.items() if v < cutoff]:
+                del self._last_frame_ts[k]
+            entries = [dict(e) for e in self._entries.values()
+                       if exclude_device_id is None or e["device_id"] != exclude_device_id]
         for e in entries:
             e["online"] = (now - e["last_seen"]) <= OFFLINE_AFTER_SECONDS
         entries.sort(key=lambda e: (e["first_seen"], e["device_id"]))
@@ -274,8 +288,8 @@ class Discovery:
     def stop(self):
         self.listener.stop()
 
-    def snapshot(self):
-        return {"entries": self.pool.snapshot(),
+    def snapshot(self, exclude_device_id=None):
+        return {"entries": self.pool.snapshot(exclude_device_id=exclude_device_id),
                 "manual": self.manual.list(),
                 "listener": {"bound": self.listener.bound,
                              "port": BROADCAST_PORT,
