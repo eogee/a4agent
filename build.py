@@ -5,11 +5,13 @@
     uv run python build.py --installer    # 文件夹版 + 编译 Inno Setup 安装包
     uv run python build.py --onefile      # 单 exe（逃生舱/临时分发）
     uv run python build.py --installer --iscc C:\\path\\to\\ISCC.exe
+    uv run python build.py --installer --node-source C:\\path\\to\\CrossDevice
 """
 import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -38,6 +40,20 @@ HIDDEN_IMPORTS = [
 ]
 
 DEFAULT_VERSION = "0.1.0"
+
+# CrossDevice node 运行时源（M4/B23/D29）：默认兄弟仓，--node-source 可覆盖。
+# node.py 探测顺序（backend/app/devices/node_proc.py）：环境变量 → 安装目录
+# node_runtime/（此处暂存并由安装器内嵌）→ 开发态 CrossDevice 兄弟仓。
+DEFAULT_NODE_SOURCE = ROOT.parent / "CrossDevice"
+
+# 暂存清单（源仓相对路径 → node_runtime/ 内文件名）：与 installer.iss 的
+# [Files] node_runtime 三件一一对应；node.py/gen_cert.ps1 原名平铺（node_proc
+# 的证书工具候选为 node.py 同目录 gen_cert.ps1），LICENSE 随包满足 MIT 要求。
+NODE_RUNTIME_FILES = (
+    ("node/node.py", "node.py"),
+    ("tools/gen_cert.ps1", "gen_cert.ps1"),
+    ("LICENSE", "LICENSE"),
+)
 
 
 def _app_version(override: str | None) -> str:
@@ -232,13 +248,40 @@ def _run_pyinstaller(onefile: bool, version: str) -> None:
         print("\n打包完成：dist/a4agent/a4agent.exe（文件夹版）")
 
 
-def _run_installer(version: str, iscc: Path) -> None:
+def _stage_node_runtime(node_source: str | None) -> Path | None:
+    """把 CrossDevice node 运行时三件从源仓暂存到 build/node_runtime/。
+
+    运行时文件一律不入 a4agent 仓库（.gitignore 已忽略 build/），仅在构建期
+    从源仓复制到暂存目录，再由 _run_installer 经 /DNodeRuntimeDir 传给 ISCC。
+    源仓缺席（目录或个别文件缺失）时警告并返回 None，纯 a4agent 包仍可构建
+    （installer.iss 用 #if FileExists 兜底跳过，设备页运行时缺失由 UI 如实显示）。
+    """
+    src = Path(node_source).resolve() if node_source else DEFAULT_NODE_SOURCE
+    missing = [s for s, _ in NODE_RUNTIME_FILES if not (src / s).is_file()]
+    if missing:
+        print(
+            f"警告：node 运行时源 {src} 缺 {'、'.join(missing)}，"
+            "跳过暂存——本次安装包不内嵌 node 运行时"
+            "（可用 --node-source 指定 CrossDevice 仓后重试）"
+        )
+        return None
+    stage = ROOT / "build" / "node_runtime"
+    stage.mkdir(parents=True, exist_ok=True)
+    for s, name in NODE_RUNTIME_FILES:
+        shutil.copy2(src / s, stage / name)
+    print(f"已暂存 node 运行时：{stage}（源：{src}）")
+    return stage
+
+
+def _run_installer(version: str, iscc: Path, node_runtime_dir: Path | None) -> None:
     print(f"\n编译 Inno Setup 安装包（版本 {version}）...")
-    subprocess.run(
-        [str(iscc), "installer.iss", f"/DMyAppVersion={version}"],
-        cwd=str(ROOT),
-        check=True,
-    )
+    cmd = [str(iscc), "installer.iss", f"/DMyAppVersion={version}"]
+    if node_runtime_dir is not None:
+        # 传相对 a4agent 仓根的路径（ISCC 以该目录为 cwd 编译）；未暂存时不传，
+        # installer.iss 的 #ifndef 默认值配合 #if FileExists 自动跳过三件
+        rel = Path(os.path.relpath(node_runtime_dir, ROOT))
+        cmd.append(f"/DNodeRuntimeDir={rel}")
+    subprocess.run(cmd, cwd=str(ROOT), check=True)
     print(f"\n安装包完成：dist/a4agent-setup-{version}.exe")
 
 
@@ -248,12 +291,18 @@ def main() -> None:
     parser.add_argument("--iscc", help="指定 ISCC.exe 路径（默认自动探测）")
     parser.add_argument("--onefile", action="store_true", help="单 exe 模式（默认 onedir）")
     parser.add_argument("--version", help="覆盖版本号（默认读取 pyproject.toml）")
+    parser.add_argument(
+        "--node-source",
+        help="CrossDevice 源仓目录（默认兄弟仓 ../CrossDevice；"
+             "源缺席时警告跳过，安装包不含 node 运行时）",
+    )
     args = parser.parse_args()
 
     version = _app_version(args.version)
     _run_pyinstaller(args.onefile, version)
 
     if args.installer:
+        node_runtime_dir = _stage_node_runtime(args.node_source)
         iscc = _find_iscc(args.iscc)
         if iscc is None:
             print(
@@ -262,7 +311,7 @@ def main() -> None:
                 "\n或使用 --iscc 指定路径。"
             )
             sys.exit(1)
-        _run_installer(version, iscc)
+        _run_installer(version, iscc, node_runtime_dir)
 
 
 if __name__ == "__main__":

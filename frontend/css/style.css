@@ -2786,3 +2786,139 @@ html[lang="en"] .card-actions .layui-btn:not(.i18n-icon-only) {
 .layui-laydate .laydate-time-list ol li.layui-this { border-radius: 6px; }
 .layui-laydate .laydate-time-list > li:first-child ol { border-radius: 8px 0 0 8px; }
 .layui-laydate .laydate-time-list > li:nth-child(2) ol { border-radius: 0 8px 8px 0; }
+
+/* ==================== 设备页（CrossDevice 集成，M4） ==================== */
+.dev-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 18px 2px 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #2d3439;
+}
+.dev-section-head:first-child { margin-top: 4px; }
+.dev-head-actions { display: flex; gap: 8px; font-weight: 400; }
+.dev-runtime {
+  background: #fff;
+  border: 1px solid #ececec;
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+.dev-runtime-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #2d3439;
+  margin-bottom: 6px;
+}
+.dev-runtime-row:last-child { margin-bottom: 0; }
+.dev-listen-row { display: flex; gap: 6px; font-size: 12px; color: #8a8e94; }
+.dev-flex { flex: 1; }
+.dev-muted { color: #8a8e94; font-size: 12px; }
+.dev-path { max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dev-log {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #f7f8f9;
+  border-radius: 8px;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  color: #5a6068;
+  max-height: 150px;
+  overflow: auto;
+}
+.dev-log-line { white-space: pre-wrap; word-break: break-all; }
+.dev-state { font-size: 12px; padding: 2px 10px; border-radius: 20px; }
+.dev-state-on { background: #e8f7f3; color: #16a58a; }
+.dev-state-off { background: #f1f2f4; color: #8a8e94; }
+.dev-state-warn { background: #fdf3e4; color: #c98a2c; }
+.dev-state-bad { background: #fdeaea; color: #c45454; }
+.dev-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+.dev-card {
+  background: #fff;
+  border: 1px solid #ececec;
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.dev-card-title { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.dev-card-name { font-size: 14px; font-weight: 600; color: #2d3439; }
+.dev-badge {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 20px;
+  background: #f1f2f4;
+  color: #5a6068;
+}
+.dev-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12px;
+  color: #8a8e94;
+  margin-bottom: 10px;
+}
+.dev-card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.dev-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; }
+.dev-table th, .dev-table td {
+  text-align: left;
+  padding: 9px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid #f1f2f4;
+}
+.dev-table th { background: #fafbfc; color: #5a6068; font-weight: 500; }
+.dev-table tbody tr:hover { background: #fafbfc; }
+.dev-addr { font-family: Consolas, monospace; }
+.dev-actions { white-space: nowrap; }
+.dev-actions .layui-btn + .layui-btn { margin-left: 6px; }
+.dev-hint { margin: 16px 2px 0; font-size: 12px; color: #8a8e94; }
+.dev-form { padding: 18px 22px 22px; }
+.dev-form-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.dev-form-row > label { width: 108px; flex: none; font-size: 13px; color: #2d3439; text-align: right; }
+.dev-form-row .layui-input { flex: 1; }
+.dev-form-tip { margin-left: 4px; }
+.dev-form select { min-width: 160px; }
+.dev-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #2d3439; cursor: pointer; }
+.dev-pair-wait { margin-bottom: 12px; font-size: 13px; color: #2d3439; }
+.dev-code-input { max-width: 200px; font-family: Consolas, monospace; letter-spacing: 4px; font-size: 16px; }
+.dev-incoming { padding: 20px 22px; }
+.dev-incoming-line { margin-bottom: 10px; font-size: 13px; color: #2d3439; }
+.dev-incoming-ip { font-weight: 600; }
+.dev-incoming-btns { display: flex; gap: 10px; margin-top: 14px; }
+.dev-code-modal { padding: 22px; text-align: center; }
+.dev-code-value {
+  font-family: Consolas, monospace;
+  font-size: 40px;
+  letter-spacing: 10px;
+  color: #16a58a;
+  margin: 10px 0 14px;
+}
+.dev-code-hint { font-size: 12px; color: #5a6068; margin-bottom: 8px; }
+.dev-code-hint .dev-muted, .dev-code-hint.dev-muted { color: #8a8e94; }
+.dev-exec-form { display: flex; flex-direction: column; height: 100%; }
+.dev-exec-output {
+  flex: 1;
+  margin: 4px 0 0 118px;
+  padding: 10px 12px;
+  background: #f7f8f9;
+  border-radius: 8px;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  color: #2d3439;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 300px;
+  overflow: auto;
+}
+.dev-screen-modal { display: flex; flex-direction: column; height: 100%; }
+.dev-screen-bar { display: flex; align-items: center; gap: 10px; padding: 12px 16px 4px; }
+.dev-screen-bar select { min-width: 150px; }
+.dev-screen-view { flex: 1; overflow: auto; padding: 10px 16px 16px; }
+.dev-screen-view img { max-width: 100%; border: 1px solid #ececec; border-radius: 8px; }
+.dev-file-input { font-size: 13px; }
+.dev-tasks-modal { padding: 14px 16px 18px; }
+.dev-task-row { cursor: pointer; }
+.dev-task-cmd { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dev-tasks-total { margin-top: 10px; text-align: right; }
+.dev-task-detail { margin: 16px; max-height: 480px; }

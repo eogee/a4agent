@@ -8,8 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import models  # noqa: F401  # 注册模型建表
-from .api.v1 import (configs, desktop, feedback, fs, llama, loops, mcp,
-                     phone, providers, removal, skills, switch, tasks, update)
+from .api.v1 import (configs, desktop, devices, feedback, fs, llama, loops,
+                     mcp, phone, providers, removal, skills, switch, tasks,
+                     update)
 from .database import Base, engine, ensure_schema
 from .logging_config import setup_logging
 from .phone import notifier
@@ -67,6 +68,48 @@ def create_app() -> FastAPI:
     app.include_router(fs.router, prefix="/api/v1", tags=["fs"])
     app.include_router(desktop.router, prefix="/api/v1", tags=["desktop"])
     app.include_router(phone.router, prefix="/api/v1", tags=["phone"])
+    app.include_router(devices.router, prefix="/api/v1", tags=["devices"])
+
+    # 设备发现广播监听（UDP 51889，只进"发现池"，绝不自动信任，D38）
+    from .devices.pool import discovery, start_listener
+    start_listener()
+
+    # 安装形态首启自动拉起本机 node（M4/C8）：device_runtime.json 的 auto_start
+    # 为 true 时启动守护（安装器在安装完成时预写该设置；dev 态无此文件默认关闭）。
+    # 放后台线程：ensure_certs 可能同步跑数秒（PowerShell 生成证书），不阻塞应用启动；
+    # 拉起失败仅记守护日志，不影响应用。
+    def _auto_start_device_runtime() -> None:
+        try:
+            from .database import get_data_dir
+            from .devices import node_proc
+
+            if node_proc.resolve_settings(get_data_dir())["auto_start"]:
+                node_proc.get_guardian().start()
+        except Exception:  # noqa: BLE001 - 自动拉起失败不影响应用启动
+            pass
+
+    import threading
+
+    threading.Thread(target=_auto_start_device_runtime, daemon=True,
+                     name="device-runtime-autostart").start()
+
+    # 退出收尾：停发现监听与 node 守护（dev/浏览器运行态；桌面壳退出路径
+    # 另有 os._exit，需在 desktop.py 回收序列加一行 node_proc 守护 stop）
+    import atexit
+
+    def _stop_device_runtime() -> None:
+        try:
+            discovery.stop()
+        except Exception:  # noqa: BLE001 - 退出收尾失败不影响退出
+            pass
+        try:
+            from .devices import node_proc
+
+            node_proc.get_guardian().stop()
+        except Exception:  # noqa: BLE001
+            pass
+
+    atexit.register(_stop_device_runtime)
 
     # 任务终态 → 手机推送（enabled 关闭时监听器内部直接跳过）
     notifier.register()

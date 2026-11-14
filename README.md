@@ -289,6 +289,17 @@ A blocked task still leaves a `precheck_failed` record, visible in the queue wit
 
 ---
 
+## Device Networking (CrossDevice Remote Control)
+
+- The "Devices" page manages [CrossDevice](https://github.com/eogee/CrossDevice) (MIT) as the controlled-device runtime: a4agent launches and supervises the local node as an independent subprocess (auto-restart on exit, crash circuit-breaker, automatic certificate generation when missing)
+- With a4agent installed on both machines, devices in the same LAN appear automatically under "Discovered Devices" via UDP broadcast (roughly a 10-second heartbeat, 30 seconds without frames marks a device offline); the broadcast only makes devices visible and **never grants trust by itself**
+- **One-confirmation pairing**: click "Pair" on the controller → the controlled side's a4agent pops a confirmation window (showing the source IP) → once confirmed, a one-time 6-digit pairing code is displayed on screen (5-minute validity) → enter the code on the controller → the connection is established; remote commands, screenshots, file transfer and task history then work without manual setup
+- If the controlled side clicks "Reject", no connection is made; exceeding the guess limit (5 by default) voids the pairing session; every success, failure and rejection is recorded in the controlled side's audit log
+- Credentials of paired devices (tokens and certificate fingerprints) are stored locally encrypted with Windows DPAPI and are never returned in plain text through the API or files; a certificate fingerprint change is rejected, and the fingerprint can be reset from the Devices page to reconnect
+- The node runtime files (node.py / gen_cert.ps1) ship with the a4agent installer into the install directory `node_runtime/`; you can also point the Devices page at a custom path (in development, the CrossDevice repo works directly)
+
+---
+
 ## Notifications (Phone Push & Desktop Toasts)
 
 ![Notifications — phone push configuration and the session-interaction host table](assets/screenshots/notifications-en.png)

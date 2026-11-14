@@ -4,8 +4,16 @@
 ;   - AppId 保持不变：Inno 视其为同一应用的升级，卸载入口只有一份；
 ;   - UsePreviousAppDir=no：安装目录从 Programs\a4api 迁到 Programs\a4agent，
 ;     旧目录与旧快捷方式在 ssPostInstall 清理（数据目录 %APPDATA% 由应用首启自动迁移）。
+; CrossDevice node 运行时（M4/B23/D29）：build.py 构建时从 CrossDevice 源仓暂存
+;   node.py / gen_cert.ps1 / LICENSE 到 build\node_runtime\，经 /DNodeRuntimeDir
+;   注入后安装到 {app}\node_runtime\（backend.app.devices.node_proc 的第二探测位，
+;   无需额外配置即自动生效）；源仓缺席时本文件照常编译出纯 a4agent 包。
+;   运行时文件一律不入 a4agent 仓库，仅以构建暂存产物形式进入安装包。
 #ifndef MyAppVersion
   #define MyAppVersion "0.1.0"
+#endif
+#ifndef NodeRuntimeDir
+  #define NodeRuntimeDir "build\node_runtime"
 #endif
 
 #define MyAppName "a4agent"
@@ -47,6 +55,14 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 
 [Files]
 Source: "dist\a4agent\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; CrossDevice node 运行时三件（源为 build.py 暂存产物，非仓库内容）。
+; 未暂存（CrossDevice 源仓缺席）时跳过，安装包退化为纯 a4agent 包，
+; 设备页运行时缺失由 UI 如实显示（node_proc 探测不到 node.py 置 failed）。
+#if FileExists(NodeRuntimeDir + "\node.py")
+Source: "{#NodeRuntimeDir}\node.py"; DestDir: "{app}\node_runtime"; Flags: ignoreversion
+Source: "{#NodeRuntimeDir}\gen_cert.ps1"; DestDir: "{app}\node_runtime"; Flags: ignoreversion
+Source: "{#NodeRuntimeDir}\LICENSE"; DestDir: "{app}\node_runtime"; Flags: ignoreversion
+#endif
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -60,6 +76,9 @@ Filename: "{app}\{#MyAppExeName}"; Description: "启动 {#MyAppName}"; Flags: no
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--proxy-stop"; Flags: runhidden
 
 [UninstallDelete]
+; 卸载后移除 node 运行时目录（随 [Files] 已被 Inno 移除，此处兜底清理运行期残留，
+; 如空目录或第三方工具在运行时目录内产生的临时文件）
+Type: filesandordirs; Name: "{app}\node_runtime"
 ; 卸载后移除 {app} 空目录（unins000.exe 自删除时序可能导致目录移除被跳过）
 Type: dirifempty; Name: "{app}"
 
@@ -70,6 +89,40 @@ const
   LegacyImageName = 'a4api.exe';
   // 同一 AppId：v0.3.x 及更早版本的卸载注册表键，InstallLocation 记录旧安装目录
   LegacyUninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{8A3C5F71-2B4D-4E6F-9A0B-1C2D3E4F5A6B}_is1';
+  // CrossDevice node 高权限驻留计划任务默认名（node.py DEFAULT_ELEVATE_TASK，
+  // 接口契约 §22；对齐 FR-13「卸载时移除计划任务与自启项」，删除失败容错忽略）
+  NodeTaskName = 'CrossDeviceNode';
+
+// 终止 a4agent 拉起的本机 node 子进程（M4/FR-13/C8）。
+// node 以 python.exe 运行，不能按镜像名 taskkill（会误伤无关 python 进程），
+// 按命令行特征定位：含 node.py 且（来自安装目录 node_runtime 或配置指向
+// a4agent 数据目录的 node\node.json）——只清 a4agent 形态的 node，
+// 不触碰独立部署的 CrossDevice（配置在 %LOCALAPPDATA%\CrossDevice）。
+// 已提权驻留的 node 可能因完整性级别拒绝终止（Access Denied），静默忽略：
+// 计划任务已随下方删除，重启后不再自启。
+procedure KillNodeProcesses();
+var
+  Rc: Integer;
+begin
+  Exec('powershell.exe',
+       '-NoProfile -ExecutionPolicy Bypass -Command ' +
+       '"Get-CimInstance Win32_Process | Where-Object { ($_.Name -like ''python*'') ' +
+       'and ($_.CommandLine -like ''*node.py*'') ' +
+       'and (($_.CommandLine -like ''*node_runtime*'') ' +
+       'or ($_.CommandLine -like ''*a4agent\node\node.json*'')) } ' +
+       '| ForEach-Object { taskkill /PID $($_.ProcessId) /F | Out-Null }"',
+       '', SW_HIDE, ewWaitUntilTerminated, Rc);
+end;
+
+// 删除 node 高权限驻留计划任务（schtasks，任务不存在或无权限删除时静默容错）。
+procedure DeleteNodeTask();
+var
+  Rc: Integer;
+begin
+  Exec(ExpandConstant('{cmd}'),
+       '/C schtasks /delete /tn ' + NodeTaskName + ' /f >NUL 2>&1',
+       '', SW_HIDE, ewWaitUntilTerminated, Rc);
+end;
 
 var
   PreviousDir: String;
@@ -169,6 +222,14 @@ end;
 function InitializeUninstall(): Boolean;
 begin
   Result := True;
+  // 卸载文案标注数据目录策略（与既有卸载策略一致：只清安装目录，保留 %APPDATA% 数据）
+  if not WizardSilent() then
+    MsgBox('卸载将终止本机 node 子进程、删除计划任务 ' + NodeTaskName +
+           '，并移除安装目录（含内嵌的 CrossDevice node 运行时）。' #13#10 #13#10
+           '配置与数据（含设备 node 配置）保存在 ' +
+           RemoveBackslashUnlessRoot(ExpandConstant('{userappdata}')) +
+           '\a4agent，卸载不会删除；如需一并清除请卸载后手动删除该目录。',
+           mbInformation, MB_OK);
   if AppRunning() then
   begin
     if ConfirmStopAndStop() then
@@ -183,6 +244,13 @@ begin
     else
       Result := False;
   end;
+  if not Result then
+    Exit;
+  // 卸载清理三件（FR-13/C8）：a4agent 刹停后孤儿化的 node 子进程按命令行特征终止；
+  // node 高权限驻留计划任务删除（容错，不存在不报错）；
+  // 安装目录 node_runtime/ 由 [Files] 反向删除与 [UninstallDelete] 兜底移除。
+  KillNodeProcesses();
+  DeleteNodeTask();
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -221,5 +289,13 @@ begin
     // 旧组文件夹（UsePreviousGroup=yes 时代 0.4.0/0.4.1 把 a4agent.lnk 装进了 a4api 组）
     if DirExists(ExpandConstant('{userprograms}\a4api')) then
       DelTree(ExpandConstant('{userprograms}\a4api'), True, True, True);
+    // 安装形态首启自动拉起本机 node（M4/C8）：预写设备运行时设置 auto_start=true，
+    // 应用启动时据此拉起 node 守护（证书缺失自动生成）。仅当设置文件不存在时写入，
+    // 不覆盖用户既有配置（dev 态无此文件也不写，默认不自动拉起）。
+    if not DirExists(ExpandConstant('{userappdata}\a4agent')) then
+      ForceDirectories(ExpandConstant('{userappdata}\a4agent'));
+    if not FileExists(ExpandConstant('{userappdata}\a4agent\device_runtime.json')) then
+      SaveStringToFile(ExpandConstant('{userappdata}\a4agent\device_runtime.json'),
+        '{"auto_start": true}', False);
   end;
 end;

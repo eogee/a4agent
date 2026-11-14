@@ -22,6 +22,7 @@ const FILES = [
   'frontend/js/skillpick.js',
   'frontend/js/phone.js',
   'frontend/js/dirpicker.js',
+  'frontend/js/devices.js',
 ];
 const CJK = /[\u3400-\u9fff\uf900-\ufaff]/;
 

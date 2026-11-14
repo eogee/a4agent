@@ -63,6 +63,12 @@ def _exit_after_apply() -> None:
     except Exception:
         pass
     try:
+        from ...devices import node_proc
+
+        node_proc.get_guardian().stop()   # 更新重启前收掉本机 node，避免孤儿进程
+    except Exception:
+        pass
+    try:
         from ...llama import runtime as llama_runtime
 
         llama_runtime.shutdown()

@@ -328,6 +328,15 @@ def main() -> None:
         llama_runtime.shutdown()
     except Exception:
         pass
+    try:
+        # 设备运行时守护：与 main.py 的 atexit 语义一致，桌面态 os._exit
+        # 不触发 atexit，需在此显式停止（未启用设备功能时不创建实例）
+        from backend.app.devices import node_proc
+
+        if node_proc.guardian is not None:
+            node_proc.guardian.stop()
+    except Exception:
+        pass
     clear_instance()
     os._exit(0)
 
