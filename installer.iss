@@ -119,9 +119,9 @@ begin
   Exec('powershell.exe',
        '-NoProfile -ExecutionPolicy Bypass -Command ' +
        '"Get-CimInstance Win32_Process | Where-Object { ($_.Name -like ''python*'') ' +
-       'and ($_.CommandLine -like ''*node.py*'') ' +
-       'and (($_.CommandLine -like ''*node_runtime*'') ' +
-       'or ($_.CommandLine -like ''*a4agent\node\node.json*'')) } ' +
+       '-and ($_.CommandLine -like ''*node.py*'') ' +
+       '-and (($_.CommandLine -like ''*node_runtime*'') ' +
+       '-or ($_.CommandLine -like ''*a4agent\node\node.json*'')) } ' +
        '| ForEach-Object { taskkill /PID $($_.ProcessId) /F | Out-Null }"',
        '', SW_HIDE, ewWaitUntilTerminated, Rc);
 end;
@@ -195,12 +195,27 @@ begin
   Result := False;
 end;
 
+// 静默判定：Setup 期用 WizardSilent，Uninstall 期用 UninstallSilent。
+// WizardSilent 在 Uninstall 阶段调用即 fatal（Internal error: Cannot call
+// "WizardSilent" function during Uninstall，B38 卸载黑盒实测发现）——卸载
+// 路径一律经本函数取静默态。阶段旗标由两阶段入口函数各自设置。
+var
+  PhaseUninstall: Boolean;
+
+function IsSilentInstall(): Boolean;
+begin
+  if PhaseUninstall then
+    Result := UninstallSilent()
+  else
+    Result := WizardSilent();
+end;
+
 // 静默安装/卸载（如应用内更新触发）没有界面可点：AppRunning 时默认确认刹停；
 // 交互安装则弹中文确认框，用户选「否」直接中止。
 function ConfirmStopAndStop(): Boolean;
 begin
   Result := True;
-  if WizardSilent() then
+  if IsSilentInstall() then
     Exit;  // 静默：无需确认，交给下方 StopAllAppProcesses
   if MsgBox('检测到 a4agent（或改名前的 a4api）正在运行（主界面或后台代理服务）。' #13#10 #13#10
             '是否关闭全部相关服务并继续？',
@@ -212,6 +227,7 @@ end;
 function InitializeSetup(): Boolean;
 begin
   Result := True;
+  PhaseUninstall := False;
   // 读取旧版本（同名 AppId）的安装目录，供 ssInstall 停旧代理、ssPostInstall 清理旧目录
   PreviousDir := '';
   RegQueryStringValue(HKCU, LegacyUninstallKey, 'InstallLocation', PreviousDir);
@@ -221,7 +237,7 @@ begin
     begin
       if not StopAllAppProcesses() then
       begin
-        if not WizardSilent() then
+        if not IsSilentInstall() then
           MsgBox('无法结束 a4agent 进程，请手动关闭后重试安装。', mbCriticalError, MB_OK);
         Result := False;
       end;
@@ -234,8 +250,9 @@ end;
 function InitializeUninstall(): Boolean;
 begin
   Result := True;
+  PhaseUninstall := True;
   // 卸载文案标注数据目录策略（与既有卸载策略一致：只清安装目录，保留 %APPDATA% 数据）
-  if not WizardSilent() then
+  if not IsSilentInstall() then
     MsgBox('卸载将终止本机 node 子进程、删除计划任务 ' + NodeTaskName +
            '，并移除安装目录（含内嵌的 CrossDevice node 运行时）。' #13#10 #13#10
            '配置与数据（含设备 node 配置）保存在 ' +
@@ -248,7 +265,7 @@ begin
     begin
       if not StopAllAppProcesses() then
       begin
-        if not WizardSilent() then
+        if not IsSilentInstall() then
           MsgBox('无法结束 a4agent 进程，请手动关闭后重试卸载。', mbCriticalError, MB_OK);
         Result := False;
       end;
