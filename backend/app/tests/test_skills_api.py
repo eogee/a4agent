@@ -16,9 +16,10 @@ from backend.app.api.v1.skills import discover_skills
 
 @pytest.fixture()
 def isolated(tmp_path, monkeypatch):
-    """隔离数据目录与八端 skill 根；项目发现清空（不扫真实磁盘）。"""
+    """隔离数据目录与九端 skill 根；项目发现清空（不扫真实磁盘）。"""
     monkeypatch.setenv("A4AGENT_DATA_DIR", str(tmp_path / "data"))
-    for tool in ("CLAUDE", "CODEX", "DSH", "ZCODE", "PI", "QODER", "OPENCODE", "WORKBUDDY"):
+    for tool in ("CLAUDE", "CODEX", "DSH", "ZCODE", "PI", "QODER", "OPENCODE",
+                 "WORKBUDDY", "TRAE"):
         monkeypatch.setenv(f"A4AGENT_{tool}_SKILLS_PATH", str(tmp_path / f"{tool.lower()}-skills"))
     monkeypatch.setenv("A4AGENT_OPENCODE_CONFIG_DIR", str(tmp_path / "oc-config"))
     registered: list[dict] = []

@@ -657,7 +657,7 @@ def devices_overview():
 def install_skill(body: dict):
     """安装内置 crossdevice 技能（B35/FR-16）：三档范围，已存在不覆盖、如实报告。
 
-    scope=global → skill_manager.global_skill_roots() 八端全局根；
+    scope=global → skill_manager.global_skill_roots() 九端全局根；
     scope=project → project_path 下各端项目级子目录（skill_manager.project_skill_roots）；
     scope=custom → body.custom_dir 指定目录（写入 <目录>/crossdevice/SKILL.md）。
     """

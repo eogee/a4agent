@@ -810,7 +810,7 @@
     "把 CrossDevice 控制技能安装到 Agent 技能目录，": "Install the CrossDevice control skill into the agent skill folders so that",
     "工作空间内的 Agent 即可发现并使用已配对设备的能力。": "agents in your workspaces can discover and use paired-device capabilities.",
     "安装范围": "Install scope",
-    "全局技能库（八端通用）": "Global skill folders (all eight tools)",
+    "全局技能库（九端通用）": "Global skill folders (all nine tools)",
     "项目目录": "Project folder",
     "自定义目录": "Custom folder",
     "选择项目": "Pick a project",
@@ -880,6 +880,20 @@
     "移除实例": "Remove instance",
     "停止实例": "Stop instance",
     "已移除": "Removed",
+
+    /* ---------- TRAE：只读发现 ---------- */
+    "TRAE 仅支持只读发现，安装/迁移请在 TRAE 界面操作":
+      "TRAE supports read-only discovery only — install or migrate inside TRAE.",
+    "运行时缓存（无连接配置）": "Runtime cache (no connection settings)",
+    "只读缓存": "Read-only cache",
+    "该 server 仅有只读缓存，无法作为迁移源":
+      "This server only has a read-only cache entry and cannot be used as a migration source",
+    "未知（TRAE 运行时缓存不保存连接参数）":
+      "Unknown (TRAE's runtime cache does not store connection settings)",
+    "：未知（TRAE 运行时缓存不保存连接参数）":
+      ": Unknown (TRAE's runtime cache does not store connection settings)",
+    "MCP 详情": "MCP details",
+    "工具": "Tools",
   };
 
   /* ---------------- 句式规则：中文模板 => English 模板（{n} 为通配） ---------------- */

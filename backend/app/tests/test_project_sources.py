@@ -16,7 +16,7 @@ from backend.app.api.v1 import skills as skills_api
 
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
-    """隔离八端 skill 根与数据目录。返回上下文字典。"""
+    """隔离九端 skill 根与数据目录。返回上下文字典。"""
     ctx = {"data": tmp_path / "data", "root": tmp_path / "scan"}
     monkeypatch.setenv("A4AGENT_DATA_DIR", str(ctx["data"]))
     for tool in skill_manager.TOOLS:

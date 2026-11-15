@@ -22,7 +22,7 @@ from backend.app.models import SkillMigration, SkillTrash
 
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
-    """隔离六端 skill 根、数据目录与项目根列表。返回上下文字典。"""
+    """隔离九端 skill 根、数据目录与项目根列表。返回上下文字典。"""
     ctx = {
         "data": tmp_path / "data",
         "claude": tmp_path / "claude-skills",
@@ -33,6 +33,7 @@ def env(tmp_path, monkeypatch):
         "qoder": tmp_path / "qoder-skills",
         "opencode": tmp_path / "opencode-skills",
         "workbuddy": tmp_path / "workbuddy-skills",
+        "trae": tmp_path / "trae-skills",
         "projects_root": tmp_path / "projects",
     }
     monkeypatch.setenv("A4AGENT_DATA_DIR", str(ctx["data"]))
@@ -47,7 +48,10 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("A4AGENT_OPENCODE_SKILLS_PATH", str(ctx["opencode"]))
     # WorkBuddy 同理：不隔离会扫描用户真实的 ~/.workbuddy/skills
     monkeypatch.setenv("A4AGENT_WORKBUDDY_SKILLS_PATH", str(ctx["workbuddy"]))
-    for key in ("claude", "codex", "dsh", "zcode", "pi", "qoder", "opencode", "workbuddy"):
+    # TRAE 同理：不隔离会扫描用户真实的 ~/.trae-cn/skills
+    monkeypatch.setenv("A4AGENT_TRAE_SKILLS_PATH", str(ctx["trae"]))
+    for key in ("claude", "codex", "dsh", "zcode", "pi", "qoder", "opencode",
+                "workbuddy", "trae"):
         ctx[key].mkdir(parents=True)
     ctx["projects_root"].mkdir(parents=True)
     # 项目根指向临时目录下的 projects_root
@@ -658,3 +662,83 @@ def test_qoder_home_prefers_existing_distribution_dir(tmp_path, monkeypatch):
 
     (tmp_path / ".qoder-cn").mkdir()
     assert config_manager.qoder_home() == tmp_path / ".qoder-cn"
+
+
+# ---------------- TRAE 端 ----------------
+
+
+def test_discover_includes_trae_global_and_project_roots(env):
+    """TRAE 端：全局 <数据目录>/skills 与项目级 <repo>/.trae/skills 均被发现。"""
+    make_skill(env["trae"], "review", "review", "TRAE 版评审技能")
+    make_skill(env["claude"], "review", "review", "Claude 版评审技能")
+    proj = make_project(env, "proj-trae")
+    make_skill(proj / ".trae" / "skills", "deploy", "deploy", "TRAE 项目级部署")
+
+    data = skill_manager.discover()
+    global_groups = {g["name"]: g for g in data["global"]}
+    assert global_groups["review"]["ends"] == ["claude", "trae"]
+
+    projects = {p["project"]: p for p in data["projects"]}
+    groups = {g["name"]: g for g in projects["proj-trae"]["skills"]}
+    assert groups["deploy"]["ends"] == ["trae"]
+    location = skill_manager.skill_location(pathlib.Path(groups["deploy"]["copies"][0]["path"]))
+    assert location == {"scope": "project", "tool": "trae", "project": "proj-trae"}
+
+
+def test_migrate_to_trae_writes_global_and_project_roots(env, db):
+    """迁移到 TRAE：全局 → <数据目录>/skills，项目级 → <repo>/.trae/skills。"""
+    make_skill(env["claude"], "git-commit", "git-commit", "v1")
+    proj = make_project(env, "trae-proj")
+
+    result = skill_manager.migrate(
+        db,
+        [{"scope": "global", "tool": "claude", "project": None, "name": "git-commit"}],
+        [
+            {"scope": "global", "tool": "trae", "project": None},
+            {"scope": "project", "tool": "trae", "project": "trae-proj"},
+        ],
+    )
+    assert result["migrated"] == 2 and result["failed"] == 0
+    assert (env["trae"] / "git-commit" / "SKILL.md").exists()
+    assert (proj / ".trae" / "skills" / "git-commit" / "SKILL.md").exists()
+    assert {l.target_tool for l in db.query(SkillMigration).all()} == {"trae"}
+
+
+def test_trae_delete_and_restore_roundtrip(env, db):
+    """TRAE 技能可正常进回收站并恢复原位（与其它端同口径）。"""
+    skill_dir = make_skill(env["trae"], "deploy", "deploy", "TRAE 部署技能")
+
+    deleted = skill_manager.delete_to_trash(db, str(skill_dir))
+    assert deleted["deleted"] is True and not skill_dir.exists()
+    rows = skill_manager.list_trash(db)["items"]
+    assert len(rows) == 1 and rows[0]["tool"] == "trae"
+
+    restored = skill_manager.restore_from_trash(db, rows[0]["id"])
+    assert restored["restored"] is True
+    assert (env["trae"] / "deploy" / "SKILL.md").is_file()
+
+
+def test_trae_skills_root_follows_home_env(tmp_path, monkeypatch):
+    """未单独指定 skill 路径时，TRAE 全局根跟随 A4AGENT_TRAE_HOME 下的 skills。"""
+    from backend.app import config_manager
+
+    monkeypatch.delenv("A4AGENT_TRAE_SKILLS_PATH", raising=False)
+    monkeypatch.setenv("A4AGENT_TRAE_HOME", str(tmp_path / "trae-home"))
+    assert config_manager.trae_home() == tmp_path / "trae-home"
+    assert skill_manager.trae_skills_root() == tmp_path / "trae-home" / "skills"
+
+
+def test_trae_home_prefers_existing_distribution_dir(tmp_path, monkeypatch):
+    """TRAE 目录名随发行版而变：默认根不存在而国内版目录存在时取后者，否则用国际版。"""
+    from backend.app import config_manager
+
+    for name in ("A4AGENT_TRAE_HOME", "A4AGENT_TRAE_SKILLS_PATH"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(config_manager.Path, "home", classmethod(lambda cls: tmp_path))
+    assert config_manager.trae_home() == tmp_path / ".trae"
+
+    (tmp_path / ".trae-cn").mkdir()
+    assert config_manager.trae_home() == tmp_path / ".trae-cn"
+
+    (tmp_path / ".trae").mkdir()
+    assert config_manager.trae_home() == tmp_path / ".trae"

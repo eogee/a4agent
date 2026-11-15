@@ -399,7 +399,7 @@ def test_install_skill_rejects_bad_scope(isolated):
 
 
 def test_install_skill_global_into_roots(isolated, monkeypatch, tmp_path):
-    """global：写入八端全局根（monkeypatch 到临时根）；同名已存在 → 跳过不覆盖。"""
+    """global：写入各端全局根（monkeypatch 到临时根）；同名已存在 → 跳过不覆盖。"""
     roots = {}
     for i, tool in enumerate(["claude", "codex"]):
         r = tmp_path / f"root{i}"
@@ -420,6 +420,16 @@ def test_install_skill_global_into_roots(isolated, monkeypatch, tmp_path):
     assert out2["installed"] == [] and len(out2["skipped"]) == 2
     assert (list(roots.values())[0] / "crossdevice" / "SKILL.md").read_text(encoding="utf-8") == "USER-EDITED"
     assert before  # noqa: F841 - 语义占位：未覆盖既定行为
+
+
+def test_install_skill_global_includes_trae(isolated, monkeypatch, tmp_path):
+    """TRAE 已进入「安装控制技能」全局目标：写入其真实全局 skill 根。"""
+    root = tmp_path / "trae-skills"
+    monkeypatch.setattr(devices_api.skill_manager, "global_skill_roots",
+                        lambda: {"trae": root})
+    out = devices_api.install_skill({"scope": "global"})
+    assert [r["tool"] for r in out["installed"]] == ["trae"]
+    assert (root / "crossdevice" / "SKILL.md").is_file()
 
 
 def test_install_skill_project_and_custom(isolated, monkeypatch, tmp_path):

@@ -474,7 +474,7 @@ body {
   color: #8a6316;
 }
 
-/* Pi：紫调，八端里唯一没被占用的色系，与暖橙 / 各档蓝 / 青绿都不撞 */
+/* Pi：紫调，九端里唯一没被占用的色系，与暖橙 / 各档蓝 / 青绿都不撞 */
 .target-pi {
   background: #efeafb;
   color: #5b46a8;
@@ -504,6 +504,12 @@ body {
 .target-workbuddy {
   background: #e6f4f1;
   color: #1f7a68;
+}
+
+/* TRAE 徽章：靛蓝调（与 Codex 的浅蓝、Qoder 的青蓝区分开） */
+.target-trae {
+  background: #e9ecfb;
+  color: #3d4bb0;
 }
 
 .card-actions {

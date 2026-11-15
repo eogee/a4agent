@@ -35,6 +35,7 @@ def env(tmp_path, monkeypatch):
         "qoder_mcp": tmp_path / "qoder-mcp.json",
         "oc_config": tmp_path / "opencode-config",
         "workbuddy_mcp": tmp_path / "workbuddy-mcp.json",
+        "trae_mcp_cache": tmp_path / "trae-mcps",
         "projects_root": tmp_path / "projects",
     }
     monkeypatch.setenv("A4AGENT_DATA_DIR", str(ctx["data"]))
@@ -51,6 +52,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("A4AGENT_OPENCODE_CONFIG_DIR", str(ctx["oc_config"]))
     # WorkBuddy 同理：不隔离会读到用户真实的 ~/.workbuddy/mcp.json
     monkeypatch.setenv("A4AGENT_WORKBUDDY_MCP_PATH", str(ctx["workbuddy_mcp"]))
+    # TRAE 只读发现源（运行时缓存）同样隔离：不设会读到用户真实的 ~/.trae-cn/mcps
+    ctx["trae_mcp_cache"].mkdir(parents=True)
+    monkeypatch.setenv("A4AGENT_TRAE_MCP_CACHE_PATH", str(ctx["trae_mcp_cache"]))
     # 项目根指向临时目录下的 projects_root（skill 的 project_roots 复用于 MCP）
     ctx["projects_root"].mkdir(parents=True)
     from backend.app import skill_manager
@@ -1521,3 +1525,79 @@ def test_workbuddy_project_scope_is_rejected(env, db):
             [{"scope": "project", "tool": "workbuddy", "project": "proj-wb"}],
         )
     assert not env["workbuddy_mcp"].exists()
+
+
+# ---------------- TRAE 端（只读发现） ----------------
+
+
+def make_trae_cache(env, workspace: str, agent: str, server: str, tools=()):
+    """在临时目录里伪造 TRAE 运行时缓存条目（SERVER_METADATA.json + tools/*.json）。"""
+    d = env["trae_mcp_cache"] / workspace / agent / server
+    (d / "tools").mkdir(parents=True, exist_ok=True)
+    (d / "SERVER_METADATA.json").write_text(
+        json.dumps({"server_name": server}), encoding="utf-8")
+    for name in tools:
+        (d / "tools" / f"{name}.json").write_text(
+            json.dumps({"name": name}), encoding="utf-8")
+    return d
+
+
+def test_discover_trae_from_runtime_cache_read_only(env):
+    """TRAE 端：只从运行时缓存发现 server 名称与工具清单，并标注只读。"""
+    make_trae_cache(env, "s_demo-abc123", "solo_agent", "integrated_browser",
+                    ["browser_navigate", "browser_snapshot"])
+    make_trae_cache(env, "s_other-def456", "solo_agent", "integrated_browser",
+                    ["browser_click"])
+    make_trae_cache(env, "s_other-def456", "search", "plugin_deployment", [])
+
+    data = mcp_manager.discover()
+    groups = {g["name"]: g for g in data["global"]}
+    browser = groups["integrated_browser"]
+    assert browser["ends"] == ["trae"]
+    assert browser["read_only"] is True
+    assert browser["transport"] == "unknown"
+    copy = browser["copies"][0]
+    assert copy["read_only"] is True and copy["path"]
+    assert set(copy["extra"]["tools"]) == {
+        "browser_navigate", "browser_snapshot", "browser_click"}
+    assert set(copy["extra"]["workspaces"]) == {"s_demo-abc123", "s_other-def456"}
+    assert groups["plugin_deployment"]["read_only"] is True
+    assert data["roots"]["trae"] == str(env["trae_mcp_cache"])
+    assert data["read_only"] == ["trae"]
+    assert "只读发现" in data["read_only_note"]
+
+    content = mcp_manager.server_content("global", "trae", None, "integrated_browser")
+    assert content["read_only"] is True
+    assert content["transport"] == "unknown"
+
+
+def test_trae_write_delete_and_migrate_are_rejected(env, db):
+    """TRAE 不伪造写入能力：取配置路径 / 写入 / 新建 / 删除 / 迁移目标全部拒绝。"""
+    make_trae_cache(env, "s_demo-abc123", "solo_agent", "integrated_browser", ["browser_click"])
+    note = "只读发现"
+
+    with pytest.raises(ValueError, match=note):
+        mcp_manager.mcp_config_file("global", "trae", None)
+    with pytest.raises(ValueError, match=note):
+        mcp_manager.write_servers("global", "trae", None, [])
+    with pytest.raises(ValueError, match=note):
+        mcp_manager.create_server(
+            "global", "trae", None,
+            {"name": "fs", "transport": "stdio", "command": "node"})
+    with pytest.raises(ValueError, match=note):
+        mcp_manager.delete_to_trash(
+            db, {"scope": "global", "tool": "trae", "project": None,
+                 "name": "integrated_browser"})
+
+    make_claude_global(env, "sentry")
+    with pytest.raises(ValueError, match=note):
+        mcp_manager.migrate(
+            db,
+            [{"scope": "global", "tool": "claude", "project": None, "name": "sentry"}],
+            [{"scope": "global", "tool": "trae", "project": None}],
+        )
+    # 未产生任何写入：既有配置与缓存保持原样，回收站也没有条目
+    assert json.loads(env["claude_json"].read_text(encoding="utf-8"))["mcpServers"].keys() == {"sentry"}
+    assert not (env["trae_mcp_cache"] / "mcp.json").exists()
+    assert db.query(McpTrash).count() == 0
+    assert db.query(McpMigration).count() == 0

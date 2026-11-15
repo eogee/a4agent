@@ -4,13 +4,13 @@ English | [简体中文](README.zh-CN.md)
 
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/eogee/badge.svg)](https://hub.xerj.org/contributors/eogee)
 
-**A management console for eight AI coding tools + a local LLM inference console**: unified **skill management** and **MCP management** across all eight tools — **Claude Code, Codex, dsh (DeepSeek Harness), ZCode (Zhipu Agentic Dev Environment), pi (local pi coding agent), Qoder (AI IDE), OpenCode, and WorkBuddy** — plus API provider switching for the two CLI tools without a graphical config UI (Claude Code, Codex), and a built-in llama.cpp local model inference console. Everything is done through a visual interface; no manual config-file editing required.
+**A management console for nine AI coding tools + a local LLM inference console**: unified **skill management** and **MCP management** across all nine tools — **Claude Code, Codex, dsh (DeepSeek Harness), ZCode (Zhipu Agentic Dev Environment), pi (local pi coding agent), Qoder (AI IDE), OpenCode, WorkBuddy, and TRAE** — plus API provider switching for the two CLI tools without a graphical config UI (Claude Code, Codex), and a built-in llama.cpp local model inference console. Everything is done through a visual interface; no manual config-file editing required.
 
 | Capability | Description |
 |---|---|
-| **Skill Management** | Auto-discovery of global/project-level skills on all eight tools, aggregation badges, cross-tool migration, recycle-bin restore, one-click sync of a project's skills to every missing tool |
-| **MCP Management** | Auto-discovery and **one-click install** of MCP servers on all eight tools, cross-tool migration (validated by a transport capability matrix), snapshot recycle bin, automatic/custom **descriptions**; secrets are masked/encrypted throughout |
-| **API Switching** | One-click provider / model / API-key switching for the two CLI tools without a graphical UI (Claude Code, Codex), with automatic backup, atomic writes, and DPAPI-encrypted key storage; the other six tools have their own provider UIs and are configured by the user in-app |
+| **Skill Management** | Auto-discovery of global/project-level skills on all nine tools, aggregation badges, cross-tool migration, recycle-bin restore, one-click sync of a project's skills to every missing tool |
+| **MCP Management** | Auto-discovery and **one-click install** of MCP servers on all nine tools, cross-tool migration (validated by a transport capability matrix), snapshot recycle bin, automatic/custom **descriptions**; secrets are masked/encrypted throughout |
+| **API Switching** | One-click provider / model / API-key switching for the two CLI tools without a graphical UI (Claude Code, Codex), with automatic backup, atomic writes, and DPAPI-encrypted key storage; the other seven tools have their own provider UIs and are configured by the user in-app |
 | **Local Models** | Turn any `.gguf` model into an OpenAI-compatible local/LAN API service in one click: engine auto-download by GPU, model library scanning, VRAM risk assessment, one-click profile creation for Claude Code / Codex |
 | **Task Dispatch** | Run any of the seven tools in **headless mode** as background tasks: dispatch-and-return, automatic pre-flight checks (engine ready / config ready / real connectivity), queue polling, output archiving, cancel & timeout, and tasks survive closing the window. Uses the config you already set up in each app |
 | **Notifications** | Two independent channels so you are not tied to the desk, in **one unified format** across every channel — topic name / notification type / app name, plain text without emoji: **phone push** (ntfy) delivers task and session outcomes (completion / failure / timeout) always carrying the **agent's last output**; **desktop toasts** (source badge: logo + a4agent) cover completions, failures, permission requests and questions, and wake the window on click. Session hooks for **Claude Code / Codex / ZCode / Qoder / WorkBuddy / dsh** let you answer the agent's questions and approve permissions from your phone |
@@ -20,7 +20,7 @@ English | [简体中文](README.zh-CN.md)
 
 ## OpenCode Integration (since v0.6.0)
 
-OpenCode gets exactly the same treatment as the other seven tools — no dedicated UI anywhere:
+OpenCode gets exactly the same treatment as the other eight tools — no dedicated UI anywhere:
 
 - **Skills / MCP**: managed as the seventh tool like any other (works out of the box — the service password and default port `49374` are discovered automatically).
 - **Task dispatch**: an OpenCode engine that runs tasks as sessions against the live service instead of spawning a fresh CLI process each time. Approval-free execution uses **session-scoped permission rules**, so your global config is left untouched; cost, usage, and outcome come back structured; deprecated models are automatically retried with a working one.
@@ -32,11 +32,11 @@ OpenCode gets exactly the same treatment as the other seven tools — no dedicat
 
 ![Skill management — global view, aggregation badges and cross-tool migration](assets/screenshots/skills-en.png)
 
-All eight targets use the same skill format (a `<skill-name>/SKILL.md` directory with `name` and `description` frontmatter), so a4agent can manage them as one kind of resource.
+All nine targets use the same skill format (a `<skill-name>/SKILL.md` directory with `name` and `description` frontmatter), so a4agent can manage them as one kind of resource.
 
 ### Discovery & Aggregation
 
-- Scans the **global** and **project-level** skill directories of all eight tools, and aggregates by frontmatter `name`: when a skill with the same name exists on several tools, it is badged as "already on N tools".
+- Scans the **global** and **project-level** skill directories of all nine tools, and aggregates by frontmatter `name`: when a skill with the same name exists on several tools, it is badged as "already on N tools".
 - **Project discovery works two ways.** Scan ranges default to every drive on the machine (each first-level folder counts as a project), *and* a4agent reads the history the AI tools already keep — Claude Code's project list, Codex session working directories, and the recent workspaces of VS Code-family editors — so projects nested at any depth show up without you pointing at them. Only projects containing at least one skill are listed.
 - The **Project sources** dialog lists what was auto-discovered (with the tool it came from), lets you ignore entries, add scan ranges with a folder picker, or restore the default ranges.
 - Codex's reserved global directories (`.system/` and other dot-prefixed dirs) are skipped automatically and not treated as user skills.
@@ -66,6 +66,9 @@ All eight targets use the same skill format (a `<skill-name>/SKILL.md` directory
 | Qoder | `~/.qoder/skills/` (overridable via `$A4AGENT_QODER_HOME`) | `<project>/.qoder/skills/` |
 | OpenCode | `~/.config/opencode/skills/` | `<project>/.opencode/skills/` |
 | WorkBuddy | `~/.workbuddy/skills/` (overridable via `$A4AGENT_WORKBUDDY_SKILLS_PATH`) | `<project>/.workbuddy/skills/` |
+| TRAE | `~/.trae-cn/skills/` (overridable via `$A4AGENT_TRAE_HOME` / `$A4AGENT_TRAE_SKILLS_PATH`) | `<project>/.trae/skills/` |
+
+**TRAE**: the user skill directory TRAE actually scans is `skills` under its product-data folder (`~/.trae-cn/skills` on this machine), with project-level skills in `<project>/.trae/skills`; the format is still `<name>/SKILL.md` plus frontmatter, so no special handling is needed. `~/.trae-cn/builtin/global/skills` is the materialized directory for TRAE's **built-in** skills and is rewritten wholesale by TRAE updates, so a4agent never writes to or manages it. TRAE has no hook protocol and no headless CLI, so this round covers skill management plus read-only MCP discovery only.
 
 **ZCode**: the official client also recognizes the cross-tool directories `~/.agents/skills` and `<project>/.agents/skills`; a4agent standardizes on the `.zcode` prefix for consistency with the other tools. Skills migrated to ZCode are really loaded by the ZCode client.
 
@@ -82,20 +85,21 @@ All eight targets use the same skill format (a `<skill-name>/SKILL.md` directory
 
 ## MCP Management
 
-![MCP management — servers across all eight tools with one-click install](assets/screenshots/mcp-en.png)
+![MCP management — servers across all nine tools with one-click install](assets/screenshots/mcp-en.png)
 
-Each of the eight tools stores its MCP servers in its own config file; a4agent normalizes them into one view (`name` / `transport` / `command` / `args` / `env` / `url` / `headers`).
+Except for TRAE (MCP config lives in an encrypted internal database and is read-only discoverable), each of the nine tools stores its MCP servers in its own config file; a4agent normalizes them into one view (`name` / `transport` / `command` / `args` / `env` / `url` / `headers`).
 
 ### Discovery & Aggregation
 
-- Auto-discovers global and project-level MCP servers on all eight tools and aggregates same-name servers across tools ("already on N tools").
+- Auto-discovers global and project-level MCP servers on all nine tools and aggregates same-name servers across tools ("already on N tools").
+- **TRAE is read-only**: TRAE keeps user-level MCP config in an encrypted internal database (`ModularData/ai-agent/database.db`, not standard SQLite); the only plaintext side is the runtime cache `~/.trae-cn/mcps/<workspace>/<agent>/<server>/` (`SERVER_METADATA.json` + `tools/*.json`). a4agent reads **server names and tool lists** from that cache, labels the card "TRAE supports read-only discovery only", never fabricates connection settings, and offers no install/delete/migrate actions — do those inside TRAE. Override the cache location with `$A4AGENT_TRAE_MCP_CACHE_PATH`.
 - `env` / `headers` are always **masked** in detail views (key names only); the API never returns plaintext secrets.
 - Every server card shows a **description**: common servers are recognized automatically (a built-in digest library plus live npm registry lookups for npx packages, both cached with failure fallbacks), and you can also click "Describe" to write your own (stored locally, shared across tools, cleared when left empty).
 - Project-level files are recognized automatically: Claude Code `.mcp.json`, Codex `.codex/config.toml`, ZCode `.zcode/config.json`, pi `.pi/mcp.json` (Qoder's project level *is* Claude Code's `.mcp.json`, managed under the Claude tool and not discovered twice). WorkBuddy is global-only — it has no workspace-level MCP file.
 
 ### Installing MCP Servers
 
-- Click "Install MCP" to create a server from scratch on any app: pick a target app (Claude Code / Codex / dsh / ZCode / pi / Qoder / OpenCode / WorkBuddy — written to that app's global config) and a transport (stdio / http / sse, filtered by the target's capabilities — e.g. Codex is stdio-only, pi and OpenCode have no sse), then fill in command/args/env or URL/headers.
+- Click "Install MCP" to create a server from scratch on any app: pick a target app (Claude Code / Codex / dsh / ZCode / pi / Qoder / OpenCode / WorkBuddy — written to that app's global config) and a transport (stdio / http / sse, filtered by the target's capabilities — e.g. Codex is stdio-only, pi and OpenCode have no sse), then fill in command/args/env or URL/headers. TRAE keeps MCP config in an encrypted internal database, so it never appears as an install or migration target.
 - You can also **paste JSON to import in bulk**: paste an existing MCP config snippet (three formats supported: a top-level "mcpServers" object, a name-keyed server dictionary, or a single server object) and install many at once — each entry is independent, so one failure (name conflict, unsupported transport, etc.) doesn't abort the rest, and each reports success/failure.
 - Installation uses each tool's native rendering and atomic writes (a same-name server on the target is explicitly rejected — use migration or delete first); existing servers and unrelated config keys are preserved. Installed servers appear in the card list immediately with descriptions auto-matched.
 
@@ -114,6 +118,7 @@ Each of the eight tools stores its MCP servers in its own config file; a4agent n
 | Qoder | stdio / sse / http | `~/.qoder/mcp.json` (global; project level reuses Claude Code's `<project>/.mcp.json`) |
 | OpenCode | stdio / streamable-http | `~/.config/opencode/opencode.json(c)`, `<project>/.opencode/opencode.json(c)` (`mcp.servers`) |
 | WorkBuddy | stdio / sse / http (written as `streamableHttp`) | `~/.workbuddy/mcp.json` (global only) |
+| TRAE | Write not supported (read-only discovery) | Encrypted internal database; plaintext side is only the `~/.trae-cn/mcps` runtime cache |
 
 **dsh**: MCP servers hang off the `@deepseek-ai/dsh-mcp-client` plugin entry; rewrites preserve other non-managed entries. No project-level MCP.
 
@@ -314,7 +319,7 @@ A blocked task still leaves a `precheck_failed` record, visible in the queue wit
 
 ### Agent Open Interaction (hand device control to AI agents)
 
-- The **Install control skill** button in the "Paired devices" section installs the CrossDevice control skill into agent skill folders, with three scopes: **global skill folders** (all eight tools), **project folder** (registered project roots), or a **custom folder**; existing same-name skills are never overwritten and are reported honestly
+- The **Install control skill** button in the "Paired devices" section installs the CrossDevice control skill into agent skill folders, with three scopes: **global skill folders** (all nine tools), **project folder** (registered project roots), or a **custom folder**; existing same-name skills are never overwritten and are reported honestly
 - Once installed, AI agents in your workspaces (Claude Code / Codex / ZCode etc.) discover the device capability via SKILL.md: each session starts with `GET /api/v1/devices/overview` to fetch a live view of paired devices, then calls remote command / screenshot / upload / download / task-history endpoints by device name (the backend listens on 127.0.0.1 only; its port is recorded in `%APPDATA%\a4agent\desktop.json`)
 - Honest boundaries: agents can **only operate paired devices** (pairing confirmation is a manual action by the device owner on the Devices page — agents cannot initiate new pairings); device credentials stay encrypted inside a4agent and never appear in any API response; agent-initiated operations are audited on the controlled device just like any other
 
@@ -451,8 +456,8 @@ a4agent/
 │   ├── responses_translator.py  # OpenAI Responses protocol translation
 │   ├── proxy_standalone.py   # standalone-process form of the translation proxy
 │   ├── crypto.py             # Windows DPAPI key encryption
-│   ├── skill_manager.py      # eight-tool skill discovery, aggregation, migration, recycle bin
-│   ├── mcp_manager.py        # eight-tool MCP discovery, installation, migration, snapshots
+│   ├── skill_manager.py      # nine-tool skill discovery, aggregation, migration, recycle bin
+│   ├── mcp_manager.py        # nine-tool MCP discovery (TRAE read-only), installation, migration, snapshots
 │   ├── removal.py            # cleanup of managed entries handed to the three tools (only self-written ones)
 │   ├── removal_backup.py     # permanent snapshots taken before cleanup
 │   ├── task_engines.py       # headless task engine adapters (commands & output parsing)

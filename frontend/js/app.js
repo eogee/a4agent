@@ -817,11 +817,13 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   /* ---------- 技能管理 ---------- */
-  var TOOL_LABEL = { claude: 'Claude', codex: 'Codex', dsh: 'DSH', zcode: 'ZCode', pi: 'Pi', qoder: 'Qoder', opencode: 'OpenCode', workbuddy: 'WorkBuddy' };
-  // 八端清单唯一定义处：新增/删除端只改这里（后端 TOOLS 与 schemas 闸门需同步）
-  var TOOL_KEYS = ['claude', 'codex', 'dsh', 'zcode', 'pi', 'qoder', 'opencode', 'workbuddy'];
+  var TOOL_LABEL = { claude: 'Claude', codex: 'Codex', dsh: 'DSH', zcode: 'ZCode', pi: 'Pi', qoder: 'Qoder', opencode: 'OpenCode', workbuddy: 'WorkBuddy', trae: 'TRAE' };
+  // 九端清单唯一定义处：新增/删除端只改这里（后端 TOOLS 与 schemas 闸门需同步）
+  var TOOL_KEYS = ['claude', 'codex', 'dsh', 'zcode', 'pi', 'qoder', 'opencode', 'workbuddy', 'trae'];
   // MCP 项目级有独立文件的端：dsh 是全局 profile 层，Qoder 复用 Claude Code 的 <repo>/.mcp.json
   var MCP_PROJECT_TOOLS = ['claude', 'codex', 'zcode', 'pi', 'opencode'];
+  // 只读端：MCP 配置在加密内部库中，只能发现、不能作为安装/迁移目标
+  var MCP_READ_ONLY_TOOLS = ['trae'];
   var skillView = 'global'; // global | project
   var skillData = null;
   var skillQuery = ''; // 搜索关键词，仅前端过滤已缓存的 skillData
@@ -906,7 +908,7 @@ layui.use(['layer', 'form', 'element'], function () {
           return;
         }
         box.innerHTML = '<div class="empty-tip">各端的全局目录还没有任何 skill<br>' +
-          '<span style="font-size:12px;">~/.claude/skills · ~/.codex/skills · ~/.dsh/skills · ~/.zcode/skills · ~/.pi/agent/skills · ~/.qoder/skills · ~/.config/opencode/skills · ~/.workbuddy/skills</span></div>';
+          '<span style="font-size:12px;">~/.claude/skills · ~/.codex/skills · ~/.dsh/skills · ~/.zcode/skills · ~/.pi/agent/skills · ~/.qoder/skills · ~/.config/opencode/skills · ~/.workbuddy/skills · ~/.trae-cn/skills</span></div>';
         return;
       }
       box.innerHTML = gs.map(function (g) { return skillGroupCard(g, 'global', ''); }).join('');
@@ -1646,20 +1648,24 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   function mcpCopyLine(c) {
-    var kind = c.transport === 'stdio'
-      ? escapeHtml(c.command || '')
-      : escapeHtml(c.url || '');
+    var kind = c.read_only
+      ? '运行时缓存（无连接配置）'
+      : (c.transport === 'stdio' ? escapeHtml(c.command || '') : escapeHtml(c.url || ''));
     var envKeys = Object.keys(c.env || {});
     var envHint = envKeys.length
       ? '<span class="mcp-env-hint" title="' + escapeHtml(envKeys.join(', ')) + '">env×' + envKeys.length + '</span>'
       : '';
+    // 只读端（TRAE）没有可写配置：不给删除入口，避免用户点了才收到拒绝
+    var del = c.read_only
+      ? ''
+      : '<a href="javascript:;" data-mc="delcopy" data-tool="' + escapeHtml(c.tool) + '" data-scope="' + c.scope + '" data-project="' + escapeHtml(c.project || '') + '" data-name="' + escapeHtml(c.name) + '">删除</a>';
     return '<div class="skill-copy" data-copy>' +
       '<span class="target-badge target-' + c.tool + '">' + TOOL_LABEL[c.tool] + '</span>' +
       '<span class="skill-copy-path" title="' + escapeHtml(c.path || '') + '">' + kind + '</span>' +
       envHint +
       '<span class="skill-copy-actions">' +
         '<a href="javascript:;" data-mc="detail" data-tool="' + escapeHtml(c.tool) + '" data-scope="' + c.scope + '" data-project="' + escapeHtml(c.project || '') + '" data-name="' + escapeHtml(c.name) + '">详情</a>' +
-        '<a href="javascript:;" data-mc="delcopy" data-tool="' + escapeHtml(c.tool) + '" data-scope="' + c.scope + '" data-project="' + escapeHtml(c.project || '') + '" data-name="' + escapeHtml(c.name) + '">删除</a>' +
+        del +
       '</span>' +
     '</div>';
   }
@@ -1670,22 +1676,28 @@ layui.use(['layer', 'form', 'element'], function () {
       : '';
     var badges = g.ends.map(endBadge).join('');
     var copies = g.copies.map(mcpCopyLine).join('');
-    var desc = '<div class="card-meta skill-desc">' + transportBadge(g.transport) + '</div>';
+    var transport = g.read_only ? '只读缓存' : g.transport;
+    var desc = '<div class="card-meta skill-desc">' + transportBadge(transport) + '</div>';
     var srcLabel = { custom: '自定义', config: '配置自带', builtin: '自动识别', npm: 'npm 自动识别' }[g.description_source] || '';
     var intro = g.description
       ? '<div class="card-meta skill-desc mcp-desc" title="' + escapeHtml(g.description) + (srcLabel ? '（来源：' + srcLabel + '）' : '') + '">' + escapeHtml(g.description) + '</div>'
       : '<div class="card-meta skill-desc skill-desc-none">无功能介绍（可点「介绍」补充）</div>';
+    var readOnly = g.read_only
+      ? '<div class="card-meta skill-desc">TRAE 仅支持只读发现，安装/迁移请在 TRAE 界面操作</div>'
+      : '';
+    var actions = g.read_only
+      ? '<button class="layui-btn layui-btn-sm" data-mc="intro" data-name="' + escapeHtml(g.name) + '" data-intro="' + escapeHtml(g.custom_description || '') + '">介绍</button>' +
+        '<button class="layui-btn layui-btn-sm" data-mc="preview" data-name="' + escapeHtml(g.name) + '">预览</button>'
+      : '<button class="layui-btn layui-btn-sm layui-btn-normal" data-mc="migrate">迁移…</button>' +
+        '<button class="layui-btn layui-btn-sm" data-mc="intro" data-name="' + escapeHtml(g.name) + '" data-intro="' + escapeHtml(g.custom_description || '') + '">介绍</button>' +
+        '<button class="layui-btn layui-btn-sm" data-mc="preview" data-name="' + escapeHtml(g.name) + '">预览</button>';
     return '' +
       '<div class="config-card skill-card" data-group="' + escapeHtml(g.name) + '" data-scope="' + scope + '" data-project="' + escapeHtml(project || '') + '">' +
         '<div class="skill-badges">' + badges + dup + '</div>' +
         '<div class="card-name">' + escapeHtml(g.name) + '</div>' +
-        desc + intro +
+        desc + intro + readOnly +
         '<div class="skill-copies">' + copies + '</div>' +
-        '<div class="card-actions">' +
-          '<button class="layui-btn layui-btn-sm layui-btn-normal" data-mc="migrate">迁移…</button>' +
-          '<button class="layui-btn layui-btn-sm" data-mc="intro" data-name="' + escapeHtml(g.name) + '" data-intro="' + escapeHtml(g.custom_description || '') + '">介绍</button>' +
-          '<button class="layui-btn layui-btn-sm" data-mc="preview" data-name="' + escapeHtml(g.name) + '">预览</button>' +
-        '</div>' +
+        '<div class="card-actions">' + actions + '</div>' +
       '</div>';
   }
 
@@ -1703,7 +1715,7 @@ layui.use(['layer', 'form', 'element'], function () {
           return;
         }
         box.innerHTML = '<div class="empty-tip">各端还未配置任何 MCP server<br>' +
-          '<span style="font-size:12px;">~/.claude.json · ~/.codex/config.toml · cordis.patch.yml · ~/.zcode/cli/config.json · ~/.pi/agent/mcp.json · ~/.qoder/mcp.json · ~/.config/opencode/opencode.jsonc · ~/.workbuddy/mcp.json</span></div>';
+          '<span style="font-size:12px;">~/.claude.json · ~/.codex/config.toml · cordis.patch.yml · ~/.zcode/cli/config.json · ~/.pi/agent/mcp.json · ~/.qoder/mcp.json · ~/.config/opencode/opencode.jsonc · ~/.workbuddy/mcp.json · ~/.trae-cn/mcps</span></div>';
         return;
       }
       box.innerHTML = gs.map(function (g) { return mcpGroupCard(g, 'global', ''); }).join('');
@@ -1785,6 +1797,9 @@ layui.use(['layer', 'form', 'element'], function () {
     if (migrationBusy) return;
     var g = findMcpGroup(scope, project, name);
     if (!g) { layer.msg('数据已过期，请刷新后重试', { icon: 2 }); return; }
+    // 只读副本（TRAE 运行时缓存）没有连接配置，不能作为迁移源
+    var srcCopies = g.copies.filter(function (c) { return !c.read_only; });
+    if (!srcCopies.length) { layer.msg('该 server 仅有只读缓存，无法作为迁移源', { icon: 0 }); return; }
 
     function destRow(destScope, tool, destProject, srcCopy) {
       var isSrc = !!srcCopy
@@ -1804,10 +1819,10 @@ layui.use(['layer', 'form', 'element'], function () {
     }
 
     function buildPanel(srcIdx) {
-      var src = g.copies[srcIdx] || {};
+      var src = srcCopies[srcIdx] || {};
       var html = '<div class="mig-panel">' +
         '<div class="mig-section"><div class="mig-title">迁移哪一份？</div>' +
-        g.copies.map(function (c, i) {
+        srcCopies.map(function (c, i) {
           return '<label class="mig-item">' +
             '<input type="radio" name="mig-src" value="' + i + '"' + (i === srcIdx ? ' checked' : '') + '>' +
             '<span class="target-badge target-' + c.tool + '">' + TOOL_LABEL[c.tool] + '</span>' +
@@ -1816,7 +1831,7 @@ layui.use(['layer', 'form', 'element'], function () {
         }).join('') + '</div>';
       html += '<div class="mig-section"><div class="mig-title">复制到哪些位置？（目标端同名旧版将移入回收站）</div>';
       html += '<div class="mig-group"><span class="mig-group-name">全局</span>';
-      TOOL_KEYS.forEach(function (t) { html += destRow('global', t, '', src); });
+      MCP_TOOLS.forEach(function (t) { html += destRow('global', t, '', src); });
       html += '</div>';
       (mcpData.projects || []).forEach(function (p) {
         html += '<div class="mig-group"><span class="mig-group-name">' + escapeHtml(p.project) + '</span>';
@@ -1853,7 +1868,7 @@ layui.use(['layer', 'form', 'element'], function () {
       yes: function (index) {
         var srcIdx = 0;
         document.querySelectorAll('input[name="mig-src"]').forEach(function (r, i) { if (r.checked) srcIdx = i; });
-        var src = g.copies[srcIdx];
+        var src = srcCopies[srcIdx];
         var targets = [];
         document.querySelectorAll('[data-mig]:checked').forEach(function (cb) {
           var parts = cb.getAttribute('data-mig').split('|');
@@ -1886,6 +1901,19 @@ layui.use(['layer', 'form', 'element'], function () {
     apiGet('/mcp/content' + q).then(function (c) {
       var lines = [];
       lines.push('<p class="skill-fm-line"><b>端</b>：' + escapeHtml(TOOL_LABEL[c.tool] || c.tool) + ' · ' + scopeLabel(c.scope, c.project) + '</p>');
+      if (c.read_only) {
+        lines.push('<p class="skill-fm-line"><b>传输</b>：未知（TRAE 运行时缓存不保存连接参数）</p>');
+        var tools = (c.extra && c.extra.tools) || [];
+        if (tools.length) {
+          lines.push('<p class="skill-fm-line"><b>工具</b>（' + tools.length + '）：</p>' +
+            '<div class="mcp-env-list">' + tools.map(function (t) {
+              return '<div class="mcp-env-row"><code>' + escapeHtml(t) + '</code></div>';
+            }).join('') + '</div>');
+        }
+        lines.push('<p class="skill-fm-line">TRAE 仅支持只读发现，安装/迁移请在 TRAE 界面操作</p>');
+        layer.alert(lines.join(''), { title: 'MCP 详情', icon: 0 });
+        return;
+      }
       lines.push('<p class="skill-fm-line"><b>传输</b>：' + escapeHtml(c.transport || '') + '</p>');
       if (c.transport === 'stdio') {
         lines.push('<p class="skill-fm-line"><b>命令</b>：<code>' + escapeHtml(c.command || '') + '</code></p>');
@@ -1950,7 +1978,7 @@ layui.use(['layer', 'form', 'element'], function () {
   }
 
   /* ---- MCP 安装（向指定端新建 server） ---- */
-  var MCP_TOOLS = TOOL_KEYS;  // 安装/导入面向全局配置，六端都支持全局
+  var MCP_TOOLS = TOOL_KEYS.filter(function (t) { return MCP_READ_ONLY_TOOLS.indexOf(t) === -1; });  // 安装/导入面向全局配置；TRAE 只读不收
 
   function kvFromTextarea(text) {
     var out = {};

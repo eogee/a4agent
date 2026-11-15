@@ -112,14 +112,14 @@ class IgnoredProjectsIn(BaseModel):
 
 class SkillSourceIn(BaseModel):
     scope: str = Field(pattern="^(global|project)$")
-    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode|workbuddy)$")
+    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode|workbuddy|trae)$")
     project: Optional[str] = None
     name: str  # frontmatter name 或目录名
 
 
 class SkillTargetIn(BaseModel):
     scope: str = Field(pattern="^(global|project)$")
-    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode|workbuddy)$")
+    tool: str = Field(pattern="^(claude|codex|zcode|qoder|dsh|pi|opencode|workbuddy|trae)$")
     project: Optional[str] = None
     # 自选项目文件夹（绝对路径）：提供时优先于 project 名，.{tool}/skills 缺失会自动创建
     project_root: Optional[str] = None

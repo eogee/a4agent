@@ -1,4 +1,4 @@
-"""MCP 八端（Claude Code / Codex / dsh / zcode / pi / Qoder / OpenCode / WorkBuddy）server 发现、迁移、回收站。
+"""MCP 九端（Claude Code / Codex / dsh / zcode / pi / Qoder / OpenCode / WorkBuddy / TRAE）server 发现、迁移、回收站。
 
 与 skill_manager 同构的管理骨架，差异在 MCP 配置是「配置文件内的子结构」
 而非独立目录，因此：
@@ -16,6 +16,10 @@
   端一次写入即两端同时生效；WorkBuddy 读写 ~/.workbuddy/mcp.json 顶层
   mcpServers（与 claude / Qoder 同构，但 http 传输的 type 写作驼峰
   streamableHttp 而非 http，另有 timeout 等自有键需原样保留），只托管全局。
+  TRAE 的用户级 MCP 配置保存在加密内部库（ModularData/ai-agent/database.db，
+  非标准 SQLite），明文侧只有运行时缓存 ~/.trae-cn/mcps/<工作区>/<agent>/
+  <server>/（SERVER_METADATA.json + tools/*.json），因此 trae 端**只读发现**
+  server 名称与工具清单，不提供任何写入/迁移目标能力。
 - 归一 schema（迁移中枢）：{ name, transport, command, args, env, url,
   headers, cwd, ... }，transport ∈ {stdio, sse, http}。
 - 传输能力矩阵：claude 支持 stdio/sse/http；codex 仅 stdio；dsh 支持
@@ -51,7 +55,7 @@ except ModuleNotFoundError:  # Python 3.10
 
 logger = logging.getLogger(__name__)
 
-TOOLS = ("claude", "codex", "dsh", "zcode", "pi", "qoder", "opencode", "workbuddy")
+TOOLS = ("claude", "codex", "dsh", "zcode", "pi", "qoder", "opencode", "workbuddy", "trae")
 TOOL_LABELS = {
     "claude": "Claude",
     "codex": "Codex",
@@ -61,7 +65,13 @@ TOOL_LABELS = {
     "qoder": "Qoder",
     "opencode": "OpenCode",
     "workbuddy": "WorkBuddy",
+    "trae": "TRAE",
 }
+# 只读端：配置不在可写明文文件中，只做发现，绝不伪造写入能力
+READ_ONLY_TOOLS = ("trae",)
+TRAE_MCP_READ_ONLY_NOTE = (
+    "TRAE 仅支持只读发现（MCP 配置在加密内部库中），安装/迁移请在 TRAE 界面操作"
+)
 TRASH_DIR_NAME = "mcp_recycle"
 TRASH_KEEP_DAYS = 30
 BACKUP_KEEP = 5
@@ -87,6 +97,9 @@ TRANSPORT_CAPABILITY = {
     # WorkBuddy 支持 stdio / sse / streamable HTTP（配置里写作驼峰
     # streamableHttp），与 Claude / Qoder 同构，三种传输都认。
     "workbuddy": {"stdio", "sse", "http"},
+    # TRAE 的 MCP 配置在加密内部库中，明文侧只有运行时缓存（无连接参数），
+    # 空集合表示不接收任何传输——写入与迁移在入口处直接拒绝。
+    "trae": set(),
 }
 
 # OpenCode 的 schema 严格（未知键会被丢弃），归一化时把规范字段收走，
@@ -113,6 +126,9 @@ DASH_SCOPE_CAPABILITY = {
     # 注意 skill 不同——WorkBuddy 确有工作区级 <workspace>/.workbuddy/skills，
     # 故 skill 侧项目级照常放行（见 skill_manager.project_skill_roots 的通用公式）。
     "workbuddy": ("global",),
+    # TRAE 只有加密内部库，无任何可写明文配置，故全局/项目级都不托管；
+    # 发现走运行时缓存（见 read_trae_servers）。
+    "trae": (),
 }
 
 # ---------------- MCP 简介知识库 ----------------
@@ -362,6 +378,97 @@ def workbuddy_mcp_path() -> Path:
     return Path.home() / ".workbuddy" / "mcp.json"
 
 
+def trae_mcp_cache_root() -> Path:
+    """TRAE MCP 运行时缓存根：<数据目录>/mcps（本机 ~/.trae-cn/mcps）。
+
+    这不是配置文件，而是 TRAE 跑过 MCP 之后留下的缓存：每个工作区一个
+    s_<项目>-<hash> 目录，其下按 agent（solo_agent / search 等）再按 server 分目录，
+    只有 SERVER_METADATA.json（server 名）与 tools/*.json（工具清单）。
+    连接参数（command/url/env/headers）不在明文侧，因此只能只读发现。
+    另设 A4AGENT_TRAE_MCP_CACHE_PATH 便于测试与非标准安装。
+    """
+    override = os.environ.get("A4AGENT_TRAE_MCP_CACHE_PATH")
+    if override:
+        return Path(override)
+    return config_manager.trae_home() / "mcps"
+
+
+def read_trae_servers(cache_root: Path | None = None) -> list[dict]:
+    """从 TRAE 运行时缓存只读发现 server（名称 + 工具清单），同名的合并。"""
+    root = cache_root or trae_mcp_cache_root()
+    try:
+        if not root.is_dir():
+            return []
+        workspaces = sorted(root.iterdir(), key=lambda p: p.name.lower())
+    except OSError as e:
+        logger.warning("无法读取 TRAE MCP 缓存 %s：%s（已跳过）", root, e)
+        return []
+
+    found: dict[str, dict] = {}
+    order: list[str] = []
+    for workspace in workspaces:
+        if not workspace.is_dir() or workspace.name.startswith("."):
+            continue
+        try:
+            agents = sorted(workspace.iterdir(), key=lambda p: p.name.lower())
+        except OSError:
+            continue
+        for agent in agents:
+            if not agent.is_dir():
+                continue
+            try:
+                server_dirs = sorted(agent.iterdir(), key=lambda p: p.name.lower())
+            except OSError:
+                continue
+            for server_dir in server_dirs:
+                if not server_dir.is_dir():
+                    continue
+                name = server_dir.name
+                meta_file = server_dir / "SERVER_METADATA.json"
+                if meta_file.is_file():
+                    try:
+                        meta = json.loads(meta_file.read_text(encoding="utf-8-sig"))
+                        name = str(meta.get("server_name") or name).strip() or name
+                    except (OSError, ValueError):
+                        pass
+                tools_dir = server_dir / "tools"
+                try:
+                    tools = sorted(p.stem for p in tools_dir.glob("*.json")) \
+                        if tools_dir.is_dir() else []
+                except OSError:
+                    tools = []
+                key = name.lower()
+                if key not in found:
+                    found[key] = {
+                        "name": name,
+                        "transport": "unknown",
+                        "command": None,
+                        "args": [],
+                        "env": {},
+                        "url": None,
+                        "headers": {},
+                        "cwd": None,
+                        "description": "",
+                        "tool": "trae",
+                        "scope": "global",
+                        "project": None,
+                        "path": str(server_dir),
+                        "read_only": True,
+                        "extra": {
+                            "source": "runtime_cache",
+                            "workspaces": [workspace.name],
+                            "tools": tools,
+                        },
+                    }
+                    order.append(key)
+                    continue
+                entry = found[key]
+                entry["extra"]["tools"] = sorted(set(entry["extra"]["tools"]) | set(tools))
+                if workspace.name not in entry["extra"]["workspaces"]:
+                    entry["extra"]["workspaces"].append(workspace.name)
+    return [found[k] for k in order]
+
+
 def opencode_config_dir() -> Path:
     """OpenCode 用户级配置目录 ~/.config/opencode（与 skill 根同处）。"""
     override = os.environ.get("A4AGENT_OPENCODE_CONFIG_DIR")
@@ -412,6 +519,10 @@ def opencode_project_mcp_path(project_root: Path) -> Path:
 
 def mcp_config_file(scope: str, tool: str, project: str | None) -> Path:
     """(scope, tool, project) → 配置文件路径；未知组合抛 ValueError。"""
+    if tool in READ_ONLY_TOOLS:
+        # TRAE 没有可写的明文 MCP 配置：任何试图拿"配置文件路径"去读写的调用
+        # 都必须在这里失败，避免误写一份 TRAE 读不到的文件
+        raise ValueError(TRAE_MCP_READ_ONLY_NOTE)
     if scope == "global":
         if tool == "claude":
             return claude_mcp_path()
@@ -1292,6 +1403,9 @@ def read_opencode_servers(path: Path, tool: str = "opencode", scope: str = "glob
 
 def read_servers(scope: str, tool: str, project: str | None = None) -> list[dict]:
     """从指定位置读取归一 server 列表（文件不存在返回空）。"""
+    if tool == "trae":
+        # 只读端没有项目级配置；全局走运行时缓存
+        return read_trae_servers() if scope == "global" else []
     path = mcp_config_file(scope, tool, project)
     if tool == "claude":
         return read_claude_servers(path, tool, scope, project)
@@ -1491,6 +1605,8 @@ def _write_opencode(path: Path, servers: list[dict]) -> None:
 
 def write_servers(scope: str, tool: str, project: str | None, servers: list[dict]) -> Path:
     """把归一 server 列表写回指定位置（先备份），返回配置文件路径。"""
+    if tool in READ_ONLY_TOOLS:
+        raise ValueError(TRAE_MCP_READ_ONLY_NOTE)
     path = mcp_config_file(scope, tool, project)
     _backup_config(path)
     if tool == "claude":
@@ -1592,6 +1708,8 @@ def _aggregate(entries: list[dict], mask: bool = False, descriptions: dict | Non
                 "end_count": len(ends),
                 "duplicate": len(copies) > 1,
                 "ends": ends,
+                # 全部副本都来自只读端时标出来（目前只有 TRAE），前端据此隐藏写操作
+                "read_only": all(c.get("read_only") for c in copies),
                 "description": text,
                 "description_source": source,
                 "custom_description": str(custom.get(name) or ""),
@@ -1651,12 +1769,16 @@ def discover() -> dict:
         "projects": projects_out,
         # 同样按 TOOLS 生成，新增端自动带上路径
         "roots": {
-            tool: str(dsh_mcp_patch_path() if tool == "dsh"
+            tool: str(trae_mcp_cache_root() if tool == "trae"
+                      else dsh_mcp_patch_path() if tool == "dsh"
                       else mcp_config_file("global", tool, None))
             for tool in TOOLS
         },
         "project_roots": load_project_roots(),
         "capability": {tool: sorted(list(transports)) for tool, transports in TRANSPORT_CAPABILITY.items()},
+        # 只读端清单与说明：前端在 MCP 视图如实展示「只能看、不能装」
+        "read_only": list(READ_ONLY_TOOLS),
+        "read_only_note": TRAE_MCP_READ_ONLY_NOTE,
     }
 
 
@@ -1787,6 +1909,8 @@ def delete_to_trash(db, descriptor: dict) -> dict:
     """删除某端某个 server（移除配置片段 → 快照进回收站）。"""
     from . import models
 
+    if descriptor.get("tool") in READ_ONLY_TOOLS:
+        raise ValueError(TRAE_MCP_READ_ONLY_NOTE)
     server = _find_server(descriptor)
     scope, tool, project = server["scope"], server["tool"], server["project"]
     purged = purge_expired(db)
@@ -2029,6 +2153,8 @@ def migrate(db, sources: list[dict], targets: list[dict]) -> dict:
 
     # 目标合法性预校验
     for t in targets:
+        if t.get("tool") in READ_ONLY_TOOLS:
+            raise ValueError(TRAE_MCP_READ_ONLY_NOTE)
         mcp_config_file(t.get("scope"), t.get("tool"), t.get("project"))
 
     results = []

@@ -1,13 +1,13 @@
-"""Skill 管理：八端（Claude Code / Codex / dsh / zcode / pi / Qoder / OpenCode / WorkBuddy）
-skill 发现、迁移、回收站。
+"""Skill 管理：九端（Claude Code / Codex / dsh / zcode / pi / Qoder / OpenCode /
+WorkBuddy / TRAE）skill 发现、迁移、回收站。
 
 各端均采用「<skill-name>/SKILL.md 目录 bundle + frontmatter（name/description）」
 格式，因此迁移即目录复制。本模块职责：
 
-- 路径解析：七端全局根（含 A4AGENT_*_SKILLS_PATH 环境变量覆盖）+ 可配置项目根
+- 路径解析：九端全局根（含 A4AGENT_*_SKILLS_PATH 环境变量覆盖）+ 可配置项目根
   列表下的项目级根；项目根列表持久化到 get_data_dir()/projects.json。
 
-OpenCode 的两处特例（其余六端沿用既有口径）：
+OpenCode 的两处特例（其余八端沿用既有口径）：
 - **身份是目录名**：技能 ID 由路径派生、大小写敏感，frontmatter name 只是显示名。
   因此聚合键与冲突判定在 opencode 端按 dir_name（见 _scan_root / _aggregate /
   _trash_existing_conflicts），显示名仍取 frontmatter name。
@@ -41,7 +41,7 @@ from .env_compat import env_first
 
 logger = logging.getLogger(__name__)
 
-TOOLS = ("claude", "codex", "dsh", "zcode", "pi", "qoder", "opencode", "workbuddy")
+TOOLS = ("claude", "codex", "dsh", "zcode", "pi", "qoder", "opencode", "workbuddy", "trae")
 TOOL_LABELS = {
     "claude": "Claude",
     "codex": "Codex",
@@ -51,6 +51,7 @@ TOOL_LABELS = {
     "qoder": "Qoder",
     "opencode": "OpenCode",
     "workbuddy": "WorkBuddy",
+    "trae": "TRAE",
 }
 SKILL_FILE = "SKILL.md"
 TRASH_DIR_NAME = "skills_recycle"
@@ -165,8 +166,20 @@ def workbuddy_skills_root() -> Path:
     return Path.home() / ".workbuddy" / "skills"
 
 
+def trae_skills_root() -> Path:
+    """TRAE 全局 skill 根，可用环境变量 A4AGENT_TRAE_SKILLS_PATH 覆盖。
+
+    TRAE 实际扫描的是产品数据目录下的 skills（本机 ~/.trae-cn/skills），
+    技能格式同样是 <name>/SKILL.md + frontmatter。~/.trae-cn/builtin/global/skills
+    是 TRAE 内置技能的物化目录（由 TRAE 更新流程整体重写），不写入、不托管。
+    项目级 <项目>/.trae/skills 正好命中 project_skill_roots 的 .{tool}/skills
+    通用公式，无需特判（TRAE 也扫描该目录）。
+    """
+    return config_manager.trae_skills_root()
+
+
 def global_skill_roots() -> dict:
-    """八端全局 skill 根映射 {tool: Path}。"""
+    """九端全局 skill 根映射 {tool: Path}。"""
     return {
         "claude": claude_skills_root(),
         "codex": codex_skills_root(),
@@ -176,6 +189,7 @@ def global_skill_roots() -> dict:
         "qoder": qoder_skills_root(),
         "opencode": opencode_skills_root(),
         "workbuddy": workbuddy_skills_root(),
+        "trae": trae_skills_root(),
     }
 
 
@@ -506,7 +520,7 @@ def project_dirs(roots: list[str] | None = None) -> list[dict]:
 
 
 def _scan_project(proj_root: Path, project_name: str) -> list[dict]:
-    """扫一个项目下八端的项目级 skill 根；远程项目加超时。"""
+    """扫一个项目下九端的项目级 skill 根；远程项目加超时。"""
 
     def work() -> list[dict]:
         entries: list[dict] = []
@@ -520,7 +534,7 @@ def _scan_project(proj_root: Path, project_name: str) -> list[dict]:
 
 
 def project_skill_roots(project_path: Path) -> dict:
-    """某项目的三端项目级 skill 根映射 {tool: Path}。"""
+    """某项目的项目级 skill 根映射 {tool: Path}。"""
     return {tool: project_path / f".{tool}" / "skills" for tool in TOOLS}
 
 

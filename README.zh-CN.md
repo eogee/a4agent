@@ -4,13 +4,13 @@
 
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/eogee/badge.svg)](https://hub.xerj.org/contributors/eogee)
 
-**八端 AI 编程工具管理台 + 本地大模型推理控制台**：为 **Claude Code、Codex、dsh（DeepSeek Harness）、ZCode（智谱 Agentic 开发环境）、pi（本地 pi coding agent）、Qoder（AI IDE）、OpenCode 与 WorkBuddy** 提供统一的技能管理与 MCP 管理（八端全覆盖），并为其中没有图形配置界面的两个 CLI 工具（Claude Code、Codex）提供 API 服务商切换，同时内置 llama.cpp 本地模型推理。所有操作通过可视化界面完成，无需手动编辑配置文件。
+**九端 AI 编程工具管理台 + 本地大模型推理控制台**：为 **Claude Code、Codex、dsh（DeepSeek Harness）、ZCode（智谱 Agentic 开发环境）、pi（本地 pi coding agent）、Qoder（AI IDE）、OpenCode、WorkBuddy 与 TRAE** 提供统一的技能管理与 MCP 管理（九端全覆盖，其中 TRAE 的 MCP 为只读发现），并为其中没有图形配置界面的两个 CLI 工具（Claude Code、Codex）提供 API 服务商切换，同时内置 llama.cpp 本地模型推理。所有操作通过可视化界面完成，无需手动编辑配置文件。
 
 | 能力 | 说明 |
 |---|---|
-| **技能管理** | 八端全局/项目级 skill 自动发现、聚合标注、跨端迁移、回收站恢复，一键把项目 skill 补齐到所有缺失的端 |
-| **MCP 管理** | 八端 MCP server 自动发现与**一键安装**、跨端迁移（按传输能力矩阵校验）、快照回收站、自动/自定义**功能介绍**，密钥全程脱敏/加密 |
-| **API 切换** | 为无图形界面的 CLI（Claude Code、Codex）一键切换服务商、模型、API Key，配置自动备份、原子写入，密钥 DPAPI 加密存储；其余六端应用自带供应商配置界面，由用户自行配置 |
+| **技能管理** | 九端全局/项目级 skill 自动发现、聚合标注、跨端迁移、回收站恢复，一键把项目 skill 补齐到所有缺失的端 |
+| **MCP 管理** | 九端 MCP server 自动发现与**一键安装**、跨端迁移（按传输能力矩阵校验）、快照回收站、自动/自定义**功能介绍**，密钥全程脱敏/加密 |
+| **API 切换** | 为无图形界面的 CLI（Claude Code、Codex）一键切换服务商、模型、API Key，配置自动备份、原子写入，密钥 DPAPI 加密存储；其余七端应用自带供应商配置界面，由用户自行配置 |
 | **本地模型** | 把任意 `.gguf` 模型一键变成 OpenAI 兼容的本地/局域网 API 服务：引擎按显卡自动获取、模型库扫描、显存风险评估，一键接入配置方案（Claude Code / Codex） |
 | **任务下发** | 七端以**无头模式**后台执行任务：下发即返回、下发前自动预检（引擎可用 / 配置就绪 / 真实连通）、队列轮询、产出留档、取消与超时、关窗不杀任务。直接使用你在各应用内配好的配置 |
 | **通知提醒** | 两条独立通道让你不必守在电脑前，且**全端一个样式**——话题名称 / 通知类型 / 应用名称三行制，纯文字无 Emoji：**手机推送**（ntfy）在任务与会话终局（成功 / 失败 / 超时）送达，始终带 **Agent 最后一段输出**；**桌面横幅**（来源区 logo + a4agent）覆盖完成 / 失败 / 权限申请 / 提问，点击唤回窗口。会话 hook 覆盖 **Claude Code / Codex / ZCode / Qoder / WorkBuddy / dsh**，可在手机上直接回答提问、审批权限 |
@@ -20,7 +20,7 @@
 
 ## OpenCode 接入（v0.6.0 起）
 
-OpenCode 与其他七端完全同权，没有任何专属界面：
+OpenCode 与其他八端完全同权，没有任何专属界面：
 
 - **技能 / MCP**：作为第七端统一托管（见上文，本机装了即可用——服务密码与默认端口 `49374` 自动发现）
 - **任务下发**：多一个 OpenCode 引擎，直接对它常驻的服务建会话执行，而不是每次新起一个 CLI 进程。
@@ -42,17 +42,17 @@ OpenCode 与其他七端完全同权，没有任何专属界面：
 
 ### 发现与聚合
 
-- 自动扫描八端**全局**与**项目级**技能目录，以 frontmatter `name` 为唯一标识做**聚合标注**：同名技能跨端存在时自动标记「已在 N 端存在」。
+- 自动扫描九端**全局**与**项目级**技能目录，以 frontmatter `name` 为唯一标识做**聚合标注**：同名技能跨端存在时自动标记「已在 N 端存在」。
 - **项目发现走两条路**：扫描范围默认是本机所有盘符（一级子目录视为项目），同时读取各 AI 工具本来就记着的历史——Claude Code 的项目表、Codex 会话的工作目录、VS Code 系编辑器最近打开的工作区——所以任意深度的项目都会自己冒出来，不需要你指给它。只收录含至少一个 skill 的项目。
 - 「项目来源」弹窗里能看到自动发现了什么（以及来自哪个工具），可以逐条忽略、用目录选择器添加扫描范围，或一键恢复默认范围。
 - Codex 全局的保留目录（`.system/` 等点开头目录）自动跳过，不视为用户技能。
 
-### 跨端迁移与「一键适配八端」
+### 跨端迁移与「一键适配九端」
 
 - 任意一端的 skill 可迁移到任意目标端（全局或任意项目），迁移为**非破坏复制**：源端永久保留。
 - 迁移目标支持**自选项目文件夹**：目标项目无需事先存在任何 skill，`.{tool}/skills` 目录缺失时自动创建；桌面端与浏览器端共用同一套内置目录选择器。
 - 目标端已存在同名技能（frontmatter name 或目录名任一命中）时，旧版自动移入回收站而非静默覆盖。
-- **「一键适配八端」**：一键把项目内全部 skill 按其缺失的端一次补齐，先弹计划清单再执行，带进度条并临时锁定页面，防止中途误操作。
+- **「一键适配九端」**：一键把项目内全部 skill 按其缺失的端一次补齐，先弹计划清单再执行，带进度条并临时锁定页面，防止中途误操作。
 - 每次迁移写入**迁移日志**（时间、Skill、源、目标、结果），全程可追溯。
 
 ### 回收站
@@ -60,7 +60,7 @@ OpenCode 与其他七端完全同权，没有任何专属界面：
 - 删除的 skill 移入回收站，**30 天内**可恢复原位或彻底删除；恢复时原位置被占用会明确报错，绝不覆盖。
 - 过期条目在下次访问回收站时惰性清理，并在返回结果中提示本次清理数量。
 
-### 八端技能目录
+### 九端技能目录
 
 | 工具 | 全局（用户级） | 项目级 |
 |---|---|---|
@@ -72,6 +72,9 @@ OpenCode 与其他七端完全同权，没有任何专属界面：
 | Qoder | `~/.qoder/skills/`（`$A4AGENT_QODER_HOME` 可覆盖） | `<项目>/.qoder/skills/` |
 | OpenCode | `~/.config/opencode/skills/` | `<项目>/.opencode/skills/` |
 | WorkBuddy | `~/.workbuddy/skills/`（`$A4AGENT_WORKBUDDY_SKILLS_PATH` 可覆盖） | `<项目>/.workbuddy/skills/` |
+| TRAE | `~/.trae-cn/skills/`（`$A4AGENT_TRAE_HOME` / `$A4AGENT_TRAE_SKILLS_PATH` 可覆盖） | `<项目>/.trae/skills/` |
+
+**TRAE**：TRAE 实际扫描的用户技能目录是产品数据目录下的 `skills`（本机 `~/.trae-cn/skills`），项目级为 `<项目>/.trae/skills`，格式仍是 `<name>/SKILL.md` + frontmatter，因此无需特殊处理。`~/.trae-cn/builtin/global/skills` 是 TRAE **内置技能**的物化目录，随 TRAE 更新整体重写，a4agent 不写入、不托管，避免升级时互相覆盖。TRAE 没有 hook 协议、也没有无头 CLI，因此本轮只接技能管理与 MCP 只读发现。
 
 **ZCode**：官方还识别跨工具兼容目录 `~/.agents/skills` 与 `<项目>/.agents/skills`；a4agent 统一托管到 `.zcode` 前缀，与其它端保持一致。迁移到 ZCode 的 skill 会被 ZCode 客户端真实读取。
 
@@ -90,20 +93,21 @@ OpenCode 与其他七端完全同权，没有任何专属界面：
 
 ## MCP 管理
 
-![MCP 管理：八端服务聚合与一键安装](assets/screenshots/mcp-zh.png)
+![MCP 管理：九端服务聚合与一键安装](assets/screenshots/mcp-zh.png)
 
-八端的 MCP server 都写在各自的配置文件里，a4agent 把它们归一为统一视图（`name` / `transport` / `command` / `args` / `env` / `url` / `headers`）管理。
+九端里除 TRAE（MCP 配置在加密内部库，仅只读发现）外，各端的 MCP server 都写在各自的配置文件里，a4agent 把它们归一为统一视图（`name` / `transport` / `command` / `args` / `env` / `url` / `headers`）管理。
 
 ### 发现与聚合
 
-- 自动发现八端全局与项目级 MCP server，同名 server 跨端聚合标注（「已在 N 端存在」）。
+- 自动发现九端全局与项目级 MCP server，同名 server 跨端聚合标注（「已在 N 端存在」）。
+- **TRAE 只读发现**：TRAE 的用户级 MCP 配置保存在加密内部库（`ModularData/ai-agent/database.db`，非标准 SQLite），明文侧只有运行时缓存 `~/.trae-cn/mcps/<工作区>/<agent>/<server>/`（`SERVER_METADATA.json` + `tools/*.json`）。a4agent 从该缓存读出 **server 名称与工具清单**，卡片明确标注「TRAE 仅支持只读发现」，不伪造连接参数，也不提供安装/删除/迁移入口——请在 TRAE 界面操作。可用 `$A4AGENT_TRAE_MCP_CACHE_PATH` 覆盖缓存位置。
 - 详情中 `env` / `headers` **一律脱敏**（只回显键名），API 永不回传明文密钥。
 - 每张卡片显示该 server 的**功能介绍**：自动识别常用 server（内置简介库 + npx 包实时查询 npm registry，均有缓存与失败兜底），也支持点「介绍」手工维护说明（本地持久化、跨端共享、留空即清除）。
 - 项目级自动识别：Claude Code `.mcp.json`、Codex `.codex/config.toml`、ZCode `.zcode/config.json`、pi `.pi/mcp.json`（Qoder 的项目级就是 Claude Code 的 `.mcp.json`，归 Claude 端托管，不重复发现）。WorkBuddy 只有全局，没有工作区级 MCP 文件。
 
 ### 安装 MCP 服务
 
-- 点「安装 MCP」可在任意应用**从零新建** server：选择目标应用（Claude Code / Codex / dsh / ZCode / pi / Qoder / OpenCode / WorkBuddy，写入该应用全局配置）+ 传输类型（stdio / http / sse，按目标端能力自动过滤，如 Codex 仅 stdio、pi 与 OpenCode 无 sse），填写命令/参数/环境变量或地址/请求头。
+- 点「安装 MCP」可在任意应用**从零新建** server：选择目标应用（Claude Code / Codex / dsh / ZCode / pi / Qoder / OpenCode / WorkBuddy，写入该应用全局配置）+ 传输类型（stdio / http / sse，按目标端能力自动过滤，如 Codex 仅 stdio、pi 与 OpenCode 无 sse），填写命令/参数/环境变量或地址/请求头。TRAE 只有加密内部库，不出现在安装/迁移目标里。
 - 也支持**粘贴 JSON 批量导入**：把已有的 MCP 配置片段直接粘进来（兼容「mcpServers」顶层、名称作键的 server 字典、单对象三种格式），一次装多个，逐条独立——单条失败（同名冲突、目标端不支持该传输等）不中断其余，并逐条报告成功/失败。
 - 安装走各端原生渲染与原子写（目标同名已存在会明确拒绝，可改用迁移或先删除），既有 server 与其它配置键原样保留；安装后立即出现在卡片列表，并自动匹配功能介绍。
 
@@ -122,6 +126,7 @@ OpenCode 与其他七端完全同权，没有任何专属界面：
 | Qoder | stdio / sse / http | `~/.qoder/mcp.json`（全局；项目级复用 Claude Code 的 `<项目>/.mcp.json`） |
 | OpenCode | stdio / streamable-http | `~/.config/opencode/opencode.json(c)`、`<项目>/.opencode/opencode.json(c)`（`mcp.servers`） |
 | WorkBuddy | stdio / sse / http（写回为 `streamableHttp`） | `~/.workbuddy/mcp.json`（仅全局） |
+| TRAE | 不支持写入（只读发现） | 加密内部库；明文侧仅 `~/.trae-cn/mcps` 运行时缓存 |
 
 **dsh**：MCP server 挂在 `@deepseek-ai/dsh-mcp-client` 插件条目下，重写时保留其它非管理条目；无项目级 MCP。
 
@@ -322,7 +327,7 @@ a4agent 为**没有图形配置界面的 CLI 工具**提供一键切换：目前
 
 ### Agent 开放交互（把设备能力交给 AI Agent）
 
-- 设备页「已配对设备」区的 **「安装控制技能」** 把 CrossDevice 控制技能安装到 Agent 技能目录，三档范围：**全局技能库**（八端通用）、**项目目录**（已注册项目根）、**自定义目录**；目标已有同名技能时不覆盖、如实报告
+- 设备页「已配对设备」区的 **「安装控制技能」** 把 CrossDevice 控制技能安装到 Agent 技能目录，三档范围：**全局技能库**（九端通用）、**项目目录**（已注册项目根）、**自定义目录**；目标已有同名技能时不覆盖、如实报告
 - 安装后，工作空间内的 AI Agent（Claude Code / Codex / ZCode 等）经 SKILL.md 发现设备能力：每次会话先调 `GET /api/v1/devices/overview` 动态获取已配对设备全景，再按设备名调用远程命令、截屏、上传下载、任务历史接口（backend 只监听 127.0.0.1，地址记录在 `%APPDATA%\a4agent\desktop.json`）
 - 边界如实声明：Agent **只能操作已配对设备**（配对确认是设备所有者在设备页的人工动作，Agent 无权发起新配对）；设备凭据由 a4agent 加密托管、不出现在任何接口响应中；Agent 的远程操作同样落被控端审计
 
@@ -459,8 +464,8 @@ a4agent/
 │   ├── responses_translator.py  # OpenAI Responses 协议翻译
 │   ├── proxy_standalone.py   # 独立进程形态的翻译代理
 │   ├── crypto.py             # Windows DPAPI 密钥加密
-│   ├── skill_manager.py      # 八端技能发现、聚合、迁移与回收站
-│   ├── mcp_manager.py        # 八端 MCP 发现、安装、迁移与快照
+│   ├── skill_manager.py      # 九端技能发现、聚合、迁移与回收站
+│   ├── mcp_manager.py        # 九端 MCP 发现、安装、迁移与快照
 │   ├── removal.py            # 移交三端的托管配置清理（只删自写条目）
 │   ├── removal_backup.py     # 清理前的永久快照
 │   ├── task_engines.py       # 无头任务引擎适配（六端命令与产出解析）

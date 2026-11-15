@@ -427,7 +427,7 @@ layui.use(['layer'], function () {
         '<span>工作空间内的 Agent 即可发现并使用已配对设备的能力。</span></div>' +
         '<div class="dev-form-row"><label>安装范围</label>' +
           '<span class="dev-check"><input type="radio" name="dev-skill-scope" value="global" checked>' +
-          '<span>全局技能库（八端通用）</span></span></div>' +
+          '<span>全局技能库（九端通用）</span></span></div>' +
         '<div class="dev-form-row"><label></label>' +
           '<span class="dev-check"><input type="radio" name="dev-skill-scope" value="project">' +
           '<span>项目目录</span></span>' +

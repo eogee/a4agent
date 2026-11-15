@@ -68,6 +68,11 @@ QODER_HOME_ENV = ("A4AGENT_QODER_HOME",)
 QODER_HOME_DIRNAMES = (".qoder", ".qoder-cn")
 QODER_SKILLS_CONFIG_ENV = ("A4AGENT_QODER_SKILLS_PATH",)
 
+# TRAE（AI IDE）相关常量：产品数据目录名随发行版而变（国际版 .trae / 国内版 .trae-cn）
+TRAE_HOME_ENV = ("A4AGENT_TRAE_HOME",)
+TRAE_HOME_DIRNAMES = (".trae", ".trae-cn")
+TRAE_SKILLS_CONFIG_ENV = ("A4AGENT_TRAE_SKILLS_PATH",)
+
 
 def settings_path() -> Path:
     return resolve_path(
@@ -853,3 +858,30 @@ def qoder_home() -> Path:
 def qoder_skills_root() -> Path:
     """Qoder 全局 skill 根（~/.qoder/skills），可用 A4AGENT_QODER_SKILLS_PATH 覆盖。"""
     return resolve_path(QODER_SKILLS_CONFIG_ENV, lambda: qoder_home() / "skills")
+
+
+# ---------------- TRAE（AI IDE）配置读写 ----------------
+# TRAE 的用户技能目录是产品数据目录下的 skills（本机 ~/.trae-cn/skills），
+# 技能管理配置为同目录的 skill-config.json。builtin/global/skills 是 TRAE
+# 内置技能的物化目录，随 TRAE 更新整体重写，不归本工具托管。
+
+
+def trae_home() -> Path:
+    """TRAE 产品数据目录：优先 A4AGENT_TRAE_HOME，其次取实际存在的发行版目录。
+
+    目录名随发行版变化（国际版 .trae / 国内版 .trae-cn），故按候选名探测，
+    与 qoder_home 同口径。
+    """
+    override = env_first(*TRAE_HOME_ENV)
+    if override:
+        return Path(override)
+    for name in TRAE_HOME_DIRNAMES:
+        candidate = Path.home() / name
+        if candidate.is_dir():
+            return candidate
+    return Path.home() / TRAE_HOME_DIRNAMES[0]
+
+
+def trae_skills_root() -> Path:
+    """TRAE 全局 skill 根（<数据目录>/skills），可用 A4AGENT_TRAE_SKILLS_PATH 覆盖。"""
+    return resolve_path(TRAE_SKILLS_CONFIG_ENV, lambda: trae_home() / "skills")
