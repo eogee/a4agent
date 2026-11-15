@@ -79,6 +79,16 @@ curl -s "$BASE/api/v1/devices/pc-a/job/<job_id>?wait=30"
 - 大数据文件（非脚本）同样先 put 上传、再在 exec 命令里引用该路径处理，产物用 `get` 下载回来。
 - 暂存目录恒可写（被控端 node 数据目录下 `tmp`），是这套组合的默认落点；产物清理可在 exec 里执行 `del <路径>`，或交由被控端自行管理。
 
+## 宏（xd macro rec/run）——控制端 CLI 能力（非 a4agent HTTP 接口）
+
+`xd macro rec/run` 是 CrossDevice **控制端 CLI（xd.py）** 的本地子命令（契约 V1.7 新增，纯控制端本地功能，协议零变更）：把本机（控制端）录下的一段键鼠操作存成宏文件，再按原节奏回放到任意已注册设备。它须在**装有 CrossDevice 控制端的机器上本地执行**（如在本机 shell 直接运行 `py xd.py macro ...`）；a4agent 本地 HTTP 接口**不提供调宏端点**（上表没有，也不存在），不要尝试经 a4agent HTTP API 调宏。
+
+- **宏 = 白名单动作类型序列**——**不允许任意脚本**（D30 红线：不支持循环、条件、变量、表达式、外部命令）；宏文件只在控制端本地解析与严格校验，不进入被控端执行面，加载校验失败即整体拒绝、不执行任何动作。
+- **回放**（`xd macro run <设备> <宏文件> [--speed <倍率 0.01–100，默认 1.0>]`）：按宏内延迟**分段**经既有 `/v1/input` 发送，**全程持输入租约**；他人持有时返回 `INPUT_LEASE_TAKEN` 且不执行；**Ctrl+C 或异常中断会立即 best-effort 释放输入租约**（FR-06"中断即释放"），正常回放结束也会自动释放（不等 60 秒过期）。
+- **录制**（`xd macro rec <输出宏文件> [--seconds <N> 默认 10，Ctrl+C 提前结束]`）：经 Windows 低级键鼠钩子（WH_MOUSE_LL/WH_KEYBOARD_LL，纯标准库 ctypes）捕获**控制端本机**键鼠；忽略注入事件（回放不会被自录进去）；钩子安装失败会明确报错。录制完成后**不自动回放**。
+
+宏文件格式、去抖/聚合阈值与示例见 CrossDevice README"宏（macro rec/run）"节与接口契约 §11。
+
 ## 错误形态
 
 业务失败返回 HTTP 4xx/5xx，`{"detail": {"code": "<错误码>", "message": "<中文描述>"}}`；常见码：`NOT_FOUND`（设备名不存在）、`BAD_REQUEST`（参数错误）、`SANDBOX_DENIED`（写路径越白名单，见上节）、`PAIR_*`（配对相关——你不应触发）。长命令记得用 `job_id` 轮询而不是反复发起。
