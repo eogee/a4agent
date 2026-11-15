@@ -783,8 +783,12 @@ def test_process_queue_survives_unlink_oserror(data_dir, dq_clock, monkeypatch):
     assert [t for t, _ in shown] == ["Claude Code", "Codex"]  # 第二条未被阻断
 
 
-def test_process_queue_survives_show_error(data_dir, monkeypatch):
-    """单条 show 抛异常不阻断后续条目，也不阻断删除。"""
+def test_process_queue_survives_show_error(data_dir, dq_clock, monkeypatch):
+    """单条 show 抛异常不阻断后续条目，也不阻断删除。
+
+    注入 dq_clock 防两条 notify 落在同一毫秒触发文件名碰撞（M5 WP1 同款
+    根因预防——碰撞时第二条覆盖第一条，本用例断言恰好容忍，属侥幸通过）。
+    """
     deskqueue.queue_notify("A", "一")
     deskqueue.queue_notify("B", "二")
 
