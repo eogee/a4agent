@@ -563,6 +563,8 @@
     /* ---------- 循环任务（并入任务下发页） ---------- */
     "循环任务": "Loops",
     "单次任务": "Tasks",
+    "计划中的任务": "Scheduled loops",
+    "还没有计划。在上方表单把执行计划切到「按计划循环」并保存，Agent 就会到点自动执行（应用开着才会触发）": "No loops yet. Set the execution plan to \"On a schedule\" in the form above and save — the agent will then run on time (only while the app is running)",
     "新建循环任务": "New loop",
     "编辑循环任务": "Edit loop",
     "调度中": "Scheduling",
