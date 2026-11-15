@@ -298,6 +298,20 @@ A blocked task still leaves a `precheck_failed` record, visible in the queue wit
 - Credentials of paired devices (tokens and certificate fingerprints) are stored locally encrypted with Windows DPAPI and are never returned in plain text through the API or files; a certificate fingerprint change is rejected, and the fingerprint can be reset from the Devices page to reconnect
 - The node runtime files (node.py / gen_cert.ps1) ship with the a4agent installer into the install directory `node_runtime/`; you can also point the Devices page at a custom path (in development, the CrossDevice repo works directly)
 
+### Devices page: upload whitelist and staging folder
+
+- **Write-direction operations** (upload / write / delete / mkdir / move) on paired devices are constrained by the controlled device's **workspace whitelist** (reads are unrestricted): with an empty whitelist by default, only the **node default staging folder** is writable (`tmp` under the controlled node's data directory, e.g. `%APPDATA%\a4agent\node\tmp`); everything else is rejected with 403 `SANDBOX_DENIED`. Explicitly configured roots and the staging folder coexist (up to 16 user roots; the staging folder does not count against the limit).
+- The staging folder is "automation friendly": created automatically at node startup and always writable — upload scripts / temporary artifacts there first, then run them via exec (see the next section and the "Large payload / long script delivery" section of the agent skill).
+- The whitelist is **controlled-device local configuration** (D24 boundary): neither the Devices page nor the API offers remote modification — to widen it, the device owner edits the `"workspace"` key in the controlled device's `node.json` (e.g. `"workspace": ["D:\\Shared"]`) and restarts node, or passes `--workspace` at startup.
+- Allowed roots are discoverable: the `SANDBOX_DENIED` error message lists the current allowed roots (plus a machine-readable `allowed_roots` field); the Devices page / `GET /api/v1/devices/{name}/workspaces` also returns the allowed roots and the exact staging path at any time (node v0.5.1+, read-only).
+
+### exec command quoting semantics (node v0.5.1+)
+
+- **cmd form** (default): the command line is passed **verbatim** to the controlled device's `cmd /c` — embedded quotes take effect as written; just quote arguments containing spaces: `tasklist /FI "IMAGENAME eq x.exe"`, `python -c "print(1)"`.
+- **powershell form**: executed via `-EncodedCommand` (UTF-16LE base64) — same semantics as `-Command` with no quoting ambiguity; deeply nested quotes work reliably.
+- **none form**: the command line is split per Windows argv semantics (spaces inside quotes do not split arguments).
+- The `cmd` field in task history and API responses is always the caller's **original text**. On node v0.5.0 and earlier, commands containing quotes failed — a fixed defect (since v0.5.1, see CrossDevice contract V1.6 §6.3).
+
 ### Agent Open Interaction (hand device control to AI agents)
 
 - The **Install control skill** button in the "Paired devices" section installs the CrossDevice control skill into agent skill folders, with three scopes: **global skill folders** (all eight tools), **project folder** (registered project roots), or a **custom folder**; existing same-name skills are never overwritten and are reported honestly

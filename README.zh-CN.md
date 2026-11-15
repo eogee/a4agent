@@ -306,6 +306,20 @@ a4agent 为**没有图形配置界面的 CLI 工具**提供一键切换：目前
 - 已配对设备的凭据（令牌与证书指纹）经 Windows DPAPI 加密存储在本机，接口与文件层均不回传明文；证书指纹变更会被拒绝，可在设备页重置指纹后重新连接
 - node 运行时文件（node.py / gen_cert.ps1）随 a4agent 安装包分发到安装目录 `node_runtime/`，也可在设备页手动指定路径（开发态可直接用 CrossDevice 仓）
 
+### 设备页：上传白名单与暂存目录
+
+- 对已配对设备的**写方向操作**（上传 / 写 / 删 / 建目录 / 移动）受**被控端工作空间白名单**约束（读取不限）：白名单默认空 = 仅 **node 默认暂存目录**可写（被控端 node 数据目录下 `tmp`，如 `%APPDATA%\a4agent\node\tmp`），其余写方向一律拒绝（403 `SANDBOX_DENIED`）；显式配置的根与暂存目录并存生效（用户根最多 16 个，暂存目录不计入）。
+- 暂存目录定位「自动化友好」：node 启动自动创建、恒可用——上传的脚本 / 临时产物先 put 到这里再经 exec 执行（见下节与 Agent 技能的「大 payload / 长脚本投递」）。
+- 白名单是**被控端本地配置**（D24 边界）：设备页与接口都**不提供远程修改**——需要扩大范围时由设备所有者编辑被控端 `node.json` 的 `"workspace"` 键（如 `"workspace": ["D:\\Shared"]`）并重启 node，或以 `--workspace` 启动参数指定。
+- 允许根可查询：被拒报错（`SANDBOX_DENIED`）的 message 会列出当前允许根（另有机读字段 `allowed_roots`）；设备页 / `GET /api/v1/devices/{name}/workspaces` 也可随时查询允许根与暂存目录的确切路径（node v0.5.1+，只读）。
+
+### exec 命令引号语义（node v0.5.1+）
+
+- **cmd 形态**（默认）：命令行**逐字直达**被控端 `cmd /c`——内嵌引号原样生效，参数含空格直接写引号即可：`tasklist /FI "IMAGENAME eq x.exe"`、`python -c "print(1)"`。
+- **powershell 形态**：经 `-EncodedCommand`（UTF-16LE base64）执行，语义同 `-Command` 但无引号歧义，深层嵌套引号同样可靠。
+- **none 形态**：按 Windows argv 语义切分命令行（引号内空格不拆散）。
+- 任务历史与接口响应中的 `cmd` 始终是调用方**原文**。node v0.5.0 及更早版本带引号命令会失效，属已修复缺陷（v0.5.1 起，见 CrossDevice 契约 V1.6 §6.3）。
+
 ### Agent 开放交互（把设备能力交给 AI Agent）
 
 - 设备页「已配对设备」区的 **「安装控制技能」** 把 CrossDevice 控制技能安装到 Agent 技能目录，三档范围：**全局技能库**（八端通用）、**项目目录**（已注册项目根）、**自定义目录**；目标已有同名技能时不覆盖、如实报告

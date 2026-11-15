@@ -100,6 +100,7 @@ layui.use(['layer'], function () {
         '<span class="dev-head-actions">' +
           '<button class="layui-btn layui-btn-sm" id="dev-runtime-start">启动</button>' +
           '<button class="layui-btn layui-btn-sm layui-btn-primary" id="dev-runtime-stop">停止</button>' +
+          '<button class="layui-btn layui-btn-sm layui-btn-primary" id="dev-instance-add">添加实例</button>' +
           '<button class="layui-btn layui-btn-sm layui-btn-primary" id="dev-runtime-settings">运行时设置</button>' +
         '</span></div>' +
       '<div id="dev-runtime" class="dev-runtime"><div class="empty-tip">加载中…</div></div>' +
@@ -136,6 +137,7 @@ layui.use(['layer'], function () {
           }).catch(fail);
         });
     };
+    document.getElementById('dev-instance-add').onclick = openInstanceAdd;
     document.getElementById('dev-runtime-settings').onclick = openRuntimeSettings;
     document.getElementById('dev-manual-add').onclick = openManualAdd;
     document.getElementById('dev-skill-install').onclick = openInstallSkill;
@@ -157,6 +159,7 @@ layui.use(['layer'], function () {
   };
 
   function renderRuntime(st) {
+    lastRuntime = st;
     var box = document.getElementById('dev-runtime');
     if (!box) return;
     var m = RUNTIME_STATE[st.state] || [st.state, 'dev-state-off'];
@@ -180,7 +183,9 @@ layui.use(['layer'], function () {
           ? '已开启（UDP ' + st.listener.port + '）'
           : '未开启' + (st.listener && st.listener.error ? '：' + st.listener.error : '')) +
         '</span></div>' +
-      (lines ? '<div class="dev-log">' + lines + '</div>' : '');
+      (lines ? '<div class="dev-log">' + lines + '</div>' : '') +
+      renderInstances(st.instances || []);
+    bindInstanceActions(box);
   }
 
   function openRuntimeSettings() {
@@ -224,6 +229,115 @@ layui.use(['layer'], function () {
         }
       });
     }).catch(fail);
+  }
+
+  /* ---------- 具名实例（B40 多实例） ---------- */
+  var INSTANCE_NAME_RE = /^[A-Za-z0-9_-]{1,32}$/;   // 与 node.py --instance 同规
+  var lastRuntime = null;      // 最近一次 /runtime 快照（实例清单维护用）
+
+  function instanceNames() {
+    return ((lastRuntime && lastRuntime.instances) || [])
+      .map(function (i) { return i.name; });
+  }
+
+  function renderInstances(list) {
+    if (!list.length) return '';
+    var cards = list.map(function (ins) {
+      var m = RUNTIME_STATE[ins.state] || [ins.state, 'dev-state-off'];
+      return '<div class="dev-card dev-instance-card" data-instance="' +
+        escapeHtml(ins.name) + '">' +
+        '<div class="dev-card-title">' +
+          '<span class="dev-card-name">' + escapeHtml(ins.name) + '</span>' +
+          '<span class="dev-state ' + m[1] + '">' + escapeHtml(m[0]) + '</span>' +
+        '</div>' +
+        '<div class="dev-card-meta">' +
+          (ins.port ? '<span>端口 </span><span>' + ins.port + '</span>'
+                    : '<span>端口未就绪</span>') +
+          (ins.pid ? '<span>PID </span><span>' + ins.pid + '</span>' : '') +
+        '</div>' +
+        '<div class="dev-card-actions">' +
+          '<button class="layui-btn layui-btn-sm" data-iact="start">启动</button>' +
+          '<button class="layui-btn layui-btn-sm layui-btn-primary" data-iact="stop">停止</button>' +
+          '<button class="layui-btn layui-btn-sm layui-btn-primary layui-btn-danger" data-iact="remove">移除</button>' +
+        '</div></div>';
+    }).join('');
+    return '<div class="dev-instance-list">' + cards + '</div>';
+  }
+
+  function bindInstanceActions(box) {
+    box.querySelectorAll('[data-iact]').forEach(function (btn) {
+      btn.onclick = function () {
+        var card = btn.closest('.dev-instance-card');
+        if (!card) return;
+        var name = card.getAttribute('data-instance');
+        var act = btn.getAttribute('data-iact');
+        if (act === 'start') startInstance(name);
+        else if (act === 'stop') stopInstance(name);
+        else if (act === 'remove') removeInstance(name);
+      };
+    });
+  }
+
+  function startInstance(name) {
+    apiSend('/runtime/instances/' + encodeURIComponent(name) + '/start', 'POST')
+      .then(function () { layer.msg('启动指令已下发', { icon: 1 }); refreshAll(); })
+      .catch(fail);
+  }
+
+  function stopInstance(name) {
+    layer.confirm('停止实例「' + name + '」？依赖它的设备将无法连接本机。',
+      { title: '停止实例' }, function (index) {
+        layer.close(index);
+        apiSend('/runtime/instances/' + encodeURIComponent(name) + '/stop', 'POST')
+          .then(function () { layer.msg('已停止', { icon: 1 }); refreshAll(); })
+          .catch(fail);
+      });
+  }
+
+  function removeInstance(name) {
+    layer.confirm('移除实例「' + name + '」？进程将被停止并从清单移除。',
+      { title: '移除实例' }, function (index) {
+        layer.close(index);
+        saveInstances(instanceNames().filter(function (n) { return n !== name; }));
+      });
+  }
+
+  function saveInstances(names) {
+    apiSend('/runtime/config', 'PUT', { instances: names }).then(function () {
+      layer.msg('已保存', { icon: 1 });
+      refreshAll();
+    }).catch(fail);
+  }
+
+  function openInstanceAdd() {
+    layer.open({
+      type: 1, title: '添加实例', area: ['500px', '260px'],
+      content: '<div class="dev-form">' +
+        '<div class="dev-form-row"><label>实例名</label>' +
+          '<input class="layui-input" id="dev-instance-name" autocomplete="off" ' +
+          'placeholder="字母/数字/连字符/下划线，最长 32 位"></div>' +
+        '<div class="dev-form-row"><label></label>' +
+          '<button class="layui-btn layui-btn-normal" id="dev-instance-save">添加</button>' +
+          '<span class="dev-muted dev-form-tip">每个实例是独立的被控端设备，端口自动顺延</span></div></div>',
+      success: function () {
+        var input = document.getElementById('dev-instance-name');
+        input.focus();
+        document.getElementById('dev-instance-save').onclick = function () {
+          var name = (input.value || '').trim();
+          if (!name) { layer.msg('请填写实例名', { icon: 2 }); return; }
+          if (!INSTANCE_NAME_RE.test(name)) {
+            layer.msg('实例名限字母、数字、连字符或下划线（最长 32 位）', { icon: 2 });
+            return;
+          }
+          if (instanceNames().indexOf(name) !== -1) {
+            layer.msg('实例已存在', { icon: 2 });
+            return;
+          }
+          saveInstances(instanceNames().concat(name));
+          layer.closeAll();
+        };
+      }
+    });
   }
 
   /* ---------- 发现池 ---------- */

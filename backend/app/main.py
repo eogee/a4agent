@@ -74,6 +74,14 @@ def create_app() -> FastAPI:
     from .devices.pool import discovery, start_listener
     start_listener()
 
+    # 配对请求系统 toast 监听（B39）：常驻线程轮询本机 node /v1/pair/session，
+    # 设备页不开也有系统提醒；拉起失败只记日志，不影响应用启动
+    try:
+        from .devices import pair_watcher
+        pair_watcher.start()
+    except Exception:  # noqa: BLE001 - 监听拉起失败不影响应用启动
+        logger.exception("配对请求 toast 监听启动失败")
+
     # 安装形态首启自动拉起本机 node（M4/C8）：device_runtime.json 的 auto_start
     # 为 true 时启动守护（安装器在安装完成时预写该设置；dev 态无此文件默认关闭）。
     # 放后台线程：ensure_certs 可能同步跑数秒（PowerShell 生成证书），不阻塞应用启动；
@@ -106,6 +114,12 @@ def create_app() -> FastAPI:
             from .devices import node_proc
 
             node_proc.get_guardian().stop()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from .devices import pair_watcher
+
+            pair_watcher.get_watcher().stop()
         except Exception:  # noqa: BLE001
             pass
 

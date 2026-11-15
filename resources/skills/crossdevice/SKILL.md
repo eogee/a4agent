@@ -69,6 +69,16 @@ curl -s "$BASE/api/v1/devices/pc-a/job/<job_id>?wait=30"
 - 默认白名单 = 仅暂存目录（被控端 node 数据目录下 `tmp`，如 `%APPDATA%\a4agent\node\tmp`）；`workspace_staging` 字段给出确切路径。
 - 扩大范围：设备所有者编辑被控端 `%APPDATA%\a4agent\node\node.json`，加 `"workspace": ["C:\\某目录"]` 后重启 node（或以 `--workspace "C:\\某目录"` 启动参数）。
 
+## 大 payload / 长脚本投递
+
+- **不要把长脚本或大段内容塞进 `cmd`**：cmd 单条命令行上限 8191 字符，多层引号转义也易出错。长内容一律走文件通道。
+- 推荐两步组合：
+  1. **写入暂存目录**：`POST /api/v1/devices/{name}/put`（multipart 上传，分块且无大小上限），`remote_path` 填暂存目录下的绝对路径——先调 `GET /api/v1/devices/{name}/workspaces` 拿 `workspace_staging` 的确切路径。
+  2. **exec 执行该文件**：如 `{"cmd": "python C:\\...\\tmp\\task.py", "shell": "cmd"}`（命令引号逐字生效，见上表）；长输出用 `job_id` 轮询取回，不要反复重新发起。
+- PowerShell 长脚本同理：上传后 `{"cmd": "powershell -File C:\\...\\tmp\\task.ps1", "shell": "cmd"}`；`shell=powershell` 走 `-EncodedCommand` 语义，内嵌引号同样可靠。
+- 大数据文件（非脚本）同样先 put 上传、再在 exec 命令里引用该路径处理，产物用 `get` 下载回来。
+- 暂存目录恒可写（被控端 node 数据目录下 `tmp`），是这套组合的默认落点；产物清理可在 exec 里执行 `del <路径>`，或交由被控端自行管理。
+
 ## 错误形态
 
 业务失败返回 HTTP 4xx/5xx，`{"detail": {"code": "<错误码>", "message": "<中文描述>"}}`；常见码：`NOT_FOUND`（设备名不存在）、`BAD_REQUEST`（参数错误）、`SANDBOX_DENIED`（写路径越白名单，见上节）、`PAIR_*`（配对相关——你不应触发）。长命令记得用 `job_id` 轮询而不是反复发起。

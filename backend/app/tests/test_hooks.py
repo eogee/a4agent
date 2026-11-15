@@ -1,6 +1,7 @@
 """会话交互（hook）测试：transcript 抽取、桌面队列、响应订阅、三类处理器、分发器、五端注册。"""
 import io
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -206,7 +207,32 @@ def test_strip_injected_host_tokens():
 
 # ---------------- 桌面队列 ----------------
 
-def test_deskqueue_write_and_consume(data_dir):
+class _SteadyClock:
+    """注入 deskqueue 的受控时钟：首次 time() 取真实时刻，之后每调用一次前进 1ms。
+
+    queue_notify 用 int(time.time()*1000) 同时拼文件名和时间戳，本机
+    time.time 粒度约 0.5ms、单次入队约 1ms，两次背靠背入队有 ~20% 概率落在
+    同一毫秒 → 文件同名，第二条经 os.replace 覆盖第一条（桌面队列三个用例
+    的偶挂根因）。受控时钟保证文件名毫秒戳严格递增，条数与顺序完全确定。
+    """
+
+    def __init__(self):
+        self._now = None
+
+    def time(self):
+        self._now = time.time() if self._now is None else self._now + 0.001
+        return self._now
+
+
+@pytest.fixture
+def dq_clock(monkeypatch):
+    """桌面队列用例注入受控时钟（只替换 deskqueue 命名空间里的 time 引用）。"""
+    clock = _SteadyClock()
+    monkeypatch.setattr(deskqueue, "time", clock)
+    return clock
+
+
+def test_deskqueue_write_and_consume(data_dir, dq_clock):
     shown = []
     assert deskqueue.queue_notify("Claude Code", "有提问需要处理") is True
     assert deskqueue.queue_notify("Claude Code", "有权限请求需要处理") is True
@@ -215,7 +241,7 @@ def test_deskqueue_write_and_consume(data_dir):
     assert deskqueue.process_queue(lambda t, m: None) == 0  # 已清空
 
 
-def test_deskqueue_drops_expired_and_corrupt(data_dir, monkeypatch):
+def test_deskqueue_drops_expired_and_corrupt(data_dir, dq_clock):
     shown = []
     deskqueue.queue_notify("旧通知", "过期")
     deskqueue.queue_notify("新通知", "有效")
@@ -733,7 +759,7 @@ def test_handle_stop_desktop_off_still_pushes_mobile(hook_cfg, monkeypatch):
 
 # ---------------- 桌面队列容错 ----------------
 
-def test_process_queue_survives_unlink_oserror(data_dir, monkeypatch):
+def test_process_queue_survives_unlink_oserror(data_dir, dq_clock, monkeypatch):
     """删除失败抛OSError 时不能中断整轮循环。
 
     本机有 safe-delete shim 会把 unlink 改走回收站，失败时抛 OSError 而非

@@ -29,6 +29,7 @@ from fastapi.responses import Response
 from ... import skill_manager
 from ...database import get_data_dir
 from ...devices import node_client, node_proc
+from ...devices.pair_watcher import TOAST_TITLE
 from ...devices.pool import BROADCAST_PORT, discovery
 from ...devices.store import get_store
 
@@ -141,6 +142,7 @@ def _call(name: str, fn):
 @router.get("/runtime")
 def runtime_status():
     status = node_proc.get_guardian().status()
+    status["instances"] = node_proc.get_guardian().instances_status()
     status["listener"] = {"bound": discovery.listener.bound,
                           "port": BROADCAST_PORT,
                           "error": discovery.listener.bind_error}
@@ -157,6 +159,40 @@ def runtime_stop():
     return node_proc.get_guardian().stop()
 
 
+def _ensure_instance_name(name: str) -> None:
+    """实例名与 node.py --instance 同规（§16.2）：非法名直接 400。"""
+    if not node_proc.INSTANCE_NAME_RE.fullmatch(name or ""):
+        raise HTTPException(
+            400, {"message": f"实例名非法：{name}（限 [A-Za-z0-9_-]{{1,32}}）",
+                  "code": "BAD_REQUEST"})
+
+
+@router.post("/runtime/instances/{name}/start")
+def runtime_instance_start(name: str):
+    """拉起具名实例（B40）：清单内才允许（否则 404），前置校验失败置 failed。"""
+    _ensure_instance_name(name)
+    try:
+        return node_proc.get_guardian().start_instance(name)
+    except KeyError:
+        raise HTTPException(404, {"message": f"实例「{name}」不在运行时清单中",
+                                  "code": "NOT_FOUND"})
+    except ValueError as e:
+        raise HTTPException(400, {"message": str(e), "code": "BAD_REQUEST"})
+
+
+@router.post("/runtime/instances/{name}/stop")
+def runtime_instance_stop(name: str):
+    """停止具名实例（B40）：幂等；清单内未拉起的实例按 stopped 返回。"""
+    _ensure_instance_name(name)
+    try:
+        return node_proc.get_guardian().stop_instance(name)
+    except KeyError:
+        raise HTTPException(404, {"message": f"实例「{name}」不在运行时清单中",
+                                  "code": "NOT_FOUND"})
+    except ValueError as e:
+        raise HTTPException(400, {"message": str(e), "code": "BAD_REQUEST"})
+
+
 @router.get("/runtime/config")
 def runtime_config():
     return node_proc.resolve_settings(get_data_dir())
@@ -168,7 +204,14 @@ def runtime_save_config(patch: dict):
     if unknown:
         raise HTTPException(400, {"message": f"未知设置项：{', '.join(unknown)}",
                                   "code": "BAD_REQUEST"})
-    return node_proc.save_settings(get_data_dir(), patch)
+    try:
+        out = node_proc.save_settings(get_data_dir(), patch)
+    except ValueError as e:
+        raise HTTPException(400, {"message": str(e), "code": "BAD_REQUEST"})
+    if "instances" in patch:
+        # B40 清单对账：移除的实例停进程并清理守护状态（新增的不自动拉起）
+        node_proc.get_guardian().sync_instances(out.get("instances") or [])
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -280,6 +323,25 @@ def pair_incoming():
     return data
 
 
+_APPROVE_TOAST_MESSAGE = "配对请求已确认，请在设备页查看配对码"
+
+
+def _notify_pair(message: str) -> None:
+    """配对系统 toast（B39）：尽力而为，任何失败绝不阻断配对响应。
+
+    文案只含固定提示，不含 IP/配对码/令牌等敏感数据；与前端轮询无关——
+    请求到达的提醒由 devices.pair_watcher 常驻线程负责，这里只管确认回执。
+    """
+    try:
+        from ... import win_toast
+        if not win_toast.AVAILABLE:
+            logger.info("系统 toast 不可用，跳过配对提醒")
+            return
+        win_toast.show(TOAST_TITLE, message)
+    except Exception:  # noqa: BLE001 - 提醒失败绝不影响配对流程
+        logger.exception("配对提醒 toast 发送失败")
+
+
 @router.post("/pair/approve")
 def pair_approve():
     """被控端本地确认：POST /v1/pair/approve（回环）→ 返回 6 位码与时效。"""
@@ -294,6 +356,10 @@ def pair_approve():
             loopback_tofu=True)
     except node_client.NodeError as e:
         _raise_node_error(e)
+    try:
+        _notify_pair(_APPROVE_TOAST_MESSAGE)
+    except Exception:  # noqa: BLE001 - 提醒回调异常绝不阻断 approve 响应
+        logger.exception("配对提醒回调异常")
     return data
 
 

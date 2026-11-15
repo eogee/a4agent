@@ -863,6 +863,23 @@
     "执行失败": "Execution failed",
     "（无输出）": "(no output)",
     "（无内容）": "(nothing)",
+
+    /* ---------- 设备页：配对系统 toast（B39；backend 直发的中文文案） ---------- */
+    "a4agent 设备配对": "a4agent device pairing",
+    "有设备请求配对，请在设备页确认": "A device is requesting pairing — confirm it on the Devices page",
+    "配对请求已确认，请在设备页查看配对码": "Pairing request confirmed — see the pairing code on the Devices page",
+
+    /* ---------- 设备页：具名实例（B40 多实例） ---------- */
+    "添加实例": "Add instance",
+    "实例名": "Instance name",
+    "字母/数字/连字符/下划线，最长 32 位": "Letters, digits, hyphen or underscore, up to 32 characters",
+    "每个实例是独立的被控端设备，端口自动顺延": "Each instance is an independent controlled device; ports increment automatically",
+    "请填写实例名": "Enter an instance name",
+    "实例名限字母、数字、连字符或下划线（最长 32 位）": "Instance name allows letters, digits, hyphen or underscore (up to 32 characters)",
+    "实例已存在": "Instance already exists",
+    "移除实例": "Remove instance",
+    "停止实例": "Stop instance",
+    "已移除": "Removed",
   };
 
   /* ---------------- 句式规则：中文模板 => English 模板（{n} 为通配） ---------------- */
@@ -1050,6 +1067,10 @@
     ["任务历史 - {0}", "Task history - {0}"],
     ["任务 {0}", "Task {0}"],
     ["显示最近 {0} 条（共 {1} 条）", "Showing the latest {0} of {1} records"],
+
+    /* 设备页：具名实例（B40） */
+    ["移除实例「{0}」？进程将被停止并从清单移除。", "Remove instance \"{0}\"? Its process will be stopped and it is removed from the list."],
+    ["停止实例「{0}」？依赖它的设备将无法连接本机。", "Stop instance \"{0}\"? Devices relying on it will not be able to connect to this machine."],
   ];
 
   /* 迁移结果提示是「基数 + 若干可选后缀」拼出来的整句，
