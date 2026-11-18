@@ -1,6 +1,6 @@
 ---
 name: crossdevice
-description: 控制局域网内已配对的 Windows 设备（远程命令、截屏、文件上传下载、任务历史）。当任务需要在另一台机器上执行命令、取文件、看屏幕或跑长命令时使用。经本机 a4agent 本地 API 调用，仅限已配对设备。
+description: 控制局域网内已配对的 Windows 设备（远程命令、截屏、文件上传下载、任务历史），并查询对端设备上各宿主会话的进度状态（hook 自动上报）。当任务需要在另一台机器上执行命令、取文件、看屏幕、跑长命令，或需要了解/跟进另一台设备上正在运行的会话进度时使用。经本机 a4agent 本地 API 调用，仅限已配对设备。
 ---
 
 # CrossDevice 设备控制（经 a4agent）
@@ -41,6 +41,7 @@ GET {base}/api/v1/devices/overview
 | 查询可写目录 | `GET /api/v1/devices/{name}/workspaces` | 返回被控端 `workspace_roots`（允许根列表）与 `workspace_staging`（默认暂存目录）；只读，改白名单需在被控端本地配置 |
 | 任务历史 | `GET /api/v1/devices/{name}/tasks?status=&limit=50&offset=0` | 按 a4agent 身份过滤 |
 | 任务详情 | `GET /api/v1/devices/{name}/tasks/{task_id}` | 含 stdout/stderr |
+| 会话状态汇报 | `GET /api/v1/devices/{name}/status` | 被控端宿主会话经 hook **自动上报**的最新进度（见下方「跨设备状态汇报」节）；全部设备一次拉取用 `GET /api/v1/devices/status` |
 
 调用示例（读端口并执行命令）：
 
@@ -88,6 +89,21 @@ curl -s "$BASE/api/v1/devices/pc-a/job/<job_id>?wait=30"
 - **录制**（`xd macro rec <输出宏文件> [--seconds <N> 默认 10，Ctrl+C 提前结束]`）：经 Windows 低级键鼠钩子（WH_MOUSE_LL/WH_KEYBOARD_LL，纯标准库 ctypes）捕获**控制端本机**键鼠；忽略注入事件（回放不会被自录进去）；钩子安装失败会明确报错。录制完成后**不自动回放**。
 
 宏文件格式、去抖/聚合阈值与示例见 CrossDevice README"宏（macro rec/run）"节与接口契约 §11。
+
+## 跨设备状态汇报（B→A hook 自动上报）——查对端会话进度
+
+被控端（B 侧）上的宿主会话在**关键节点自动向控制端（A 侧）上报状态**，无需任务提示词写任何上报逻辑：a4agent 的 hook 注册器已在宿主配置中挂好 hook（ZCode＝`~/.zcode/cli/config.json` 的 `hooks.events.{Stop, PreToolUse:AskUserQuestion, PermissionRequest}` → `a4agent.exe hook zcode`；覆盖七端，幂等注册，详见 a4agent `backend/app/hooks/register.py`）。hook 触发时把一条状态原子写入被控端 `node/tmp/status/<session_id>.json`（不含令牌/证书/对话正文，workspace 只留目录名），A 侧 backend **每 15 秒轮询拉取**入库。
+
+- **查询**：`GET /api/v1/devices/{name}/status`（单台）或 `GET /api/v1/devices/status`（全部设备一次拉）。响应 `{device, hostname, last_error, sessions: [...]}`；`sessions` 每会话只留最新一条、按时间倒序，字段：`session_id`／`event`／`state`／`agent`／`workspace`／`summary`（≤200 字人读摘要）／`ts`／`age_seconds`／`stale`（>45 秒未更新）及中文标签。
+- **关键事件**（会触发 A 侧人读提醒：桌面弹窗/手机推送）：`hook.stop`＝回合完成、`hook.permission`＝权限申请、`hook.question`＝提问等待；其余事件只入库不打扰人。状态按会话保留 7 天、每设备上限 1000 行。
+
+**Agent 使用纪律**：
+
+1. 在对端发起长程任务（如粘贴长任务提示词、启动长会话）后，**不要在任务提示词里写轮询/汇报要求**——宿主级 hook 对该端所有会话自动生效；你要做的是事后用 status 端点查进度，而不是设计上报机制。
+2. 经 `/exec`、`/screen` 做的自动化操作**不产生 hook 事件**（它们走 a4agent 通道，不是宿主会话）——查会话进度用 status 端点，不要反复截屏当轮询器。
+3. `sessions` 为空 ≠ 设备离线或链路故障：目标会话可能还在长回合中（Stop 尚未触发）。判定顺序：先 `ping` 设备 → 再看响应里 `last_error` → 再下结论。
+4. status 只覆盖**会话级**节点（回合完成/提问/权限申请）；批次级里程碑进度不在本通道，仍在项目自身的文档与 git 里——两层互补，不要期待 status 携带任务内容。
+5. 若发现某宿主未注册 hook（宿主配置无对应段），提示用户在 a4agent 中执行 hook 注册（幂等、覆盖七端），**不要手写宿主 hook 配置**。
 
 ## 错误形态
 
