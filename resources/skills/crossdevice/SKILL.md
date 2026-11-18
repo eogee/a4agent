@@ -104,6 +104,7 @@ curl -s "$BASE/api/v1/devices/pc-a/job/<job_id>?wait=30"
 3. `sessions` 为空 ≠ 设备离线或链路故障：目标会话可能还在长回合中（Stop 尚未触发）。判定顺序：先 `ping` 设备 → 再看响应里 `last_error` → 再下结论。
 4. status 只覆盖**会话级**节点（回合完成/提问/权限申请）；批次级里程碑进度不在本通道，仍在项目自身的文档与 git 里——两层互补，不要期待 status 携带任务内容。
 5. 若发现某宿主未注册 hook（宿主配置无对应段），提示用户在 a4agent 中执行 hook 注册（幂等、覆盖七端），**不要手写宿主 hook 配置**。
+6. **验证/调试 hook 链路时**：向 `a4agent.exe hook <agent>` 喂测试载荷须用 `Start-Process -RedirectStandardInput <载荷文件> -Wait -PassThru`（GUI 子系统 exe 经 PowerShell/cmd 管道直喂会丢 stdin 且进程树挂住直到超时——表现为载荷为空不写状态、`$LASTEXITCODE` 为空，**极易误判"链路不通"**）；exe 冷启动数十秒属正常；合成测试用独立标注的 session_id（如 `a4hook-chain-test-<日期>`），验证后 B/A 两侧痕迹保留 7 天自动清理，无需手删。
 
 ## 错误形态
 
