@@ -106,6 +106,10 @@ curl -s "$BASE/api/v1/devices/pc-a/job/<job_id>?wait=30"
 5. 若发现某宿主未注册 hook（宿主配置无对应段），提示用户在 a4agent 中执行 hook 注册（幂等、覆盖七端），**不要手写宿主 hook 配置**。
 6. **验证/调试 hook 链路时**：向 `a4agent.exe hook <agent>` 喂测试载荷须用 `Start-Process -RedirectStandardInput <载荷文件> -Wait -PassThru`（GUI 子系统 exe 经 PowerShell/cmd 管道直喂会丢 stdin 且进程树挂住直到超时——表现为载荷为空不写状态、`$LASTEXITCODE` 为空，**极易误判"链路不通"**）；exe 冷启动数十秒属正常；合成测试用独立标注的 session_id（如 `a4hook-chain-test-<日期>`），验证后 B/A 两侧痕迹保留 7 天自动清理，无需手删。
 
+### 远程批办（**规划中，未实现——勿调用不存在端点**）
+
+「A 侧替用户处置对端提问/提权」已立项（见 a4agent 仓 `docs/需求识别-远程批办.md`，2026-11-19 拍板）：拟新增 B 侧 pending 队列＋hook 双通道等待（本地注入与 ntfy 先到先得）＋A 侧 `GET /devices/{name}/pending` 与 `POST /devices/{name}/pending/{id}/respond` 两端点＋设备页批办卡；三红线＝**默认关闭（B 侧所有者显式开启 assist 档）／工具白名单（危险类永不远程批）／逐条审计＋身份标注（agent 代答与用户点按区分并写回 B 侧会话）**。**实现入库前，本节所述端点不存在，不要尝试调用**；现状请依本节上文「跨设备状态汇报」的可见性通道，处置仍由 B 侧本机 UI 或手机（out 档）完成。
+
 ## 错误形态
 
 业务失败返回 HTTP 4xx/5xx，`{"detail": {"code": "<错误码>", "message": "<中文描述>"}}`；常见码：`NOT_FOUND`（设备名不存在）、`BAD_REQUEST`（参数错误）、`SANDBOX_DENIED`（写路径越白名单，见上节）、`PAIR_*`（配对相关——你不应触发）。长命令记得用 `job_id` 轮询而不是反复发起。
