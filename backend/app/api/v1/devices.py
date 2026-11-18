@@ -28,7 +28,7 @@ from fastapi.responses import Response
 
 from ... import skill_manager
 from ...database import get_data_dir
-from ...devices import node_client, node_proc
+from ...devices import node_client, node_proc, status_store, status_watcher
 from ...devices.pair_watcher import TOAST_TITLE
 from ...devices.pool import BROADCAST_PORT, discovery
 from ...devices.store import get_store
@@ -323,7 +323,7 @@ def pair_incoming():
     return data
 
 
-_APPROVE_TOAST_MESSAGE = "配对请求已确认，请在设备页查看配对码"
+_APPROVE_TOAST_MESSAGE = "配对请求已确认，请在设备互联页查看配对码"
 
 
 def _notify_pair(message: str) -> None:
@@ -594,6 +594,7 @@ def _overview_endpoints() -> dict:
         "put": "POST /api/v1/devices/{name}/put（multipart: file + remote_path）",
         "get": "GET /api/v1/devices/{name}/get?path=<远端路径>&save_dir=<本地目录>",
         "workspaces": "GET /api/v1/devices/{name}/workspaces（查询被控端可写根：工作空间白名单 + 默认暂存目录）",
+        "status": "GET /api/v1/devices/{name}/status（跨设备状态汇报：事件/状态/时间/陈旧标记）",
         "tasks": "GET /api/v1/devices/{name}/tasks?status=&limit=50&offset=0",
         "task_detail": "GET /api/v1/devices/{name}/tasks/{task_id}",
     }
@@ -616,6 +617,28 @@ def device_workspaces(name: str):
             "workspace_roots": info.get("workspace_roots") or [],
             "workspace_staging": info.get("workspace_staging"),
             "node_version": info.get("node_version")}
+
+
+def _status_payload(entry: dict) -> dict:
+    name = entry.get("name") or ""
+    return {
+        "device": name,
+        "hostname": entry.get("hostname") or name,
+        "last_error": status_watcher.get_watcher().errors().get(name),
+        "sessions": status_store.list_sessions(name),
+    }
+
+
+@router.get("/status")
+def device_status_all():
+    """全部已配对设备的最新状态（设备互联页一次拉取）。"""
+    return {"devices": [_status_payload(e) for e in get_store().list()]}
+
+
+@router.get("/{name}/status")
+def device_status(name: str):
+    """单台设备的最新状态；未配对返回 404。"""
+    return _status_payload(_load_entry(name))
 
 
 @router.get("/overview")
@@ -641,7 +664,7 @@ def devices_overview():
         ],
         "endpoints": _overview_endpoints(),
         "notes": [
-            "只能操作本清单中的已配对设备；配对确认是设备页人工动作，Agent 无权发起新配对。",
+            "只能操作本清单中的已配对设备；配对确认是设备互联页人工动作，Agent 无权发起新配对。",
             "设备令牌与证书指纹由 a4agent 加密托管，不会出现在任何接口响应中。",
             "远程命令在被控端有完整审计记录，只执行任务所需范围内的命令。",
             "文件上传（put/写方向接口）受被控端工作空间白名单约束：默认仅 node 暂存目录可写；"

@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL_SECONDS = 1.5        # 轮询节奏（比设备页前端 2s 略快，提醒更及时）
 
 TOAST_TITLE = "a4agent 设备配对"
-TOAST_REQUEST_MESSAGE = "有设备请求配对，请在设备页确认"
+TOAST_REQUEST_MESSAGE = "有设备请求配对，请在设备互联页确认"
 
 
 def _notify(title: str, message: str) -> bool:

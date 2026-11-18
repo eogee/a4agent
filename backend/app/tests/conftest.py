@@ -11,3 +11,9 @@ import pytest
 @pytest.fixture(autouse=True)
 def _disable_project_hints(monkeypatch):
     monkeypatch.setenv("A4AGENT_PROJECT_HINTS", "0")
+
+
+@pytest.fixture(autouse=True)
+def _disable_status_report(monkeypatch):
+    """默认关闭 hook 状态落盘，避免测试污染数据目录；状态测试显式打开。"""
+    monkeypatch.setenv("A4AGENT_STATUS_REPORT", "0")

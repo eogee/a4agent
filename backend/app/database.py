@@ -144,7 +144,7 @@ def ensure_schema() -> None:
     from sqlalchemy import text
 
     # Skill 管理两张表的补建：对旧库（create_all 时模型尚不存在的情况）兜底
-    from .models import (AgentTask, Loop, McpMigration, McpTrash,
+    from .models import (AgentTask, DeviceStatus, Loop, McpMigration, McpTrash,
                          SkillMigration, SkillTrash)
 
     Base.metadata.create_all(
@@ -156,6 +156,7 @@ def ensure_schema() -> None:
             McpTrash.__table__,
             AgentTask.__table__,
             Loop.__table__,
+            DeviceStatus.__table__,
         ],
     )
 

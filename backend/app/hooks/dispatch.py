@@ -6,6 +6,7 @@
 """
 import logging
 
+from ..devices import status_report
 from ..phone import config as phone_config
 from ..phone.notifier import format_notice
 from . import deskqueue, handlers
@@ -23,6 +24,25 @@ WORKBUDDY_SAFE_WAIT_S = WORKBUDDY_HOOK_TIMEOUT_S - 15
 
 def agent_name(agent: str) -> str:
     return AGENT_NAMES.get(agent, "Claude Code")
+
+
+def _report_status(event: str, state: str, input_payload: dict, name: str,
+                   summary: str = "") -> None:
+    """把关键 hook 节点写成本机状态，供已配对设备拉取。
+
+    状态写入是旁路：任何异常只记日志，绝不影响 hook 返回或宿主流程。
+    """
+    try:
+        status_report.report(
+            event=event,
+            state=state,
+            session_id=str(input_payload.get("session_id") or ""),
+            agent=name,
+            workspace=str(input_payload.get("cwd") or ""),
+            summary=summary,
+        )
+    except Exception:  # noqa: BLE001 - 状态旁路不能拖累 hook 主流程
+        logger.warning("hook 状态汇报失败", exc_info=True)
 
 
 def resolve_wait_seconds(agent: str, hook_cfg: dict) -> int:
@@ -44,6 +64,8 @@ def dispatch(input: dict, agent: str, cfg: dict | None = None) -> dict | None:
     desktop_on = cfg.get("desktop", True)
 
     if event == "Stop":
+        if not input.get("_resumed"):
+            _report_status("hook.stop", "done", input, name)
         handlers.handle_stop(input, name, cfg, desktop_on=desktop_on)
         return None
 
@@ -54,6 +76,9 @@ def dispatch(input: dict, agent: str, cfg: dict | None = None) -> dict | None:
             # WorkBuddy 的提问面板不在这里：实测面板挂着时不调 hook、不写 stdin 载荷，
             # 直到用户点完才 spawn 本进程——此刻再弹「问题作答」纯属噪音（人已经答了）。
             # 该端的提问提醒由 workbuddy_listen 直接读会话 jsonl，在面板出现时发出。
+            if agent != "workbuddy":
+                _report_status("hook.question", "waiting", input, name,
+                               summary="等待作答")
             if desktop_on and agent != "workbuddy":
                 deskqueue.queue_notify(*format_notice(
                     handlers.session_topic(input), "问题作答", name))
@@ -64,6 +89,9 @@ def dispatch(input: dict, agent: str, cfg: dict | None = None) -> dict | None:
     if event == "PermissionRequest":
         # ZCode 对一次提问同时触发 PreToolUse 和 PermissionRequest：提问提醒已由
         # PreToolUse 分支负责，这里跳过弹窗避免重复通知与误导性文案
+        if tool_name != "AskUserQuestion":
+            _report_status("hook.permission", "waiting", input, name,
+                           summary=tool_name)
         if tool_name != "AskUserQuestion" and desktop_on:
             deskqueue.queue_notify(*format_notice(
                 handlers.session_topic(input), "权限申请", name))

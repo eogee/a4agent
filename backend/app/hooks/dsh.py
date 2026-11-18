@@ -16,6 +16,7 @@ phone-hooks.mjs 回退策略一致。
 import json
 import logging
 
+from ..devices import status_report
 from ..phone import config as phone_config
 from ..phone import ntfy
 from . import deskqueue, response
@@ -46,10 +47,27 @@ def phone_active(cfg: dict) -> bool:
     return cfg.get("hook", {}).get("mode") == "out" and bool(cfg.get("topic"))
 
 
+def _report_status(event: str, state: str, payload: dict,
+                   summary: str = "") -> None:
+    """把 DSH 关键节点写成本机状态，供已配对设备拉取；失败只记日志。"""
+    try:
+        status_report.report(
+            event=event,
+            state=state,
+            session_id=str(payload.get("sessionId") or ""),
+            agent="DSH",
+            workspace=str(payload.get("cwd") or payload.get("workspace") or ""),
+            summary=summary,
+        )
+    except Exception:  # noqa: BLE001 - 状态旁路不能拖累 DSH 插件
+        logger.warning("DSH 状态汇报失败", exc_info=True)
+
+
 # ---------------- 任务完成 ----------------
 
 def handle_task_complete(payload: dict) -> None:
     """turn/end 且 reason=completed：桌面弹窗 + 手机推送（含 AI 最后输出）。"""
+    _report_status("dsh.complete", "done", payload)
     cfg = phone_config.load()
     desktop_on = cfg.get("desktop", True)
     session_id = payload.get("sessionId") or ""
@@ -76,6 +94,7 @@ def handle_ask_user_question(payload: dict) -> dict | None:
     无选项的提问无法手机作答，直接跳过该题，避免推送后干等超时回退。
     """
     cfg = phone_config.load()
+    _report_status("dsh.question", "waiting", payload, summary="等待作答")
     if cfg.get("desktop", True):
         deskqueue.queue_notify("DSH", "有提问需要处理")
     if not phone_active(cfg):
@@ -150,6 +169,8 @@ def handle_permission_request(payload: dict) -> str | None:
     手机点选映射为前两者。返回 None 表示放行原生审批链。
     """
     cfg = phone_config.load()
+    _report_status("dsh.approval", "waiting", payload,
+                   summary=str(payload.get("toolName") or ""))
     if cfg.get("desktop", True):
         deskqueue.queue_notify("DSH", "有权限请求需要处理")
     if not phone_active(cfg):

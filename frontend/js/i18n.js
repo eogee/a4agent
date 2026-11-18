@@ -38,7 +38,7 @@
     "本地模型": "Local models",
     "任务下发": "Tasks",
     "通知提醒": "Notifications",
-    "设备": "Devices",
+    "设备互联": "Device Networking",
     "供应商模板": "Provider templates",
     "新增供应商": "New provider",
     "全局视图": "Global view",
@@ -742,7 +742,7 @@
     "已配对设备": "Paired devices",
     "发现的设备（同一局域网，尚未配对）": "Discovered devices (same LAN, not paired)",
     "手动添加 IP": "Add IP manually",
-    "配对说明：在对方设备的「设备」页确认请求后，这里输入它展示的 6 位配对码。": "Pairing: after the request is confirmed on the other device's \"Devices\" page, enter the 6-digit pairing code it shows here.",
+    "配对说明：在对方设备的「设备互联」页确认请求后，这里输入它展示的 6 位配对码。": "Pairing: after the request is confirmed on the other device's \"Device Networking\" page, enter the 6-digit pairing code it shows here.",
     "发现列表只提供连接线索，未经确认不会建立连接。": "The discovery list only offers connection hints; nothing connects without confirmation.",
     "端口未就绪": "Port not ready",
     "证书就绪": "Certificate ready",
@@ -789,7 +789,7 @@
     "添加": "Add",
     "广播不可达（跨网段）时手动填地址": "For manual entry when broadcast cannot reach (across subnets)",
     "如 192.168.3.20": "e.g. 192.168.3.20",
-    "请在对方设备的「设备」页确认本次配对，": "Confirm this pairing on the other device's \"Devices\" page,",
+    "请在对方设备的「设备互联」页确认本次配对，": "Confirm this pairing on the other device's \"Device Networking\" page,",
     "然后输入它展示的 6 位配对码。": "then enter the 6-digit pairing code it shows.",
     "请求有效期至 ": "Request valid until ",
     "配对码": "Pairing code",
@@ -868,8 +868,24 @@
 
     /* ---------- 设备页：配对系统 toast（B39；backend 直发的中文文案） ---------- */
     "a4agent 设备配对": "a4agent device pairing",
-    "有设备请求配对，请在设备页确认": "A device is requesting pairing — confirm it on the Devices page",
-    "配对请求已确认，请在设备页查看配对码": "Pairing request confirmed — see the pairing code on the Devices page",
+    "有设备请求配对，请在设备互联页确认": "A device is requesting pairing — confirm it on the Device Networking page",
+    "配对请求已确认，请在设备互联页查看配对码": "Pairing request confirmed — see the pairing code on the Device Networking page",
+
+    /* ---------- 设备页：跨设备状态汇报 ---------- */
+    "最新状态：": "Latest status: ",
+    "暂无状态": "No status yet",
+    "已过时": "Stale",
+    "拉取失败：": "Fetch failed: ",
+    "任务完成": "Task completed",
+    "权限申请": "Permission request",
+    "提问": "Question",
+    "DSH 任务完成": "DSH task completed",
+    "DSH 提问": "DSH question",
+    "DSH 审批": "DSH approval",
+    "等待处理": "Waiting",
+    "已批准": "Approved",
+    "已拒绝": "Denied",
+    "已回答": "Answered",
 
     /* ---------- 设备页：具名实例（B40 多实例） ---------- */
     "添加实例": "Add instance",

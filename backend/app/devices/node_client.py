@@ -80,7 +80,7 @@ def _open_tls(host, port, timeout, expected_fp=None):
             tls.close()
             raise TofuError(
                 f"TOFU 证书指纹变更：期望 {expected[:16]}…，实际 {actual[:16]}…。"
-                f"若确为该设备重装/换证书，可在设备页重置指纹后重连")
+                f"若确为该设备重装/换证书，可在设备互联页重置指纹后重连")
     return tls, actual
 
 

@@ -18,6 +18,7 @@ layui.use(['layer'], function () {
   var codeLayerSession = null;
   var countdownTimer = null;
   var execPolling = {};          // 设备名 -> true（exec 轮询中）
+  var statusMap = {};            // 设备名 -> 最新状态（GET /status）
 
   /* ---------- 工具 ---------- */
   function escapeHtml(s) {
@@ -116,7 +117,7 @@ layui.use(['layer'], function () {
           '<button class="layui-btn layui-btn-sm layui-btn-primary" id="dev-pool-refresh">刷新</button>' +
         '</span></div>' +
       '<div id="dev-pool"><div class="empty-tip">加载中…</div></div>' +
-      '<div class="dev-hint"><span>配对说明：在对方设备的「设备」页确认请求后，这里输入它展示的 6 位配对码。</span>' +
+      '<div class="dev-hint"><span>配对说明：在对方设备的「设备互联」页确认请求后，这里输入它展示的 6 位配对码。</span>' +
       '<span>发现列表只提供连接线索，未经确认不会建立连接。</span></div>';
 
     document.getElementById('dev-refresh').onclick = refreshAll;
@@ -143,11 +144,23 @@ layui.use(['layer'], function () {
     document.getElementById('dev-skill-install').onclick = openInstallSkill;
   }
 
+  function loadStatuses() {
+    return apiGet('/status').then(function (data) {
+      statusMap = {};
+      (data.devices || []).forEach(function (d) {
+        statusMap[d.device] = d;
+      });
+    }).catch(function () {});
+  }
+
   function refreshAll() {
     apiGet('/runtime').then(renderRuntime).catch(function () {});
     apiGet('/pool').then(renderPool).catch(function () {});
-    apiGet('').then(function (data) { renderDevices(data.devices || []); })
-      .catch(function () {});
+    loadStatuses().then(function () {
+      return apiGet('');
+    }).then(function (data) {
+      renderDevices(data.devices || []);
+    }).catch(function () {});
   }
 
   /* ---------- 运行时 ---------- */
@@ -519,6 +532,23 @@ layui.use(['layer'], function () {
       return;
     }
     box.innerHTML = list.map(function (d) {
+      var st = statusMap[d.name] || {};
+      var latest = (st.sessions || [])[0];
+      var statusHtml = latest
+        ? '<div class="dev-status' + (latest.stale ? ' dev-status-stale' : '') + '">' +
+            '<span class="dev-status-label">最新状态：</span>' +
+            '<span class="dev-status-event">' + escapeHtml(latest.event_label || latest.event) + '</span>' +
+            '<span class="dev-status-state">' + escapeHtml(latest.state_label || latest.state) + '</span>' +
+            (latest.agent ? '<span class="dev-status-agent">' + escapeHtml(latest.agent) + '</span>' : '') +
+            '<span class="dev-status-time">' + fmtTime(latest.ts) + '</span>' +
+            (latest.stale ? '<span class="dev-status-badge">已过时</span>' : '') +
+          '</div>'
+        : '<div class="dev-status dev-status-empty">' +
+            '<span>最新状态：</span><span>暂无状态</span></div>';
+      if (st.last_error) {
+        statusHtml += '<div class="dev-status dev-status-error">' +
+          '<span>拉取失败：</span><span>' + escapeHtml(st.last_error) + '</span></div>';
+      }
       return '<div class="dev-card" data-name="' + escapeHtml(d.name) + '">' +
         '<div class="dev-card-title">' +
           '<span class="dev-card-name">' + escapeHtml(d.name) + '</span>' +
@@ -530,6 +560,7 @@ layui.use(['layer'], function () {
           (d.device_id ? '<span>ID ' + escapeHtml(d.device_id) + '</span>' : '') +
           '<span>配对于 ' + fmtTime(d.added_at) + '</span>' +
         '</div>' +
+        statusHtml +
         '<div class="dev-card-actions">' +
           '<button class="layui-btn layui-btn-sm" data-act="exec">命令</button>' +
           '<button class="layui-btn layui-btn-sm" data-act="screen">截屏</button>' +
@@ -586,7 +617,7 @@ layui.use(['layer'], function () {
       layer.open({
         type: 1, title: '配对 ' + ip + ':' + port, area: ['480px', '340px'],
         content: '<div class="dev-form dev-pair-form">' +
-          '<div class="dev-pair-wait"><span>请在对方设备的「设备」页确认本次配对，</span>' +
+          '<div class="dev-pair-wait"><span>请在对方设备的「设备互联」页确认本次配对，</span>' +
           '<span>然后输入它展示的 6 位配对码。</span></div>' +
           '<div class="dev-pair-wait dev-muted"><span>请求有效期至 </span>' +
             '<span id="dev-pair-expires">' + fmtTime(expires) + '</span></div>' +

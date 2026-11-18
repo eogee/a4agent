@@ -181,7 +181,7 @@ def test_pair_approve_sends_toast_and_tolerates_failure(monkeypatch):
     monkeypatch.setattr(devices_api, "_notify_pair", msgs.append)
     out = devices_api.pair_approve()
     assert out["code"] == "654321"
-    assert msgs == ["配对请求已确认，请在设备页查看配对码"]
+    assert msgs == ["配对请求已确认，请在设备互联页查看配对码"]
 
     def boom(message):
         raise RuntimeError("toast down")

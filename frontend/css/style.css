@@ -2865,6 +2865,33 @@ html[lang="en"] .card-actions .layui-btn:not(.i18n-icon-only) {
   color: #8a8e94;
   margin-bottom: 10px;
 }
+.dev-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #f7f8f9;
+  font-size: 12px;
+  color: #5a6068;
+}
+.dev-status-stale { background: #fdf3e4; color: #c98a2c; }
+.dev-status-empty { color: #8a8e94; }
+.dev-status-error { background: #fdeaea; color: #c45454; }
+.dev-status-label { color: #8a8e94; }
+.dev-status-event { font-weight: 600; color: #2d3439; }
+.dev-status-stale .dev-status-event { color: #c98a2c; }
+.dev-status-state { padding: 0 8px; border-radius: 20px; background: #eef1f4; }
+.dev-status-agent { color: #8a8e94; }
+.dev-status-time { color: #8a8e94; }
+.dev-status-badge {
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 11px;
+}
 .dev-card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .dev-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; }
 .dev-table th, .dev-table td {

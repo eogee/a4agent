@@ -1,7 +1,8 @@
 """SQLAlchemy 数据模型。"""
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy import (Boolean, Column, DateTime, Float, ForeignKey, Integer,
+                        LargeBinary, String, Text, UniqueConstraint)
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -188,6 +189,33 @@ class AgentTask(Base):
     created_at = Column(DateTime, default=datetime.now)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
+
+
+class DeviceStatus(Base):
+    """跨设备状态汇报：A 侧拉取后按 (device, session_id) 保存最新一条。
+
+    ts 是被控端写入状态的时间（秒），seq 用于丢弃乱序旧值；
+    notified_seq 记录已发过人读提醒的序号，避免重启后重复推送。
+    """
+
+    __tablename__ = "device_status"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device = Column(String(100), nullable=False, index=True)
+    session_id = Column(String(200), nullable=False)
+    seq = Column(Integer, default=0)
+    event = Column(String(50), default="")
+    state = Column(String(20), default="")
+    agent = Column(String(50), default="")
+    workspace = Column(String(200), default="")
+    summary = Column(Text, default="")
+    ts = Column(Float, default=0)
+    notified_seq = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint("device", "session_id", name="uq_device_status"),
+    )
 
 
 class Loop(Base):

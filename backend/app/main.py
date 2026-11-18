@@ -82,6 +82,14 @@ def create_app() -> FastAPI:
     except Exception:  # noqa: BLE001 - 监听拉起失败不影响应用启动
         logger.exception("配对请求 toast 监听启动失败")
 
+    # 跨设备状态拉取（B 写、A 拉）：每 15 秒读已配对设备的暂存状态目录，
+    # 不新增监听端口；拉起失败只记日志，不影响应用启动
+    try:
+        from .devices import status_watcher
+        status_watcher.start()
+    except Exception:  # noqa: BLE001 - 监听拉起失败不影响应用启动
+        logger.exception("设备状态拉取监听启动失败")
+
     # 安装形态首启自动拉起本机 node（M4/C8）：device_runtime.json 的 auto_start
     # 为 true 时启动守护（安装器在安装完成时预写该设置；dev 态无此文件默认关闭）。
     # 放后台线程：ensure_certs 可能同步跑数秒（PowerShell 生成证书），不阻塞应用启动；
@@ -120,6 +128,12 @@ def create_app() -> FastAPI:
             from .devices import pair_watcher
 
             pair_watcher.get_watcher().stop()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from .devices import status_watcher
+
+            status_watcher.stop()
         except Exception:  # noqa: BLE001
             pass
 
